@@ -15,10 +15,15 @@
   // pattern AND the permission origins are DERIVED from this one list, so the
   // rule can never match a host we did not ask permission for — the mismatch that
   // makes a redirect install and then silently never fire.
+  // Kept deliberately short: every domain here becomes a line in the browser's
+  // permission prompt, and a prompt naming fifteen sites reads as an extension
+  // asking for a lot — which is the opposite of what this one is.
+  //
+  // Adding a domain is one entry, and it updates the rule and the permission
+  // request together. If a jump silently stops working on google.<something>,
+  // this list is the first place to look.
   const GOOGLE_DOMAINS = [
     "google.com", "google.fr", "google.co.uk", "google.de", "google.es",
-    "google.it", "google.be", "google.ch", "google.nl", "google.ca",
-    "google.pt", "google.pl", "google.ie", "google.com.au", "google.co.in",
   ];
 
   const ENGINES = [
