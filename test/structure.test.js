@@ -139,3 +139,31 @@ test("no workflow exposes secrets to pull request code", () => {
   assert.equal(/pull_request_target/.test(ci), false, "a fork PR must never run with secrets in scope");
   assert.equal(/secrets\./.test(ci), false, "ci.yml must not reference any secret");
 });
+
+test("every resource the pages reference actually exists", () => {
+  // A path typo in an HTML page is invisible until the page is opened in a
+  // browser; the manifest linter does not follow script or stylesheet paths.
+  for (const page of ["src/options.html", "src/popup.html"]) {
+    const html = read(page);
+    const refs = [
+      ...[...html.matchAll(/<script\s+src="([^"]+)"/g)].map((m) => m[1]),
+      ...[...html.matchAll(/<link[^>]+href="([^"]+)"/g)].map((m) => m[1]),
+    ];
+    assert.ok(refs.length > 0, `${page} references nothing`);
+    for (const ref of refs) {
+      assert.ok(existsSync(join(ROOT, "src", ref)), `${page} references missing ${ref}`);
+    }
+  }
+  // Same for the stylesheets' own url() references, which carry the bundled font.
+  for (const sheet of ["src/ui/tokens.css", "src/ui/sections.css"]) {
+    for (const m of read(sheet).matchAll(/url\("([^"]+)"\)/g)) {
+      assert.ok(existsSync(join(ROOT, "src", "ui", m[1])), `${sheet} references missing ${m[1]}`);
+    }
+  }
+});
+
+test("the background script list matches the files on disk", () => {
+  for (const script of manifest.background.scripts) {
+    assert.ok(existsSync(join(ROOT, "src", script)), `manifest lists missing ${script}`);
+  }
+});

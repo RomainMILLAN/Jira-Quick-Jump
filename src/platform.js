@@ -15,6 +15,20 @@
     api,
 
     /**
+     * Every user-visible string goes through here, with its English text as the
+     * fallback. Writing it this way from the start is what keeps the French
+     * version cheap: no string is assembled by concatenation, and no label
+     * depends on English word order.
+     */
+    t(key, fallback) {
+      try {
+        return api.i18n.getMessage(key) || fallback;
+      } catch {
+        return fallback;
+      }
+    },
+
+    /**
      * storage.local by default. Sync would ship internal Jira host names
      * (infrastructure mapping) and project keys (often customer names) to the
      * user's Google or Mozilla account, replicated to every signed-in browser.

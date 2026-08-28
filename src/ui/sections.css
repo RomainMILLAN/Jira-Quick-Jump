@@ -1,0 +1,541 @@
+/**
+ * Section layout, shared by both surfaces.
+ *
+ * DENSITY IS CSS ONLY. The popup sets `.is-compact` on the root in its markup;
+ * no JavaScript ever branches on it. The shortcut row goes from a single line to
+ * a stacked one and the per-field labels are REVEALED rather than added, which is
+ * also why they exist in the markup on both surfaces.
+ */
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--text);
+  font-family: var(--ui);
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: var(--teal);
+  text-decoration: none;
+}
+a:hover {
+  color: var(--teal-deep);
+  text-decoration: underline;
+}
+code {
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.page {
+  padding: 34px 28px 22px;
+}
+.card {
+  max-width: 640px;
+  margin: 0 auto;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: var(--shadow);
+}
+
+.app-hd {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  padding: 20px 24px;
+  border-bottom: 1px solid var(--line-soft);
+}
+.mark {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background: var(--teal);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.hd-txt {
+  flex-grow: 1;
+  min-width: 0;
+}
+.hd-txt p {
+  margin: 2px 0 0;
+  font-size: 12.5px;
+  color: var(--faint);
+}
+.ver {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--faint);
+}
+
+/* The L3 lockup: the product carries the name, "for Jira" qualifies it. */
+.lock {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+.lock span {
+  font-weight: 500;
+  font-size: 9.5px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--teal-deep);
+}
+
+.sections {
+  padding: 6px 24px 22px;
+}
+.section {
+  padding: 18px 0;
+  border-top: 1px solid var(--line-soft);
+}
+.section:first-child {
+  border-top: none;
+}
+.lbl {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  margin-bottom: 11px;
+}
+.lbl .note {
+  font-weight: 400;
+  color: var(--faint);
+  margin-left: 7px;
+}
+
+/* Status */
+.status {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+}
+.status-txt {
+  flex-grow: 1;
+  min-width: 0;
+}
+.status-t {
+  font-weight: 600;
+  font-size: 14.5px;
+}
+.status-s {
+  font-size: 12.5px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+.tag {
+  font-size: 11.5px;
+  font-weight: 600;
+  border-radius: 999px;
+  padding: 4px 11px;
+  white-space: nowrap;
+}
+.tag.ok {
+  background: var(--teal-wash);
+  color: var(--teal-deep);
+}
+.tag.warn {
+  background: var(--amber-wash);
+  color: var(--amber);
+}
+.tag.bad {
+  background: var(--red-wash);
+  color: var(--red);
+}
+.tag.off {
+  background: var(--line-soft);
+  color: var(--muted);
+}
+
+/* A 40x24 hit area: WCAG 2.2 AA asks for 24x24 minimum. */
+.sw {
+  width: 40px;
+  height: 24px;
+  border-radius: 999px;
+  background: var(--teal);
+  border: none;
+  position: relative;
+  flex-shrink: 0;
+  padding: 0;
+  cursor: pointer;
+}
+.sw::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 19px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform 0.14s;
+}
+.sw[aria-checked="false"] {
+  background: #cfcdc5;
+}
+.sw[aria-checked="false"]::after {
+  transform: translateX(-16px);
+}
+.sw:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+@media (prefers-reduced-motion: reduce) {
+  .sw::after {
+    transition: none;
+  }
+}
+
+/* Shortcut rows */
+.rows {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.row {
+  display: grid;
+  grid-template-columns: 7rem 1fr auto auto;
+  grid-template-areas: "key url arm del";
+  align-items: center;
+  gap: 11px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 9px 12px;
+  background: var(--card);
+}
+.row.is-refused {
+  border-color: var(--red-line);
+}
+.row.is-pending {
+  border-color: var(--amber-line);
+}
+.f-key {
+  grid-area: key;
+}
+.f-url {
+  grid-area: url;
+  min-width: 0;
+}
+.f-arm {
+  grid-area: arm;
+}
+.f-del {
+  grid-area: del;
+}
+.row-msg {
+  grid-column: 1 / -1;
+  font-size: 12px;
+  line-height: 1.45;
+}
+.row-msg.refused {
+  color: var(--red);
+}
+.row-msg.pending {
+  color: var(--amber);
+}
+
+.field-label {
+  display: none;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--faint);
+  margin-bottom: 4px;
+}
+
+input.f {
+  width: 100%;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 7px 9px;
+  background: var(--field);
+  color: var(--text);
+  min-height: 30px;
+}
+input.f.key {
+  font-weight: 600;
+}
+input.f[aria-invalid="true"] {
+  border-color: var(--red);
+}
+
+.dest {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  /* Isolated so a right-to-left character cannot reorder a host name on screen. */
+  unicode-bidi: isolate;
+  direction: ltr;
+}
+.dest .host {
+  font-weight: 600;
+}
+.dest .path {
+  color: var(--faint);
+}
+
+.acks {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ack {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--amber);
+  cursor: pointer;
+}
+.ack input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  flex-shrink: 0;
+  accent-color: var(--teal);
+}
+
+.btn {
+  font-family: var(--ui);
+  font-size: 12.5px;
+  font-weight: 500;
+  border: 1px solid var(--line);
+  background: var(--card);
+  color: var(--teal-deep);
+  border-radius: 8px;
+  padding: 0 13px;
+  min-height: 32px;
+  cursor: pointer;
+}
+.btn:hover {
+  background: var(--field);
+}
+.btn.primary {
+  background: var(--teal);
+  border-color: var(--teal);
+  color: #fff;
+}
+.btn.plain {
+  color: var(--muted);
+}
+.btn.icon {
+  width: 30px;
+  min-height: 30px;
+  padding: 0;
+  color: var(--faint);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.btn-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.chips {
+  display: flex;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+.chip {
+  font-size: 12.5px;
+  font-weight: 500;
+  border-radius: 999px;
+  padding: 7px 13px;
+  border: 1px solid var(--line);
+  background: var(--card);
+  color: var(--muted);
+  min-height: 32px;
+  cursor: pointer;
+}
+.chip[aria-pressed="true"] {
+  background: var(--teal-wash);
+  border-color: var(--teal-line);
+  color: var(--teal-deep);
+}
+
+.access {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--teal);
+  flex-shrink: 0;
+}
+.dot.pending {
+  background: #c9a227;
+}
+.origins {
+  margin-top: 9px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.origin {
+  display: flex;
+  gap: 9px;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--faint);
+  unicode-bidi: isolate;
+  direction: ltr;
+}
+
+.alert {
+  border: 1px solid var(--red-line);
+  background: var(--red-wash);
+  border-radius: 12px;
+  padding: 13px 15px;
+}
+.alert-t {
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--red);
+}
+.alert-s {
+  font-size: 12.5px;
+  color: var(--muted);
+  margin-top: 3px;
+  line-height: 1.55;
+}
+.alert-s .dest {
+  font-size: 11.5px;
+}
+
+.preview {
+  margin-top: 9px;
+  padding-left: 13px;
+  border-left: 2px solid var(--teal);
+  font-family: var(--mono);
+  font-size: 12.5px;
+  unicode-bidi: isolate;
+  direction: ltr;
+}
+.preview .host {
+  font-weight: 600;
+}
+.preview .path {
+  color: var(--faint);
+}
+.preview.empty {
+  border-left-color: var(--line);
+  color: var(--faint);
+  font-family: var(--ui);
+}
+
+.hint {
+  font-size: 12.5px;
+  color: var(--muted);
+  line-height: 1.5;
+  margin: 11px 0 0;
+}
+
+/* Author signature — see ui/author-signature.css for the vendored stylesheet.
+   Contract: --rm-tag-filled-color / --rm-tag-stroke-color. We extend through the
+   published variables and never modify the vendored copy, or `make
+   sync-signature` reports a drift on every run. */
+.site-foot {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 22px 0 4px;
+  display: flex;
+  justify-content: center;
+}
+.signature {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  text-decoration: none;
+}
+.signature:hover {
+  text-decoration: none;
+}
+.signature .rm-tag-logo {
+  width: 88px;
+  --rm-tag-filled-color: var(--muted, currentColor);
+  --rm-tag-stroke-color: var(--muted, currentColor);
+}
+.signature-domain {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--faint);
+  unicode-bidi: isolate;
+  direction: ltr;
+}
+@media (prefers-reduced-motion: reduce) {
+  .signature .rm-tag-logo:hover .rm-tag-logo-circle {
+    animation: none;
+  }
+}
+
+/* ---- Compact density: the popup only. No JavaScript branches on this. ---- */
+.is-compact .page {
+  padding: 0;
+}
+.is-compact .card {
+  max-width: none;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+}
+.is-compact .app-hd {
+  padding: 13px 16px;
+}
+.is-compact .mark {
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+}
+.is-compact .lock {
+  font-size: 15px;
+  gap: 7px;
+}
+.is-compact .lock span {
+  font-size: 8.5px;
+  letter-spacing: 0.17em;
+}
+.is-compact .sections {
+  padding: 0 16px 14px;
+  overflow-y: auto;
+  max-height: 470px;
+}
+.is-compact .section {
+  padding: 15px 0;
+}
+.is-compact .row {
+  grid-template-columns: 1fr auto auto;
+  grid-template-areas:
+    "key arm del"
+    "url url url";
+  gap: 9px 10px;
+}
+.is-compact .field-label {
+  display: block;
+}
+.is-compact .site-foot {
+  display: none;
+}

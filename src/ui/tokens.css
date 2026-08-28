@@ -1,0 +1,89 @@
+/**
+ * Design tokens.
+ *
+ * Teal carries the product and never means a state: states are red (refused),
+ * amber (accept once) and teal only ever confirms. Colour is never the sole
+ * signal — every state also carries a word, which is what WCAG 2.2 AA requires
+ * and what makes the UI readable to someone who cannot separate the two.
+ *
+ * The interface uses the system UI face, so there is one bundled font instead of
+ * three: JetBrains Mono, for keys and URLs only.
+ */
+
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("fonts/jetbrains-mono.woff2") format("woff2");
+  font-weight: 400 700;
+  font-display: swap;
+}
+
+:root {
+  --teal: #0d7f74;
+  --teal-deep: #0a635b;
+  --teal-wash: #e6f4f1;
+  --teal-line: #bfe0da;
+
+  --text: #16211f;
+  --muted: #6a7370;
+  --faint: #9aa29f;
+
+  --paper: #f5f4f0;
+  --card: #ffffff;
+  --line: #e6e4dd;
+  --line-soft: #efede7;
+  --field: #fbfbf9;
+
+  --red: #b3372c;
+  --red-wash: #fdf1ef;
+  --red-line: #e8c4be;
+  --amber: #8a6a1e;
+  --amber-wash: #fbf5e6;
+  --amber-line: #e6d7b4;
+
+  --shadow: 0 8px 22px rgba(22, 33, 31, 0.05);
+
+  --ui: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --teal: #3fbfad;
+    --teal-deep: #6fd6c6;
+    --teal-wash: #14312d;
+    --teal-line: #2a5b54;
+
+    --text: #e4e9e7;
+    --muted: #97a09d;
+    --faint: #6f7a77;
+
+    --paper: #121716;
+    --card: #171c1b;
+    --line: #2c3230;
+    --line-soft: #262b29;
+    --field: #1e2422;
+
+    --red: #ef8a7d;
+    --red-wash: #2c211d;
+    --red-line: #5a3f36;
+    --amber: #d8ab52;
+    --amber-wash: #2b2519;
+    --amber-line: #4b402a;
+
+    --shadow: none;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+::selection {
+  background: var(--teal);
+  color: #fff;
+}
+
+:focus-visible {
+  outline: 2px solid var(--teal);
+  outline-offset: 2px;
+}

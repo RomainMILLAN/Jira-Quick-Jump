@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Quick Jump for Jira</title>
+  <link rel="stylesheet" href="ui/tokens.css">
+  <link rel="stylesheet" href="ui/author-signature.css">
+  <link rel="stylesheet" href="ui/sections.css">
+</head>
+<!-- .is-compact is set here, in the markup, and nowhere else: no JavaScript in
+     this project ever branches on density. -->
+<body class="is-compact" style="width: 380px;">
+  <div class="page">
+    <div class="card">
+      <div class="app-hd">
+        <div class="mark"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 6l6 6-6 6"></path><path d="M13.5 6l6 6-6 6"></path></svg></div>
+        <div class="hd-txt">
+          <h1 class="lock">Quick Jump<span>for Jira</span></h1>
+          <p id="popup-sub"></p>
+        </div>
+      </div>
+      <div class="alert" id="host-banner" role="alert" hidden></div>
+      <div class="sections" id="sections"></div>
+      <div class="app-hd" style="border-top: 1px solid var(--line-soft); border-bottom: none;">
+        <span class="ver" id="version" style="flex-grow: 1;"></span>
+        <button class="btn plain" id="open-options"></button>
+      </div>
+    </div>
+  </div>
+
+  <script src="platform.js"></script>
+  <script src="core/mutation-result.js"></script>
+  <script src="core/issue-reference.js"></script>
+  <script src="core/destination-warning.js"></script>
+  <script src="core/consent.js"></script>
+  <script src="core/project-shortcut.js"></script>
+  <script src="core/shortcut-registry.js"></script>
+  <script src="core/jump-policy.js"></script>
+  <script src="core/admission.js"></script>
+  <script src="interception/search-engine-catalog.js"></script>
+  <script src="interception/reference-pattern.js"></script>
+  <script src="interception/rule-factory.js"></script>
+  <script src="interception/origin-requirements.js"></script>
+  <script src="interception/jump-preview.js"></script>
+  <script src="versioned-entry.js"></script>
+  <script src="stored-policy.js"></script>
+  <script src="policy-repository.js"></script>
+  <script src="destination-journal.js"></script>
+  <script src="rule-installer.js"></script>
+  <script src="ui/dom.js"></script>
+  <script src="ui/section-host.js"></script>
+  <script src="options-sections.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>

@@ -1,0 +1,92 @@
+{
+  "access": {
+    "message": "Access"
+  },
+  "accessAll": {
+    "message": "Every origin this configuration needs has been granted."
+  },
+  "accessMissing": {
+    "message": "Some origins have not been granted yet."
+  },
+  "accessNote": {
+    "message": "A redirect needs permission for its destination."
+  },
+  "ackBlocks": {
+    "message": "Arming stays unavailable until these are accepted."
+  },
+  "addShortcut": {
+    "message": "Add shortcut"
+  },
+  "armThis": {
+    "message": "Arm this shortcut"
+  },
+  "changedAck": {
+    "message": "I have checked it"
+  },
+  "changedNow": {
+    "message": "now points to"
+  },
+  "changedTitle": {
+    "message": "A destination changed"
+  },
+  "changedWas": {
+    "message": "It used to point to"
+  },
+  "destination": {
+    "message": "Destination"
+  },
+  "engines": {
+    "message": "Search engines"
+  },
+  "enginesNote": {
+    "message": "Only searches from these are rewritten."
+  },
+  "extensionDescription": {
+    "message": "Type ABC-1234 in the address bar and land straight on the Jira issue."
+  },
+  "extensionName": {
+    "message": "Quick Jump for Jira"
+  },
+  "grant": {
+    "message": "Grant access"
+  },
+  "key": {
+    "message": "Key"
+  },
+  "openSettings": {
+    "message": "Open settings"
+  },
+  "popupSub": {
+    "message": "Address bar to issue."
+  },
+  "remove": {
+    "message": "Remove this shortcut"
+  },
+  "shortcuts": {
+    "message": "Shortcuts"
+  },
+  "shortcutsNote": {
+    "message": "Where each issue key sends you."
+  },
+  "statusArmed": {
+    "message": "Jumping is armed"
+  },
+  "statusCounting": {
+    "message": "Checking rules…"
+  },
+  "statusDisarmed": {
+    "message": "Jumping is off"
+  },
+  "toggleAll": {
+    "message": "Arm or disarm every shortcut"
+  },
+  "tryIt": {
+    "message": "Try a URL"
+  },
+  "tryItEmpty": {
+    "message": "Nothing yet."
+  },
+  "tryItNote": {
+    "message": "Paste a search URL to see where it would land."
+  }
+}
