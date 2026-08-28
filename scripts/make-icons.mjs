@@ -5,13 +5,17 @@
  * toolbar icon and the wordmark stay the same object at two sizes. Geometry is
  * expressed on the same 24-unit grid the SVG uses, so changing one changes both.
  *
- * CI runs this and fails if the committed PNGs differ (`make icons`), which keeps
- * the shipped bytes reviewable in git instead of being binaries nobody can rebuild.
+ * The committed PNGs are checked against this file by a test — on PIXELS, never
+ * on bytes. Deflate output varies with the zlib build, so comparing the
+ * compressed bytes fails on a machine that is not the one that generated them,
+ * which is a property of the compressor rather than anything about the icon.
+ * `renderPixels` is exported so the test can rebuild the image and compare what
+ * actually matters.
  */
 import { deflateSync } from "node:zlib";
 import { writeFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const OUT = join(ROOT, "src", "icons");
@@ -95,7 +99,7 @@ const encodePng = (size, rgba) => {
   ]);
 };
 
-const render = (size) => {
+export const renderPixels = (size) => {
   const rgba = Buffer.alloc(size * size * 4);
   const scale = size / 24;
   const half = size / 2;
@@ -122,12 +126,17 @@ const render = (size) => {
       rgba[i + 3] = Math.round(tile * 255);
     }
   }
-  return encodePng(size, rgba);
+  return rgba;
 };
 
-mkdirSync(OUT, { recursive: true });
-for (const size of [16, 32, 48, 128]) {
-  const png = render(size);
-  writeFileSync(join(OUT, `icon-${size}.png`), png);
-  console.log(`src/icons/icon-${size}.png  ${png.length} bytes`);
+export const SIZES = [16, 32, 48, 128];
+
+const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+if (isMain) {
+  mkdirSync(OUT, { recursive: true });
+  for (const size of SIZES) {
+    const png = encodePng(size, renderPixels(size));
+    writeFileSync(join(OUT, `icon-${size}.png`), png);
+    console.log(`src/icons/icon-${size}.png  ${png.length} bytes`);
+  }
 }

@@ -31,9 +31,9 @@ test: ## Run the test suite
 	@npm test
 
 .PHONY: icons
-icons: ## Regenerate the icons and fail if they differ from the committed ones
+icons: ## Regenerate the icons, then check they still draw the committed image
 	@npm run icons
-	@git diff --exit-code src/icons
+	@npm test -- --test-name-pattern='icons'
 
 .PHONY: sync-signature
 sync-signature: ## Resync the vendored author signature and fail if the copy drifted
