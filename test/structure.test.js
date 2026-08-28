@@ -6,6 +6,14 @@ import { join } from "node:path";
 const ROOT = new URL("..", import.meta.url).pathname;
 const read = (p) => readFileSync(join(ROOT, p), "utf8");
 const manifest = JSON.parse(read("src/manifest.json"));
+// The manifest's own strings are localised, so a store listing or a test that
+// wants the real name has to resolve __MSG_ through the default locale.
+const resolveMessage = (value) => {
+  const match = /^__MSG_([A-Za-z0-9_]+)__$/.exec(value);
+  if (!match) return value;
+  const messages = JSON.parse(read(`src/_locales/${manifest.default_locale}/messages.json`));
+  return messages[match[1]].message;
+};
 const pkg = JSON.parse(read("package.json"));
 
 const scriptsOf = (html) =>
@@ -178,7 +186,7 @@ test("the store listing justifies exactly the permissions the manifest asks for"
   for (const origin of manifest.optional_host_permissions) {
     assert.ok(listing.includes(origin), `STORE_LISTING.md does not mention ${origin}`);
   }
-  assert.ok(listing.includes(manifest.name), "STORE_LISTING.md does not carry the manifest name");
+  assert.ok(listing.includes(resolveMessage(manifest.name)), "STORE_LISTING.md does not carry the manifest name");
 });
 
 test("the search-suggestion caveat survives", () => {
@@ -247,5 +255,66 @@ test("no inline style survives, because the CSP blocks it", () => {
     assert.equal(/\sstyle="/.test(source), false, `${file} carries an inline style attribute`);
     assert.equal(/\.style\.[a-zA-Z]+\s*=/.test(source), false, `${file} assigns an inline style`);
     assert.equal(/setAttribute\(\s*["']style["']/.test(source), false, `${file} sets a style attribute`);
+  }
+});
+
+test("every locale carries exactly the keys the code and the manifest ask for", () => {
+  // A missing key is invisible in English — Platform.t falls back to the literal
+  // written at the call site, so the UI looks right while the French build is
+  // silently half-translated. The manifest is worse: Chrome refuses to load an
+  // extension whose __MSG_ has no entry in the default locale.
+  const walk = (dir, out = []) => {
+    for (const entry of readdirSync(join(ROOT, dir), { withFileTypes: true })) {
+      if (entry.isDirectory()) walk(join(dir, entry.name), out);
+      else if (entry.name.endsWith(".js")) out.push(join(dir, entry.name));
+    }
+    return out;
+  };
+
+  const called = new Map();
+  for (const file of walk("src")) {
+    for (const m of read(file).matchAll(/\bt\(\s*"([A-Za-z0-9_]+)"\s*,\s*"((?:[^"\\]|\\.)*)"\s*\)/g)) {
+      const previous = called.get(m[1]);
+      // Two call sites under one key must say the same thing, or one of them
+      // gets the other's translation.
+      assert.ok(previous === undefined || previous === m[2], `${m[1]} is called with two different English texts`);
+      called.set(m[1], m[2]);
+    }
+  }
+  assert.ok(called.size > 40, "the t() scan found suspiciously few keys");
+
+  const fromManifest = [...read("src/manifest.json").matchAll(/__MSG_([A-Za-z0-9_]+)__/g)].map((m) => m[1]);
+  assert.ok(fromManifest.includes("extensionName"), "the manifest must localise its own name");
+
+  const locales = readdirSync(join(ROOT, "src/_locales"));
+  assert.ok(locales.includes(manifest.default_locale), "the default locale must exist");
+  assert.ok(locales.length > 1, "a second locale must ship, or the i18n plumbing is untested");
+
+  const reference = JSON.parse(read(`src/_locales/${manifest.default_locale}/messages.json`));
+  for (const [key, english] of called) {
+    assert.ok(key in reference, `${key} is used in the code but missing from the default locale`);
+    // The fallback written at the call site IS the English string. If they drift,
+    // the language a reader sees depends on whether i18n happened to answer.
+    assert.equal(reference[key].message, english, `${key} says something different in code and in messages.json`);
+  }
+  for (const key of fromManifest) {
+    assert.ok(key in reference, `__MSG_${key}__ has no entry in the default locale`);
+  }
+
+  const expected = new Set([...called.keys(), ...fromManifest]);
+  for (const locale of locales) {
+    const messages = JSON.parse(read(`src/_locales/${locale}/messages.json`));
+    assert.deepEqual(
+      Object.keys(messages).sort(),
+      [...expected].sort(),
+      `src/_locales/${locale}/messages.json does not carry exactly the expected keys`,
+    );
+    for (const [key, entry] of Object.entries(messages)) {
+      assert.equal(typeof entry.message, "string", `${locale}/${key} has no message`);
+      assert.notEqual(entry.message.trim(), "", `${locale}/${key} is empty`);
+      // A placeholder that survives translation into a language we do not read
+      // would be silently rendered as literal text.
+      assert.equal(/\$[A-Za-z0-9_]+\$/.test(entry.message), false, `${locale}/${key} uses a placeholder`);
+    }
   }
 });

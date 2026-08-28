@@ -44,6 +44,9 @@
   "changedWas": {
     "message": "It used to point to"
   },
+  "commandDisarmAll": {
+    "message": "Arm or disarm Jira Quick Jump"
+  },
   "delete": {
     "message": "Delete"
   },

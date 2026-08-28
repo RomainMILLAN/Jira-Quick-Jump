@@ -1,0 +1,185 @@
+{
+  "access": {
+    "message": "Accès"
+  },
+  "accessAll": {
+    "message": "Toutes les origines dont cette configuration a besoin sont accordées."
+  },
+  "accessMissing": {
+    "message": "Certaines origines ne sont pas encore accordées."
+  },
+  "accessNote": {
+    "message": "Une redirection exige la permission de sa destination."
+  },
+  "ackBlocks": {
+    "message": "L’armement reste indisponible tant qu’ils ne sont pas acceptés."
+  },
+  "add": {
+    "message": "Ajouter"
+  },
+  "addDomain": {
+    "message": "Ajouter un domaine"
+  },
+  "addDomainNote": {
+    "message": "Le domaine seulement. La forme de son URL de recherche se choisit ci-dessous, elle ne se tape jamais."
+  },
+  "addShortcut": {
+    "message": "Ajouter un raccourci"
+  },
+  "armThis": {
+    "message": "Armer ce raccourci"
+  },
+  "cancel": {
+    "message": "Annuler"
+  },
+  "changedAck": {
+    "message": "Je l’ai vérifié"
+  },
+  "changedNow": {
+    "message": "pointe maintenant vers"
+  },
+  "changedTitle": {
+    "message": "Une destination a changé"
+  },
+  "changedWas": {
+    "message": "Elle pointait vers"
+  },
+  "commandDisarmAll": {
+    "message": "Armer ou désarmer Quick Jump for Jira"
+  },
+  "delete": {
+    "message": "Supprimer"
+  },
+  "destination": {
+    "message": "Destination"
+  },
+  "diffChanged": {
+    "message": "Modifié"
+  },
+  "diffNew": {
+    "message": "Nouveau"
+  },
+  "diffRemoved": {
+    "message": "Supprimé"
+  },
+  "domain": {
+    "message": "Domaine"
+  },
+  "engines": {
+    "message": "Moteurs de recherche"
+  },
+  "enginesNote": {
+    "message": "Seules les recherches venant de ceux-ci sont réécrites."
+  },
+  "export": {
+    "message": "Exporter…"
+  },
+  "extensionDescription": {
+    "message": "Tapez ABC-1234 dans la barre d’adresse et atterrissez directement sur le ticket Jira."
+  },
+  "extensionName": {
+    "message": "Quick Jump for Jira"
+  },
+  "fix": {
+    "message": "Corriger"
+  },
+  "grant": {
+    "message": "Accorder l’accès"
+  },
+  "import": {
+    "message": "Importer…"
+  },
+  "importConfirm": {
+    "message": "Importer, désarmé"
+  },
+  "importDisarmed": {
+    "message": "Tout arrive désarmé, et les avertissements déjà acceptés ne sont pas repris."
+  },
+  "importDropped": {
+    "message": "Certaines entrées ont été refusées et ne seront pas importées."
+  },
+  "importLede": {
+    "message": "Vérifiez où chaque clé vous enverrait. Un fichier de configuration peut faire pointer une clé que vous utilisez déjà vers un autre serveur."
+  },
+  "importTooBig": {
+    "message": "Ce fichier est trop volumineux pour être une configuration."
+  },
+  "key": {
+    "message": "Clé"
+  },
+  "openSettings": {
+    "message": "Ouvrir les réglages"
+  },
+  "popupSub": {
+    "message": "De la barre d’adresse au ticket."
+  },
+  "quarantine": {
+    "message": "Impossible à relire"
+  },
+  "quarantineFoot": {
+    "message": "Cette entrée ne produit aucune règle et reste ici jusqu’à ce que vous décidiez."
+  },
+  "quarantineNote": {
+    "message": "Conservé, jamais supprimé à votre place."
+  },
+  "remove": {
+    "message": "Supprimer ce raccourci"
+  },
+  "removeDomain": {
+    "message": "Supprimer ce domaine"
+  },
+  "shortcuts": {
+    "message": "Raccourcis"
+  },
+  "shortcutsNote": {
+    "message": "Où chaque clé de ticket vous envoie."
+  },
+  "statusArmed": {
+    "message": "Le saut est armé"
+  },
+  "statusCounting": {
+    "message": "Vérification des règles…"
+  },
+  "statusDisarmed": {
+    "message": "Le saut est désactivé"
+  },
+  "storage": {
+    "message": "Stockage"
+  },
+  "storageLocal": {
+    "message": "Cet appareil uniquement"
+  },
+  "storageMovedLocal": {
+    "message": "Votre configuration est désormais sur cet appareil uniquement, et la copie synchronisée a été supprimée."
+  },
+  "storageMovedSync": {
+    "message": "Votre configuration est désormais synchronisée. Des copies peuvent subsister sur d’autres appareils."
+  },
+  "storageNote": {
+    "message": "La synchronisation envoie vos noms d’hôtes Jira à votre compte navigateur."
+  },
+  "storageSync": {
+    "message": "Synchroniser entre appareils"
+  },
+  "storageTooBig": {
+    "message": "Cette configuration est trop volumineuse pour être synchronisée."
+  },
+  "toggleAll": {
+    "message": "Armer ou désarmer tous les raccourcis"
+  },
+  "transfer": {
+    "message": "Import et export"
+  },
+  "transferNote": {
+    "message": "Les raccourcis importés arrivent toujours désarmés."
+  },
+  "tryIt": {
+    "message": "Essayer une URL"
+  },
+  "tryItEmpty": {
+    "message": "Rien pour l’instant."
+  },
+  "tryItNote": {
+    "message": "Collez une URL de recherche pour voir où elle mènerait."
+  }
+}
