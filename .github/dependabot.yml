@@ -1,0 +1,33 @@
+version: 2
+
+updates:
+  # Actions are pinned by commit SHA, which is what makes a supply-chain
+  # compromise of an action unable to reach this repository — and also what makes
+  # a security fix invisible. Dependabot is the other half of that pin: it moves
+  # the SHA and writes the tag it corresponds to in the comment.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore"
+    cooldown:
+      default-days: 7
+
+  # Nothing here ships inside the extension — the packages are web-ext and the
+  # store CLIs. They nonetheless run in the job that produces the published
+  # artifacts, which makes them part of its trusted base.
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore"
+    groups:
+      dev-dependencies:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+    cooldown:
+      default-days: 7

@@ -9,12 +9,27 @@ on:
 # fork pull request would otherwise run untrusted code with them in scope.
 permissions: {}
 
+# A new push to a branch makes the previous run's answer obsolete.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   verify:
+    name: Test, lint and build
     runs-on: ubuntu-latest
     permissions:
       contents: read
     steps:
+      - name: Watch what the job talks to
+        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+        with:
+          # audit, not block, and deliberately: an allowlist guessed instead of
+          # observed fails the build at the worst moment, and blocks a release
+          # rather than an attack. One clean run publishes the real endpoint
+          # list; the switch to block is a one-line change afterwards.
+          egress-policy: audit
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -47,3 +62,33 @@ jobs:
           name: jira-quick-jump-builds
           path: web-ext-artifacts/*.zip
           if-no-files-found: error
+
+  # The workflows are the one place where a mistake grants write access to the
+  # repository rather than to a page. zizmor reads them as an attacker would.
+  workflows:
+    name: Audit the workflows
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Watch what the job talks to
+        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: zizmorcore/zizmor-action@3dc1ecc9bcb9e94e9b2c709687979e1298497054 # v0.6.2
+        with:
+          # Findings land as annotations on the diff. Uploading SARIF instead
+          # would need security-events: write, a permission this repository has
+          # no other reason to hand out.
+          advanced-security: false
+          annotations: true
+          # The one informational finding left is `superfluous-actions` on
+          # softprops/action-gh-release. Replacing a pinned, attested action with
+          # a shell script is not an improvement here, so the floor sits above it
+          # rather than the finding being suppressed and forgotten.
+          min-severity: low

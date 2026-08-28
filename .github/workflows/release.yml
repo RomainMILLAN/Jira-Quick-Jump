@@ -5,23 +5,43 @@ on:
   push:
     tags: ["v*"]
 
+# Two releases at once would race to upload the same artifacts.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 permissions: {}
 
 jobs:
   build:
+    name: Build and attest
     runs-on: ubuntu-latest
     permissions:
       contents: read
       id-token: write
       attestations: write
     steps:
+      - name: Watch what the job talks to
+        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+        with:
+          # audit, not block, and deliberately: an allowlist guessed instead of
+          # observed fails the build at the worst moment, and blocks a release
+          # rather than an attack. One clean run publishes the real endpoint
+          # list; the switch to block is a one-line change afterwards.
+          egress-policy: audit
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # No `cache: npm` here, unlike CI. A cache is writable from any branch of
+      # this repository and readable from a tag, so caching in the job that
+      # produces the PUBLISHED artifacts lets a poisoned cache entry reach users.
+      # The saved seconds are not worth that on a release.
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
-          cache: npm
+          # setup-node v7 caches by default; dropping `cache: npm` is not enough.
+          package-manager-cache: false
       - run: npm ci --ignore-scripts
       - run: npm test
       - run: npm run build:chrome
@@ -42,19 +62,34 @@ jobs:
   # A protected environment holds the secrets and requires a human reviewer: a
   # stolen token can push a tag, but it cannot publish on its own.
   publish:
+    name: Publish
     needs: build
     runs-on: ubuntu-latest
     environment: release
     permissions:
       contents: write
     steps:
+      - name: Watch what the job talks to
+        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+        with:
+          # audit, not block, and deliberately: an allowlist guessed instead of
+          # observed fails the build at the worst moment, and blocks a release
+          # rather than an attack. One clean run publishes the real endpoint
+          # list; the switch to block is a one-line change afterwards.
+          egress-policy: audit
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # No `cache: npm` here, unlike CI. A cache is writable from any branch of
+      # this repository and readable from a tag, so caching in the job that
+      # produces the PUBLISHED artifacts lets a poisoned cache entry reach users.
+      # The saved seconds are not worth that on a release.
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
-          cache: npm
+          # setup-node v7 caches by default; dropping `cache: npm` is not enough.
+          package-manager-cache: false
       - run: npm ci --ignore-scripts
       - run: npm run build:chrome && npm run build:firefox
 
