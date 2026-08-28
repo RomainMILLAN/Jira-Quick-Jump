@@ -33,21 +33,23 @@
   }
 
   class JumpPolicy {
-    constructor(registry, engineIds, armed) {
+    constructor(registry, engineIds, armed, customEngines = []) {
       this._registry = registry;
       this._engineIds = engineIds;
       this._armed = armed;
+      this._customEngines = customEngines;
     }
 
     shortcuts() { return this._registry.shortcuts(); }
     registry() { return this._registry; }
     engineIds() { return [...this._engineIds]; }
+    customEngines() { return [...this._customEngines]; }
     armed() { return this._armed; }
 
     /** The global kill switch. Distinct from armShortcut(id): sharing the name
      *  silently overwrote one of the two. */
-    arm() { return new JumpPolicy(this._registry, this._engineIds, true); }
-    disarm() { return new JumpPolicy(this._registry, this._engineIds, false); }
+    arm() { return new JumpPolicy(this._registry, this._engineIds, true, this._customEngines); }
+    disarm() { return new JumpPolicy(this._registry, this._engineIds, false, this._customEngines); }
 
     /**
      * The keystone. Without it the rule factory would arbitrate the domain rule
@@ -97,7 +99,7 @@
     }
 
     _rebuilt(registry) {
-      return new JumpPolicy(registry, this._engineIds, this._armed);
+      return new JumpPolicy(registry, this._engineIds, this._armed, this._customEngines);
     }
 
     /**
@@ -156,8 +158,27 @@
     }
 
     withEngines(engineIds) {
-      const policy = new JumpPolicy(this._registry, [...engineIds], this._armed);
+      const policy = new JumpPolicy(this._registry, [...engineIds], this._armed, this._customEngines);
       return this._guarded(MutationResult.ok(policy), () => policy.activeBindings());
+    }
+
+    /** Adding a domain is additive and idempotent: the id derives from the host. */
+    withCustomEngine(engine) {
+      if (this._customEngines.some((e) => e.id() === engine.id())) {
+        return MutationResult.refused("DUPLICATE_ENGINE", `${engine.host()} is already listed.`);
+      }
+      const policy = new JumpPolicy(this._registry, this._engineIds, this._armed,
+        [...this._customEngines, engine]);
+      return this._guarded(MutationResult.ok(policy), () => policy.activeBindings());
+    }
+
+    withoutCustomEngine(id) {
+      return MutationResult.ok(new JumpPolicy(
+        this._registry,
+        this._engineIds.filter((e) => e !== id),
+        this._armed,
+        this._customEngines.filter((e) => e.id() !== id),
+      ));
     }
 
     /** Projection for persistence: a faithful mirror. */
@@ -166,6 +187,7 @@
         schemaVersion: SCHEMA_VERSION,
         armed: this._armed,
         engines: this.engineIds(),
+        customEngines: this._customEngines.map((e) => e.toJSON()),
         shortcuts: this._registry.toJSON(),
       };
     }
@@ -180,6 +202,7 @@
       return {
         schemaVersion: SCHEMA_VERSION,
         engines: this.engineIds(),
+        customEngines: this._customEngines.map((e) => e.toJSON()),
         shortcuts: this._registry.shortcuts().map((s) => ({
           id: s.id(),
           key: s.key().toString(),
@@ -193,7 +216,7 @@
   JumpPolicy.MAX_BINDINGS = MAX_BINDINGS;
 
   JumpPolicy.empty = function () {
-    return new JumpPolicy(ShortcutRegistry.empty(), [], true);
+    return new JumpPolicy(ShortcutRegistry.empty(), [], true, []);
   };
 
   global.Binding = Binding;

@@ -9,7 +9,7 @@
 </head>
 <!-- .is-compact is set here, in the markup, and nowhere else: no JavaScript in
      this project ever branches on density. -->
-<body class="is-compact" style="width: 380px;">
+<body class="is-compact popup-body">
   <div class="page">
     <div class="card">
       <div class="app-hd">
@@ -21,8 +21,8 @@
       </div>
       <div class="alert" id="host-banner" role="alert" hidden></div>
       <div class="sections" id="sections"></div>
-      <div class="app-hd" style="border-top: 1px solid var(--line-soft); border-bottom: none;">
-        <span class="ver" id="version" style="flex-grow: 1;"></span>
+      <div class="app-hd popup-foot">
+        <span class="ver" id="version"></span>
         <button class="btn plain" id="open-options"></button>
       </div>
     </div>

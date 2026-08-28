@@ -229,3 +229,23 @@ test("a rule never matches a host we did not ask permission for", async () => {
     }
   }
 });
+
+test("no inline style survives, because the CSP blocks it", () => {
+  // `style-src 'self'` blocks style attributes outright — a rule this project
+  // states in its own manifest, and then has to obey. A blocked style is silent
+  // in production and only shows as a console entry nobody reads, so it is
+  // asserted here instead.
+  const walk = (dir, out = []) => {
+    for (const entry of readdirSync(join(ROOT, dir), { withFileTypes: true })) {
+      if (entry.isDirectory()) walk(join(dir, entry.name), out);
+      else if (/\.(js|html)$/.test(entry.name)) out.push(join(dir, entry.name));
+    }
+    return out;
+  };
+  for (const file of walk("src")) {
+    const source = read(file);
+    assert.equal(/\sstyle="/.test(source), false, `${file} carries an inline style attribute`);
+    assert.equal(/\.style\.[a-zA-Z]+\s*=/.test(source), false, `${file} assigns an inline style`);
+    assert.equal(/setAttribute\(\s*["']style["']/.test(source), false, `${file} sets a style attribute`);
+  }
+});

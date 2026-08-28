@@ -143,7 +143,7 @@
 
     mount(root, ctx) {
       root.appendChild(label(t("shortcuts", "Shortcuts"), t("shortcutsNote", "Where each issue key sends you.")));
-      this.rows = el("div", { class: "rows" });
+      this.rows = el("div", { class: "rows rows-spaced" });
       root.appendChild(this.rows);
       root.appendChild(el("div", { class: "btn-row" }, [
         el("button", {
@@ -154,7 +154,6 @@
           },
         }),
       ]));
-      this.rows.style.marginBottom = "11px";
     },
 
     render(stored, ctx) {
@@ -339,8 +338,7 @@
       root.appendChild(label(t("access", "Access"), t("accessNote", "A redirect needs permission for its destination.")));
       this.summary = el("div", { class: "access" });
       this.list = el("div", { class: "origins" });
-      this.actions = el("div", { class: "btn-row" });
-      this.actions.style.marginTop = "11px";
+      this.actions = el("div", { class: "btn-row row-actions" });
       // A permission request the browser refuses to even show must say so; a
       // button that does nothing is the worst of both worlds.
       this.failure = el("p", { class: "row-msg refused", hidden: true });

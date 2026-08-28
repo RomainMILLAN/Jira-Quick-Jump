@@ -21,7 +21,7 @@
   const { ProjectKey, JiraInstance, Consent, JumpPolicy, ShortcutRegistry } = global;
 
   const SHORTCUT_FIELDS = new Set(["id", "key", "baseUrl", "consent"]);
-  const DOCUMENT_FIELDS = new Set(["schemaVersion", "armed", "engines", "shortcuts"]);
+  const DOCUMENT_FIELDS = new Set(["schemaVersion", "armed", "engines", "customEngines", "shortcuts"]);
   const MAX_SHORTCUTS = 200;
   const MAX_QUARANTINE = 50;
 
@@ -80,6 +80,23 @@
     },
   };
 
+
+  /** Custom domains go through parse like everything else, and a bad one is dropped. */
+  const admitCustomEngines = (raws, policy, dropped) => {
+    let result = policy;
+    for (const raw of raws) {
+      const engine = global.CustomEngine.parse(raw);
+      if (!engine.ok) {
+        dropped.push({ entry: raw, code: engine.code, message: engine.message });
+        continue;
+      }
+      const added = result.withCustomEngine(engine.value);
+      if (added.ok) result = added.value;
+      else dropped.push({ entry: raw, code: added.code, message: added.message });
+    }
+    return result;
+  };
+
   const readDocument = (raw) => {
     if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
       return refuse("NOT_A_DOCUMENT", "The configuration must be an object.");
@@ -102,7 +119,20 @@
     if (!Array.isArray(engines) || engines.some((e) => typeof e !== "string")) {
       return refuse("ENGINES_NOT_A_LIST", "`engines` must be a list of engine ids.");
     }
-    return { ok: true, value: { ...{}, schemaVersion: raw.schemaVersion, armed: raw.armed, engines, shortcuts: raw.shortcuts } };
+    const customEngines = raw.customEngines === undefined ? [] : raw.customEngines;
+    if (!Array.isArray(customEngines)) {
+      return refuse("CUSTOM_ENGINES_NOT_A_LIST", "`customEngines` must be a list.");
+    }
+    return {
+      ok: true,
+      value: {
+        schemaVersion: raw.schemaVersion,
+        armed: raw.armed,
+        engines,
+        customEngines,
+        shortcuts: raw.shortcuts,
+      },
+    };
   };
 
   /**
@@ -124,6 +154,7 @@
     let policy = JumpPolicy.empty()
       .withEngines(document.value.engines)
       .value.disarm();
+    policy = admitCustomEngines(document.value.customEngines, policy, dropped);
     if (document.value.armed !== false) policy = policy.arm();
 
     for (const entry of document.value.shortcuts) {
@@ -174,6 +205,7 @@
     const dropped = [];
     // Disarmed, always: never read from the file.
     let policy = JumpPolicy.empty().withEngines(document.value.engines).value.disarm();
+    policy = admitCustomEngines(document.value.customEngines, policy, dropped);
 
     for (const entry of document.value.shortcuts) {
       const admitted = ShortcutAdmission.admitEntry(entry);

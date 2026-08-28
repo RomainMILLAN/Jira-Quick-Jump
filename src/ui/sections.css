@@ -560,3 +560,23 @@ input.f[aria-invalid="true"] {
   color: var(--red);
   display: block;
 }
+
+/* The popup's own chrome. These live here rather than as style attributes,
+   because `style-src 'self'` blocks inline styles outright — a rule this project
+   states and must therefore obey. */
+.popup-body {
+  width: 380px;
+}
+.popup-foot {
+  border-top: 1px solid var(--line-soft);
+  border-bottom: none;
+}
+.popup-foot .ver {
+  flex-grow: 1;
+}
+.rows-spaced {
+  margin-bottom: 11px;
+}
+.row-actions {
+  margin-top: 11px;
+}
