@@ -13,6 +13,7 @@ const ORDER = [
   "core/consent.js",
   "core/project-shortcut.js",
   "core/shortcut-registry.js",
+  "core/custom-engine.js",
   "core/jump-policy.js",
   "core/admission.js",
   "interception/search-engine-catalog.js",

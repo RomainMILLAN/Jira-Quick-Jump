@@ -16,7 +16,10 @@
   // A plain host name. No scheme, no path, no port, no wildcard, no credentials:
   // this value is concatenated into a regex and turned into a permission origin,
   // so anything clever in it is a bug or an attack.
-  const HOST = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/;
+  // The last label must be alphabetic, which is what a real public suffix looks
+  // like — and what refuses a bare IP address. A search engine is never reached
+  // at 1.2.3.4, so accepting one would only ever be an attempt at something else.
+  const HOST = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*\.[a-z]{2,}$/;
 
   class CustomEngine {
     constructor(host, shape) {

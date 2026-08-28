@@ -32,6 +32,12 @@ search engine. Quick Jump rewrites that navigation before the request leaves you
 machine. So no results page ever paints, and your internal project key never
 reaches the search engine.
 
+WORKS WITH YOUR SEARCH ENGINE
+
+Google.com, Google.fr, Bing and DuckDuckGo are built in. On anything else, add
+the domain yourself and it starts working. The extension then asks for that one
+site, and nothing more.
+
 BUILT FOR SEVERAL JIRAS AT ONCE
 
 Map as many keys as you like, each to its own instance. Self-hosted works

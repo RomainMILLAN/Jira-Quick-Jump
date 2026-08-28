@@ -115,10 +115,13 @@
     if (raw.shortcuts.length > MAX_SHORTCUTS) {
       return refuse("TOO_MANY_SHORTCUTS", "This configuration has too many shortcuts.");
     }
-    const engines = raw.engines === undefined ? [] : raw.engines;
-    if (!Array.isArray(engines) || engines.some((e) => typeof e !== "string")) {
+    const rawEngines = raw.engines === undefined ? [] : raw.engines;
+    if (!Array.isArray(rawEngines) || rawEngines.some((e) => typeof e !== "string")) {
       return refuse("ENGINES_NOT_A_LIST", "`engines` must be a list of engine ids.");
     }
+    // Selections written before engines were split per domain would otherwise
+    // resolve to nothing, and an existing configuration would quietly stop working.
+    const engines = [...new Set(rawEngines.map((id) => global.SearchEngineCatalog.migrateId(id)))];
     const customEngines = raw.customEngines === undefined ? [] : raw.customEngines;
     if (!Array.isArray(customEngines)) {
       return refuse("CUSTOM_ENGINES_NOT_A_LIST", "`customEngines` must be a list.");

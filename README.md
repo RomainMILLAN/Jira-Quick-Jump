@@ -37,8 +37,11 @@ signed build for a team.
 
 ## Set it up
 
-1. **Pick your search engine.** Whatever your address bar actually uses: Google,
-   Bing or DuckDuckGo.
+1. **Pick your search engine.** Whatever your address bar actually uses.
+   `Google.com`, `Google.fr`, Bing and DuckDuckGo are listed; anything else —
+   `google.it`, Ecosia, a self-hosted SearxNG — you add with **Add a domain**.
+   One entry per domain is deliberate: the permission prompt then contains only
+   what you ticked, instead of every Google top-level domain in existence.
 2. **Add a shortcut.** A key (`ABC`) and where it points
    (`example.atlassian.net`). Self-hosted works: a port and a path are both
    accepted, so `intra.example.org/jira` is fine, and so is `http://jira:8080`.

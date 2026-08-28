@@ -8,7 +8,7 @@ const key = (k) => g.ProjectKey.parse(k).value;
 const instance = (u) => g.JiraInstance.parse(u).value;
 
 const armedPolicy = () => {
-  let p = g.JumpPolicy.empty().withEngines(["google"]).value;
+  let p = g.JumpPolicy.empty().withEngines(["google.com"]).value;
   p = p.register(ID, key("ABC"), instance("https://example.atlassian.net")).value;
   return p.armShortcut(ID).value;
 };
@@ -103,7 +103,7 @@ test("diagnose says why nothing works, in a fixed order of priority", () => {
   assert.equal(g.JumpPolicy.empty().diagnose(granted), "NO_SHORTCUTS");
   let policy = g.JumpPolicy.empty().register(ID, key("ABC"), instance("https://example.atlassian.net")).value;
   assert.equal(policy.diagnose(granted), "NO_ENGINES");
-  policy = policy.withEngines(["google"]).value;
+  policy = policy.withEngines(["google.com"]).value;
   assert.equal(policy.diagnose(granted), "ALL_SHORTCUTS_DISARMED");
   policy = policy.armShortcut(ID).value;
   assert.equal(policy.diagnose({ originsGranted: true, quarantinedCount: 2 }), "PARTIAL_POLICY");
@@ -120,7 +120,7 @@ test("every mutation returns the same shape, with events always present", () => 
     policy.withKeyFor(ID, key("OPS")),
     policy.acknowledge(ID, "PUNYCODE"),
     policy.remove(ID),
-    policy.withEngines(["bing"]),
+    policy.withEngines(["bing.com"]),
     policy.acknowledge(ID, "NOPE"),
   ]) {
     assert.ok(Array.isArray(result.events), "events must always be present, never sometimes");

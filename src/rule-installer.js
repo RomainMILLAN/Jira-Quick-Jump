@@ -33,7 +33,8 @@
     },
 
     async _install(policy, quarantinedCount = 0) {
-      const { rules, skipped } = RuleFactory.buildRules(policy, SearchEngineCatalog);
+      const catalog = SearchEngineCatalog.forPolicy(policy);
+      const { rules, skipped } = RuleFactory.buildRules(policy, catalog);
       const supported = [];
       for (const rule of rules) {
         const check = await dnr().isRegexSupported({ regex: rule.condition.regexFilter });
@@ -56,7 +57,7 @@
      * the moment permission is granted, with no further sync.
      */
     async report(policy, skipped = [], quarantinedCount = 0) {
-      const origins = OriginRequirements.requiredOrigins(policy, SearchEngineCatalog);
+      const origins = OriginRequirements.requiredOrigins(policy, SearchEngineCatalog.forPolicy(policy));
       const originsGranted = await Platform.grantedOrigins(origins);
       const applied = (await dnr().getDynamicRules()).length;
       // The quarantine count has to travel all the way here, or PARTIAL_POLICY

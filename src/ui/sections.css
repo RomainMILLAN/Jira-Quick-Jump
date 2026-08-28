@@ -580,3 +580,13 @@ input.f[aria-invalid="true"] {
 .row-actions {
   margin-top: 11px;
 }
+
+.add-domain {
+  margin-top: 11px;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+.add-domain .hint {
+  margin: 0;
+}

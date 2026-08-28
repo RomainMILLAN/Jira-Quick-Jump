@@ -67,7 +67,7 @@ test("a forged storage entry produces no rule at all", () => {
   const forged = {
     schemaVersion: 1,
     armed: true,
-    engines: ["google"],
+    engines: ["google.com"],
     shortcuts: [
       { id: "a", key: ".*", baseUrl: "https://example.atlassian.net", consent: { armed: true, acknowledged: [] } },
       { id: "b", key: "ABC", baseUrl: "javascript:alert(1)", consent: { armed: true, acknowledged: [] } },

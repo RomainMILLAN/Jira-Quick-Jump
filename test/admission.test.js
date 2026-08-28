@@ -6,7 +6,7 @@ const g = await loadCore();
 const ID = "11111111-1111-4111-8111-111111111111";
 
 const policy = (() => {
-  let p = g.JumpPolicy.empty().withEngines(["google"]).value;
+  let p = g.JumpPolicy.empty().withEngines(["google.com"]).value;
   p = p.register(ID, g.ProjectKey.parse("ABC").value, g.JiraInstance.parse("http://jira:8080").value).value;
   p = p.acknowledge(ID, "INSECURE_SCHEME").value;
   p = p.acknowledge(ID, "INTERNAL_HOST").value;
@@ -78,7 +78,7 @@ test("an invalid entry is quarantined and the valid ones still work", () => {
   const document = {
     schemaVersion: 1,
     armed: true,
-    engines: ["google"],
+    engines: ["google.com"],
     shortcuts: [
       { id: "good", key: "ABC", baseUrl: "https://example.atlassian.net", consent: { armed: true, acknowledged: [] } },
       { id: "bad", key: "ABC.*", baseUrl: "https://example.atlassian.net", consent: { armed: true, acknowledged: [] } },
@@ -97,7 +97,7 @@ test("a quarantined entry survives a later write instead of being erased", () =>
   const document = {
     schemaVersion: 1,
     armed: true,
-    engines: ["google"],
+    engines: ["google.com"],
     shortcuts: [{ id: "bad", key: "ABC.*", baseUrl: "https://example.atlassian.net" }],
   };
   const restored = g.JumpPolicy.restore(document);
@@ -111,7 +111,7 @@ test("fixing a quarantined entry goes back through the one door and can fail", (
   const document = {
     schemaVersion: 1,
     armed: true,
-    engines: ["google"],
+    engines: ["google.com"],
     shortcuts: [
       { id: "good", key: "ABC", baseUrl: "https://example.atlassian.net" },
       { id: "bad", key: "ABC.*", baseUrl: "https://example.atlassian.net" },

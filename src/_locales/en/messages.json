@@ -14,6 +14,15 @@
   "ackBlocks": {
     "message": "Arming stays unavailable until these are accepted."
   },
+  "add": {
+    "message": "Add"
+  },
+  "addDomain": {
+    "message": "Add a domain"
+  },
+  "addDomainNote": {
+    "message": "Only the domain. How it builds its search URL is picked below, never typed."
+  },
   "addShortcut": {
     "message": "Add shortcut"
   },
@@ -49,6 +58,9 @@
   },
   "diffRemoved": {
     "message": "Removed"
+  },
+  "domain": {
+    "message": "Domain"
   },
   "engines": {
     "message": "Search engines"
@@ -109,6 +121,9 @@
   },
   "remove": {
     "message": "Remove this shortcut"
+  },
+  "removeDomain": {
+    "message": "Remove this domain"
   },
   "shortcuts": {
     "message": "Shortcuts"
