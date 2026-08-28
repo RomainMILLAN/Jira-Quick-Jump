@@ -85,6 +85,9 @@ jobs:
           # Findings land as annotations on the diff. Uploading SARIF instead
           # would need security-events: write, a permission this repository has
           # no other reason to hand out.
+          # Pinned like every action SHA in this repository: the default is
+          # `latest`, which would silently change what the gate enforces.
+          version: 1.29.0
           advanced-security: false
           annotations: true
           # The one informational finding left is `superfluous-actions` on
