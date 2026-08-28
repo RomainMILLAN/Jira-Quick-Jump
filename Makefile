@@ -13,6 +13,10 @@ help:
 bump: ## Bump the version (package.json + manifest), e.g. make bump VERSION=1.0.1
 	@if [ -z "$(VERSION)" ]; then echo "Usage: make bump VERSION=x.y.z (current: $(CURRENT_VERSION))"; exit 1; fi
 	@sed -i -E 's/("version": ")[^"]*(")/\1$(VERSION)\2/' package.json src/manifest.json
+	@# The lockfile carries the version too, and `npm ci` in the release job
+	@# reads it. Bumping without it leaves the published packages disagreeing
+	@# with the tag that built them.
+	@npm install --package-lock-only --ignore-scripts --silent
 	@echo "🔖 Version: $(CURRENT_VERSION) → $(VERSION)"
 
 .PHONY: tag
