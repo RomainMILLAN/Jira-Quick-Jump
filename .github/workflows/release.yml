@@ -68,6 +68,13 @@ jobs:
     environment: release
     permissions:
       contents: write
+    env:
+      # A BOOLEAN, never the secret itself. `secrets` is available here but not
+      # in a step's `if`, so the presence check has to happen at job level —
+      # and putting the credential itself here would place it in scope for
+      # checkout, setup-node and every postinstall script, which is exactly what
+      # the step-level `env:` below exists to prevent.
+      HAS_AMO_CREDENTIALS: ${{ secrets.WEB_EXT_API_KEY != '' && secrets.WEB_EXT_API_SECRET != '' }}
     steps:
       - name: Watch what the job talks to
         uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
@@ -97,11 +104,9 @@ jobs:
       # they would also be in scope for checkout, setup-node and every
       # postinstall script of every devDependency.
       - name: Sign the Firefox xpi (AMO, unlisted channel)
-        # `secrets`, not `env`: a step's own `env:` block is not in scope for its
-        # own `if`, so this condition was always false and the signing step was
-        # always skipped — silently, while INSTALL.md tells Firefox users to
-        # install the signed .xpi from a release.
-        if: ${{ secrets.WEB_EXT_API_KEY != '' }}
+        # Reads the job-level flag, not `secrets` (unavailable in a step `if`)
+        # and not the step's own `env:` (not yet in scope for its own `if`).
+        if: ${{ env.HAS_AMO_CREDENTIALS == 'true' }}
         env:
           WEB_EXT_API_KEY: ${{ secrets.WEB_EXT_API_KEY }}
           WEB_EXT_API_SECRET: ${{ secrets.WEB_EXT_API_SECRET }}
