@@ -55,7 +55,9 @@ without the same mechanism: the search request does not happen.
 - A redirect rule requires host access to its destination, so nothing redirects
   until the user grants that origin explicitly.
 - **Scope is a v1 boundary, not a permanent stance.** Today: `KEY-123` →
-  `<base>/browse/KEY-123`, a closed catalogue of three search engines. Other
+  `<base>/browse/KEY-123`. Search engines are listed one domain at a time,
+  four built in and the rest added by the user, so a granted permission never
+  covers more than what was ticked. Other
   jump forms are expected later (a project board, a Jira search, subtasks). The
   UI must leave room for a second jump form without being rebuilt.
   The destination **path** stays non-configurable regardless: it is a security
