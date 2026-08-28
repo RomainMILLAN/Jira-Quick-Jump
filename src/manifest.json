@@ -4,25 +4,26 @@
   "version": "0.1.0",
   "description": "Type ABC-1234 in the address bar and land straight on the Jira issue.",
   "homepage_url": "https://github.com/RomainMILLAN/jira-quick-jump",
-
-  "icons": {
-    "16": "icons/icon-16.png",
-    "32": "icons/icon-32.png",
-    "48": "icons/icon-48.png",
-    "128": "icons/icon-128.png"
-  },
-
-  "permissions": ["declarativeNetRequestWithHostAccess", "storage"],
-  "optional_host_permissions": ["http://*/*", "https://*/*"],
-
+  "permissions": [
+    "declarativeNetRequestWithHostAccess",
+    "storage"
+  ],
+  "optional_host_permissions": [
+    "http://*/*",
+    "https://*/*"
+  ],
   "content_security_policy": {
     "extension_pages": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self'; connect-src 'none'; form-action 'none'; frame-src 'none'; frame-ancestors 'none'; base-uri 'none'; object-src 'none'; worker-src 'self'"
   },
-
   "declarative_net_request": {
-    "rule_resources": [{ "id": "guard", "enabled": true, "path": "rules.json" }]
+    "rule_resources": [
+      {
+        "id": "guard",
+        "enabled": true,
+        "path": "rules.json"
+      }
+    ]
   },
-
   "background": {
     "service_worker": "background.js",
     "scripts": [
@@ -48,21 +49,30 @@
       "background.js"
     ]
   },
-
-  "options_ui": { "page": "options.html", "open_in_tab": true },
-  "action": { "default_popup": "popup.html" },
-
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  },
+  "action": {
+    "default_popup": "popup.html"
+  },
   "commands": {
     "disarm-all": {
       "description": "Arm or disarm Jira Quick Jump"
     }
   },
-
   "browser_specific_settings": {
     "gecko": {
       "id": "jira-quick-jump@romain",
-      "strict_min_version": "128.0",
-      "data_collection_permissions": { "required": ["none"] }
+      "strict_min_version": "140.0",
+      "data_collection_permissions": {
+        "required": [
+          "none"
+        ]
+      }
+    },
+    "gecko_android": {
+      "strict_min_version": "142.0"
     }
   }
 }
