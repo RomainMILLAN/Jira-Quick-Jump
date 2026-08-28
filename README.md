@@ -134,13 +134,21 @@ make bump VERSION=1.0.0
 make tag && git push origin v1.0.0
 ```
 
-The tag triggers a build that attests provenance and publishes SHA-256 sums.
-Publication waits behind a protected environment with a human reviewer. Secrets:
+The tag triggers a build that attests provenance and publishes SHA-256 sums,
+then attaches both packages to a GitHub release. **That release is the
+distribution channel** — there is no store listing, by choice.
 
-| Secret | Used for |
+Two optional paths stay wired but dormant, each behind its own switch, so
+neither can fire by accident:
+
+| Set this | And the release also |
 |---|---|
-| `WEB_EXT_API_KEY` / `WEB_EXT_API_SECRET` | Signing the Firefox `.xpi` via AMO |
-| `CWS_*` | Uploading a Chrome Web Store draft (never auto-published) |
+| `WEB_EXT_API_KEY` / `WEB_EXT_API_SECRET` | signs the Firefox `.xpi` via AMO, so it installs permanently |
+| variable `PUBLISH_CHROME_WEB_STORE=true` plus the `CWS_*` secrets | uploads a Chrome Web Store **draft**, never auto-published |
+
+Publication runs in the `release` environment. Protect it with a required
+reviewer and the tag pattern `v*`, and a stolen token can push a tag without
+being able to publish anything.
 
 ## Licence
 

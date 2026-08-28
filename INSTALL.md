@@ -1,8 +1,8 @@
 # Installing Quick Jump for Jira
 
-There is no store listing yet, so installation is manual. Both browsers are
-covered below, plus the pinned self-hosted route, which is the right one for a
-team.
+The extension is distributed as a GitHub release rather than through a store, so
+installation is manual. Both browsers are covered below, plus the pinned
+self-hosted route, which is the right one for a team.
 
 > **In short.** Chrome: unzip, then load the folder unpacked. Firefox: install the
 > signed `.xpi` from a release — an unsigned folder only survives until you close
