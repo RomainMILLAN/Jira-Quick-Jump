@@ -318,3 +318,23 @@ test("every locale carries exactly the keys the code and the manifest ask for", 
     }
   }
 });
+
+test("no user-visible sentence is written straight into the HTML", () => {
+  // This is the gap the locale-parity test above cannot see: a string that never
+  // goes through t() has no key to be missing, so every locale looks complete
+  // while the page still shows English. Three of them shipped that way before
+  // this assertion existed.
+  const allowed = new Set(["Quick Jump", "for Jira", "romainmillan.fr"]);
+  for (const page of ["src/options.html", "src/popup.html"]) {
+    let html = read(page).replace(/<!--[\s\S]*?-->/g, " ");
+    for (const tag of ["script", "style", "title", "svg"]) {
+      html = html.replace(new RegExp(`<${tag}\\b[\\s\\S]*?</${tag}>`, "g"), " ");
+    }
+    for (const text of html.split(/<[^>]*>/).map((t) => t.trim()).filter(Boolean)) {
+      assert.ok(
+        allowed.has(text),
+        `${page} writes "${text}" as literal text; route it through Platform.t instead`,
+      );
+    }
+  }
+});

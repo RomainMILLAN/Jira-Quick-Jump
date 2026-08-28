@@ -53,6 +53,27 @@
   "destination": {
     "message": "Destination"
   },
+  "diagAllOff": {
+    "message": "Tous les raccourcis sont désarmés."
+  },
+  "diagDisarmed": {
+    "message": "Tous les raccourcis sont désactivés. Les recherches se comportent normalement."
+  },
+  "diagMissingOrigins": {
+    "message": "Les règles sont installées mais ne peuvent pas s’appliquer : l’accès manque."
+  },
+  "diagNoEngines": {
+    "message": "Aucun moteur de recherche sélectionné, aucune règle ne peut être construite."
+  },
+  "diagNoShortcuts": {
+    "message": "Aucun raccourci pour l’instant, donc rien n’est intercepté."
+  },
+  "diagPartial": {
+    "message": "Certaines entrées enregistrées n’ont pas pu être relues."
+  },
+  "diagReady": {
+    "message": "Prêt."
+  },
   "diffChanged": {
     "message": "Modifié"
   },
@@ -110,6 +131,9 @@
   "openSettings": {
     "message": "Ouvrir les réglages"
   },
+  "optionsSub": {
+    "message": "Tapez une clé de ticket dans la barre d’adresse, atterrissez sur le ticket."
+  },
   "popupSub": {
     "message": "De la barre d’adresse au ticket."
   },
@@ -163,6 +187,27 @@
   },
   "storageTooBig": {
     "message": "Cette configuration est trop volumineuse pour être synchronisée."
+  },
+  "tagAllOff": {
+    "message": "Tout désactivé"
+  },
+  "tagEmpty": {
+    "message": "Vide"
+  },
+  "tagNoAccess": {
+    "message": "Aucun accès"
+  },
+  "tagNoEngine": {
+    "message": "Aucun moteur"
+  },
+  "tagOff": {
+    "message": "Désactivé"
+  },
+  "tagPartial": {
+    "message": "Partiel"
+  },
+  "tagReady": {
+    "message": "Prêt"
   },
   "toggleAll": {
     "message": "Armer ou désarmer tous les raccourcis"

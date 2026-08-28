@@ -53,6 +53,27 @@
   "destination": {
     "message": "Destination"
   },
+  "diagAllOff": {
+    "message": "Every shortcut is disarmed."
+  },
+  "diagDisarmed": {
+    "message": "Every shortcut is off. Searches behave normally."
+  },
+  "diagMissingOrigins": {
+    "message": "Rules are installed but cannot fire: access is missing."
+  },
+  "diagNoEngines": {
+    "message": "No search engine selected, so no rule can be built."
+  },
+  "diagNoShortcuts": {
+    "message": "No shortcut yet, so nothing is intercepted."
+  },
+  "diagPartial": {
+    "message": "Some saved entries could not be read back."
+  },
+  "diagReady": {
+    "message": "Ready."
+  },
   "diffChanged": {
     "message": "Changed"
   },
@@ -110,6 +131,9 @@
   "openSettings": {
     "message": "Open settings"
   },
+  "optionsSub": {
+    "message": "Type an issue key in the address bar, land on the issue."
+  },
   "popupSub": {
     "message": "Address bar to issue."
   },
@@ -163,6 +187,27 @@
   },
   "storageTooBig": {
     "message": "This configuration is too large to sync."
+  },
+  "tagAllOff": {
+    "message": "All off"
+  },
+  "tagEmpty": {
+    "message": "Empty"
+  },
+  "tagNoAccess": {
+    "message": "No access"
+  },
+  "tagNoEngine": {
+    "message": "No engine"
+  },
+  "tagOff": {
+    "message": "Off"
+  },
+  "tagPartial": {
+    "message": "Partial"
+  },
+  "tagReady": {
+    "message": "Ready"
   },
   "toggleAll": {
     "message": "Arm or disarm every shortcut"

@@ -79,10 +79,10 @@
       // rather than a transient 0, which reads as a failure.
       const report = await ctx.report();
       const sub = this.node.querySelector(".status-s");
-      if (sub) sub.textContent = DIAGNOSIS[report.diagnosis] || report.diagnosis;
+      if (sub) sub.textContent = DIAGNOSIS()[report.diagnosis] || report.diagnosis;
       const tag = this.node.querySelector(".tag");
       if (tag) {
-        tag.textContent = TAG_TEXT[report.diagnosis] || report.diagnosis;
+        tag.textContent = TAG_TEXT()[report.diagnosis] || report.diagnosis;
         tag.className = `tag ${TAG_TONE[report.diagnosis] || "off"}`;
       }
 
@@ -117,20 +117,27 @@
     },
   };
 
-  const DIAGNOSIS = {
-    DISARMED: "Every shortcut is off. Searches behave normally.",
-    NO_SHORTCUTS: "No shortcut yet, so nothing is intercepted.",
-    NO_ENGINES: "No search engine selected, so no rule can be built.",
-    ALL_SHORTCUTS_DISARMED: "Every shortcut is disarmed.",
-    PARTIAL_POLICY: "Some saved entries could not be read back.",
-    MISSING_ORIGINS: "Rules are installed but cannot fire: access is missing.",
-    READY: "Ready.",
-  };
-  const TAG_TEXT = {
-    DISARMED: "Off", NO_SHORTCUTS: "Empty", NO_ENGINES: "No engine",
-    ALL_SHORTCUTS_DISARMED: "All off", PARTIAL_POLICY: "Partial",
-    MISSING_ORIGINS: "No access", READY: "Ready",
-  };
+  // The core returns a CODE; the sentence is written here, and therefore
+  // translated here. Built lazily: t() reads the browser's locale, which is not
+  // available while this file is still being evaluated in a service worker.
+  const DIAGNOSIS = () => ({
+    DISARMED: t("diagDisarmed", "Every shortcut is off. Searches behave normally."),
+    NO_SHORTCUTS: t("diagNoShortcuts", "No shortcut yet, so nothing is intercepted."),
+    NO_ENGINES: t("diagNoEngines", "No search engine selected, so no rule can be built."),
+    ALL_SHORTCUTS_DISARMED: t("diagAllOff", "Every shortcut is disarmed."),
+    PARTIAL_POLICY: t("diagPartial", "Some saved entries could not be read back."),
+    MISSING_ORIGINS: t("diagMissingOrigins", "Rules are installed but cannot fire: access is missing."),
+    READY: t("diagReady", "Ready."),
+  });
+  const TAG_TEXT = () => ({
+    DISARMED: t("tagOff", "Off"),
+    NO_SHORTCUTS: t("tagEmpty", "Empty"),
+    NO_ENGINES: t("tagNoEngine", "No engine"),
+    ALL_SHORTCUTS_DISARMED: t("tagAllOff", "All off"),
+    PARTIAL_POLICY: t("tagPartial", "Partial"),
+    MISSING_ORIGINS: t("tagNoAccess", "No access"),
+    READY: t("tagReady", "Ready"),
+  });
   const TAG_TONE = {
     READY: "ok", MISSING_ORIGINS: "warn", PARTIAL_POLICY: "warn",
     NO_ENGINES: "warn", NO_SHORTCUTS: "off", ALL_SHORTCUTS_DISARMED: "off", DISARMED: "off",
