@@ -115,3 +115,17 @@ test("both HTML surfaces share the same UI tail", () => {
   const tail = (page) => scriptsOf(read(page)).slice(shared.length).filter((s) => !/options\.js|popup\.js/.test(s));
   assert.deepEqual(tail("src/options.html"), tail("src/popup.html"));
 });
+
+test("the vendored signature declares its provenance", () => {
+  // The project's other supply-chain test only looks at package.json. This one
+  // covers what actually ships: where this CSS came from, and under which
+  // licence. It needs no clone, which is why CI can stay hermetic.
+  const css = read("src/ui/author-signature.css");
+  assert.match(css, /Romain-MILLAN-Tag@[0-9a-f]{40}/);
+  assert.match(css, /MIT/);
+  // The SVG is a frozen manual copy living in options.html; assert its
+  // provenance too, as soon as that page exists.
+  if (existsSync(join(ROOT, "src/options.html"))) {
+    assert.match(read("src/options.html"), /Romain-MILLAN-Tag@[0-9a-f]{40}/);
+  }
+});

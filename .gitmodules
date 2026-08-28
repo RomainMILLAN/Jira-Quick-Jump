@@ -1,0 +1,3 @@
+[submodule "vendor/rm-tag"]
+	path = vendor/rm-tag
+	url = https://github.com/RomainMILLAN/Romain-MILLAN-Tag.git

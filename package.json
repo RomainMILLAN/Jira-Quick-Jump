@@ -6,6 +6,7 @@
   "type": "module",
   "scripts": {
     "test": "node --test test/*.test.js",
+    "sync:signature": "node scripts/sync-signature.mjs",
     "icons": "node scripts/make-icons.mjs",
     "build:chrome-src": "node scripts/build-chrome-src.mjs",
     "build:firefox-src": "node scripts/build-firefox-src.mjs",

@@ -35,6 +35,11 @@ icons: ## Regenerate the icons and fail if they differ from the committed ones
 	@npm run icons
 	@git diff --exit-code src/icons
 
+.PHONY: sync-signature
+sync-signature: ## Resync the vendored author signature and fail if the copy drifted
+	@npm run sync:signature
+	@git diff --exit-code src/ui/author-signature.css
+
 .PHONY: lint
 lint: ## Validate the manifest with addons-linter
 	@npm run lint
