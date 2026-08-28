@@ -341,9 +341,13 @@
       this.list = el("div", { class: "origins" });
       this.actions = el("div", { class: "btn-row" });
       this.actions.style.marginTop = "11px";
+      // A permission request the browser refuses to even show must say so; a
+      // button that does nothing is the worst of both worlds.
+      this.failure = el("p", { class: "row-msg refused", hidden: true });
       root.appendChild(this.summary);
       root.appendChild(this.list);
       root.appendChild(this.actions);
+      root.appendChild(this.failure);
     },
 
     async render(stored, ctx) {
@@ -371,7 +375,9 @@
           // The prompt is the browser's and names the real host; we can neither
           // fake it nor pre-approve it. On some browsers it closes the popup.
           onClick: async () => {
-            await Platform.requestOrigins(origins);
+            const result = await Platform.requestOrigins(origins);
+            this.failure.hidden = result.ok;
+            if (!result.ok) this.failure.textContent = result.message;
             this.render(ctx.stored(), ctx);
           },
         }));

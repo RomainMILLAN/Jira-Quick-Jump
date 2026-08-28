@@ -11,62 +11,79 @@
 (function (global) {
   "use strict";
 
+  // The domains a browser actually sends an omnibox search to. Both the host
+  // pattern AND the permission origins are DERIVED from this one list, so the
+  // rule can never match a host we did not ask permission for — the mismatch that
+  // makes a redirect install and then silently never fire.
+  const GOOGLE_DOMAINS = [
+    "google.com", "google.fr", "google.co.uk", "google.de", "google.es",
+    "google.it", "google.be", "google.ch", "google.nl", "google.ca",
+    "google.pt", "google.pl", "google.ie", "google.com.au", "google.co.in",
+  ];
+
   const ENGINES = [
     {
       id: "google",
       label: "Google",
-      hostPattern: "(?:www\\.)?google\\.[a-z.]+",
+      domains: GOOGLE_DOMAINS,
       pathPattern: "/search",
       queryParam: "q",
-      permissionOrigins: ["*://*.google.com/*"],
       exampleUrl: "https://www.google.com/search?q=ABC-1234",
     },
     {
       id: "bing",
       label: "Bing",
-      hostPattern: "(?:www\\.)?bing\\.com",
+      domains: ["bing.com"],
       pathPattern: "/search",
       queryParam: "q",
-      permissionOrigins: ["*://*.bing.com/*"],
       exampleUrl: "https://www.bing.com/search?q=ABC-1234",
     },
     {
       id: "duckduckgo",
       label: "DuckDuckGo",
-      hostPattern: "(?:www\\.)?duckduckgo\\.com",
+      domains: ["duckduckgo.com"],
       pathPattern: "/",
       queryParam: "q",
-      permissionOrigins: ["*://*.duckduckgo.com/*"],
       exampleUrl: "https://duckduckgo.com/?q=ABC-1234",
     },
   ];
 
-  const build = (engine) => ({
-    ...engine,
-    /**
-     * Wraps the typed-text fragment AND places the anchors. The seam is decided
-     * here: ReferencePattern returns an UNANCHORED fragment, the engine adds
-     * ^https:// at the front and (?:&|$) at the back. Without this rule the
-     * anchor would one day be doubled or missing.
-     *
-     * (?:&|$) is what turns "the regex stops here" into "the typed text must be
-     * EXACTLY an issue reference, nothing more" -- the decision that bounds false
-     * positives.
-     */
-    searchUrlPattern(typedTextFragment) {
-      const path = engine.pathPattern === "/" ? "/" : engine.pathPattern;
-      return (
-        "^https://" +
-        engine.hostPattern +
-        path +
-        "\\?(?:.*&)?" +
-        engine.queryParam +
-        "=" +
-        typedTextFragment +
-        "(?:&|$)"
-      );
-    },
-  });
+  const build = (engine) => {
+    const hostPattern =
+      "(?:www\\.)?(?:" + engine.domains.map((d) => d.replace(/\./g, "\\.")).join("|") + ")";
+    return {
+      ...engine,
+      hostPattern,
+      // Explicit https, never a wildcard scheme: Chrome refuses a request that
+      // is not entirely inside the manifest's optional_host_permissions, and it
+      // refuses it silently.
+      permissionOrigins: engine.domains.map((d) => `https://*.${d}/*`),
+
+      /**
+       * Wraps the typed-text fragment AND places the anchors. The seam is decided
+       * here: ReferencePattern returns an UNANCHORED fragment, the engine adds
+       * ^https:// at the front and (?:&|$) at the back. Without this rule the
+       * anchor would one day be doubled or missing.
+       *
+       * (?:&|$) is what turns "the regex stops here" into "the typed text must be
+       * EXACTLY an issue reference, nothing more" -- the decision that bounds false
+       * positives.
+       */
+      searchUrlPattern(typedTextFragment) {
+        const path = engine.pathPattern === "/" ? "/" : engine.pathPattern;
+        return (
+          "^https://" +
+          hostPattern +
+          path +
+          "\\?(?:.*&)?" +
+          engine.queryParam +
+          "=" +
+          typedTextFragment +
+          "(?:&|$)"
+        );
+      },
+    };
+  };
 
   const byId = new Map(ENGINES.map((e) => [e.id, build(e)]));
 

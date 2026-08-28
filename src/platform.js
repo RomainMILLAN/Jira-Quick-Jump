@@ -58,12 +58,21 @@
       }
     },
 
+    /**
+     * Returns the browser's answer, or the reason it refused to ask.
+     *
+     * Chrome rejects a request for an origin that is not entirely inside the
+     * manifest's `optional_host_permissions`, and it does so by throwing — so
+     * swallowing the error turns a misconfiguration into a button that does
+     * nothing at all, with a clean console. Never swallow this one.
+     */
     async requestOrigins(origins) {
-      if (origins.length === 0) return true;
+      if (origins.length === 0) return { ok: true, granted: true };
       try {
-        return await api.permissions.request({ origins });
-      } catch {
-        return false;
+        const granted = await api.permissions.request({ origins });
+        return { ok: true, granted };
+      } catch (error) {
+        return { ok: false, granted: false, message: String(error && error.message) };
       }
     },
   };

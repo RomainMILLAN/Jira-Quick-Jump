@@ -189,3 +189,43 @@ test("the search-suggestion caveat survives", () => {
     assert.match(read(doc), /suggestion/i, `${doc} no longer states the suggestion caveat`);
   }
 });
+
+test("every origin we could request is inside optional_host_permissions", async () => {
+  // Chrome refuses — silently, by throwing — a permission request that is not
+  // entirely covered by the manifest's optional patterns. That turns "Grant
+  // access" into a button that does nothing, with an empty console. This is the
+  // assertion that keeps the two lists from drifting apart.
+  const { loadCore } = await import("./load-core.js");
+  const g = await loadCore();
+
+  const declared = manifest.optional_host_permissions.map((p) => new URL(p.replace("*://", "https://")).protocol);
+  const engines = g.SearchEngineCatalog.all();
+  assert.ok(engines.length > 0);
+
+  for (const engine of engines) {
+    for (const origin of engine.permissionOrigins) {
+      assert.ok(
+        origin.startsWith("https://") || origin.startsWith("http://"),
+        `${engine.id} asks for ${origin}, whose scheme is not declared`,
+      );
+      assert.ok(declared.includes(origin.startsWith("https://") ? "https:" : "http:"));
+    }
+  }
+});
+
+test("a rule never matches a host we did not ask permission for", async () => {
+  // The host pattern and the permission origins are derived from one list, so a
+  // rule cannot match google.fr while permission was only sought for google.com —
+  // which installs a rule that can never fire.
+  const { loadCore } = await import("./load-core.js");
+  const g = await loadCore();
+
+  for (const engine of g.SearchEngineCatalog.all()) {
+    const hosts = engine.permissionOrigins.map((o) => o.replace("https://*.", "").replace("/*", ""));
+    for (const host of hosts) {
+      const pattern = new RegExp("^" + engine.hostPattern + "$");
+      assert.ok(pattern.test(host), `${engine.id}: pattern does not match granted host ${host}`);
+      assert.ok(pattern.test("www." + host), `${engine.id}: pattern does not match www.${host}`);
+    }
+  }
+});

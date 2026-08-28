@@ -32,15 +32,17 @@ test("the anchor seam is locked against a literal expectation", () => {
   // places both anchors. Without this test the anchor ends up doubled or absent.
   const key = g.ProjectKey.parse("ABC").value;
   assert.equal(g.ReferencePattern.patternFor(key), "ABC(?:-|\\+|%20)(\\d+)");
+  // DuckDuckGo has a single domain, so the whole composed pattern can be compared
+  // literally — which is what actually locks the seam.
   assert.equal(
-    g.SearchEngineCatalog.find("google").searchUrlPattern("FRAGMENT"),
-    "^https://(?:www\\.)?google\\.[a-z.]+/search\\?(?:.*&)?q=FRAGMENT(?:&|$)"
+    g.SearchEngineCatalog.find("duckduckgo").searchUrlPattern("FRAGMENT"),
+    "^https://(?:www\\.)?(?:duckduckgo\\.com)/\\?(?:.*&)?q=FRAGMENT(?:&|$)"
   );
+  const google = g.SearchEngineCatalog.find("google").searchUrlPattern("FRAGMENT");
+  assert.ok(google.startsWith("^https://(?:www\\.)?(?:google\\.com|"));
+  assert.ok(google.endsWith("/search\\?(?:.*&)?q=FRAGMENT(?:&|$)"));
   const { rules } = g.RuleFactory.buildRules(policy, g.SearchEngineCatalog);
-  assert.equal(
-    rules[0].condition.regexFilter,
-    "^https://(?:www\\.)?google\\.[a-z.]+/search\\?(?:.*&)?q=ABC(?:-|\\+|%20)(\\d+)(?:&|$)"
-  );
+  assert.ok(rules[0].condition.regexFilter.endsWith("q=ABC(?:-|\\+|%20)(\\d+)(?:&|$)"));
 });
 
 test("the pattern has exactly one capture group and the substitution one backreference", () => {
@@ -88,12 +90,14 @@ test("the preview never returns null", () => {
 
 test("required origins cover engines and every shortcut, disarmed ones included", () => {
   const disarmed = policy.disarmShortcut(ID).value;
-  assert.deepEqual(g.OriginRequirements.requiredOrigins(disarmed, g.SearchEngineCatalog), [
-    "*://*.google.com/*",
-    "*://*.bing.com/*",
-    "*://*.duckduckgo.com/*",
-    "https://example.atlassian.net/*",
-  ]);
+  const origins = g.OriginRequirements.requiredOrigins(disarmed, g.SearchEngineCatalog);
+  assert.ok(origins.includes("https://*.google.com/*"));
+  assert.ok(origins.includes("https://*.google.fr/*"), "every matchable Google domain is asked for");
+  assert.ok(origins.includes("https://*.bing.com/*"));
+  assert.ok(origins.includes("https://*.duckduckgo.com/*"));
+  assert.ok(origins.includes("https://example.atlassian.net/*"), "a disarmed shortcut still needs its origin");
+  // Never a wildcard scheme: Chrome refuses what the manifest does not declare.
+  assert.ok(origins.every((o) => o.startsWith("https://") || o.startsWith("http://")));
 });
 
 test("a self-hosted destination with a path keeps its path", () => {
