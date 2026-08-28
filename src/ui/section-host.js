@@ -124,16 +124,29 @@
 
       async function renderOnce() {
         for (const section of sections) {
-          // Never re-render the subtree holding the field being typed in: doing so
-          // replaces the value and sends the caret back to the start. It is
-          // replayed on blur instead.
-          if (section.root && section.root.contains(document.activeElement)) {
+          // Never re-render the subtree holding the field being TYPED IN: doing so
+          // replaces the value and sends the caret back to the start. Replayed on
+          // blur instead.
+          //
+          // Only a field, though. Clicking a switch or a button focuses it too,
+          // and skipping the redraw there means the storage changes while the
+          // control keeps showing the old state until the user happens to click
+          // elsewhere — which reads as "the button does nothing". A button has no
+          // typed-in value to protect.
+          if (section.root && isEditing(section.root)) {
             section.dirty = true;
             continue;
           }
           section.dirty = false;
           await section.render(stored, ctx);
         }
+      }
+
+      function isEditing(root) {
+        const active = document.activeElement;
+        if (!active || !root.contains(active)) return false;
+        const tag = active.tagName;
+        return tag === "INPUT" || tag === "TEXTAREA" || active.isContentEditable;
       }
 
       function showFailure(result) {
