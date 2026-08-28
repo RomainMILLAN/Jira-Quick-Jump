@@ -30,7 +30,7 @@ See [Limitations](#limitations) for the one place that claim needs qualifying.
 
 ## Install
 
-No store listing yet. Grab a package from
+Released on GitHub, not through a store. Grab a package from
 [Releases](https://github.com/RomainMILLAN/Jira-Quick-Jump/releases) or build it
 yourself — [INSTALL.md](INSTALL.md) has the step-by-step, including how to pin a
 signed build for a team.
