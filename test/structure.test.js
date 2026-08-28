@@ -338,3 +338,12 @@ test("no user-visible sentence is written straight into the HTML", () => {
     }
   }
 });
+
+test("the Firefox add-on id is frozen", () => {
+  // Once a signed .xpi is out, this string IS the add-on's identity: Firefox
+  // matches updates against it. Changing it does not rename the extension, it
+  // creates a different one that installs alongside the old, which keeps
+  // running with no way back. AMO also refuses a second add-on under an id
+  // already signed, so the mistake is not reversible.
+  assert.equal(manifest.browser_specific_settings.gecko.id, "jira-quick-jump@romainmillan");
+});
