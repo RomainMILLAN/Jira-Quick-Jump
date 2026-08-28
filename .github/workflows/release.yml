@@ -1,0 +1,94 @@
+name: Release
+
+# Triggered by a version tag: git tag -s vX.Y.Z && git push origin vX.Y.Z
+on:
+  push:
+    tags: ["v*"]
+
+permissions: {}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm test
+      - run: npm run build:chrome
+      - run: npm run build:firefox
+      - name: Publish the SHA-256 of every artifact
+        run: sha256sum web-ext-artifacts/* | tee web-ext-artifacts/SHA256SUMS
+      # Anyone can then run: gh attestation verify <zip> -R <owner>/jira-quick-jump
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: web-ext-artifacts/*.zip
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: packages
+          path: web-ext-artifacts/
+          if-no-files-found: error
+
+  # A protected environment holds the secrets and requires a human reviewer: a
+  # stolen token can push a tag, but it cannot publish on its own.
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm run build:chrome && npm run build:firefox
+
+      # Secrets live on the STEP that needs them, never on the job: at job level
+      # they would also be in scope for checkout, setup-node and every
+      # postinstall script of every devDependency.
+      - name: Sign the Firefox xpi (AMO, unlisted channel)
+        if: ${{ env.WEB_EXT_API_KEY != '' }}
+        env:
+          WEB_EXT_API_KEY: ${{ secrets.WEB_EXT_API_KEY }}
+          WEB_EXT_API_SECRET: ${{ secrets.WEB_EXT_API_SECRET }}
+        run: npm run sign:firefox
+
+      - name: Create the GitHub release
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
+        with:
+          files: |
+            web-ext-artifacts/*.zip
+            web-ext-artifacts/*.xpi
+          generate_release_notes: true
+
+      # No --auto-publish: a compromised CI produces a draft, not a release to
+      # every user. The publication button stays human.
+      - name: Upload to the Chrome Web Store as a draft
+        if: ${{ vars.PUBLISH_CHROME_WEB_STORE == 'true' }}
+        env:
+          CWS_CLIENT_ID: ${{ secrets.CWS_CLIENT_ID }}
+          CWS_CLIENT_SECRET: ${{ secrets.CWS_CLIENT_SECRET }}
+          CWS_REFRESH_TOKEN: ${{ secrets.CWS_REFRESH_TOKEN }}
+          CWS_EXTENSION_ID: ${{ secrets.CWS_EXTENSION_ID }}
+        run: |
+          npm exec --no-install -- chrome-webstore-upload-cli upload \
+            --source web-ext-artifacts/jira-quick-jump-chrome-*.zip \
+            --extension-id "$CWS_EXTENSION_ID" \
+            --client-id "$CWS_CLIENT_ID" \
+            --client-secret "$CWS_CLIENT_SECRET" \
+            --refresh-token "$CWS_REFRESH_TOKEN"

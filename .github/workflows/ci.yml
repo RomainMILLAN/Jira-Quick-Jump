@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# No job may write anything by default. ci.yml must never reference secrets: a
+# fork pull request would otherwise run untrusted code with them in scope.
+permissions: {}
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+
+      # --ignore-scripts: a hostile devDependency must not run code in the job
+      # that produces the published artifacts.
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: No workflow may expose secrets to pull request code
+        run: |
+          ! grep -rnE 'pull_request_target|secrets\.' .github/workflows/ci.yml
+
+      - name: Tests
+        run: npm test
+
+      - name: Lint (addons-linter on the Firefox variant)
+        run: npm run lint
+
+      - name: Build Chrome
+        run: npm run build:chrome
+
+      - name: Build Firefox
+        run: npm run build:firefox
+
+      - name: Upload the packages as run artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: jira-quick-jump-builds
+          path: web-ext-artifacts/*.zip
+          if-no-files-found: error

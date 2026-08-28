@@ -1,0 +1,42 @@
+/** Base URLs that must be refused, each with its own distinct code. */
+export const HOSTILE_BASE_URLS = [
+  ["https://evil.example/x?a=", "BASE_QUERY"],
+  ["https://evil.example/fake-jira#", "BASE_FRAGMENT"],
+  ["https://example.atlassian.net@evil.example", "BASE_USERINFO"],
+  ["https://user:pass@evil.example", "BASE_USERINFO"],
+  ["javascript:alert(1)", "BASE_SCHEME"],
+  ["data:text/html,<script>alert(1)</script>", "BASE_SCHEME"],
+  ["blob:https://evil.example/x", "BASE_SCHEME"],
+  ["file:///etc/passwd", "BASE_SCHEME"],
+  ["ftp://example.org", "BASE_SCHEME"],
+  ["chrome-extension://abcdef", "BASE_SCHEME"],
+  ["http://169.254.169.254", "BASE_FORBIDDEN_HOST"],
+  ["https://metadata.google.internal", "BASE_FORBIDDEN_HOST"],
+  ["http://0.0.0.0", "BASE_FORBIDDEN_HOST"],
+  ["http://100.100.100.200", "BASE_FORBIDDEN_HOST"],
+  ["https://example.org/%2e%2e", "BASE_PERCENT"],
+  ["https://example.org/%00", "BASE_PERCENT"],
+  ["https://example.org/a%20b", "BASE_PERCENT"],
+  ["https://example.org/a\\1", "BASE_BACKSLASH"],
+  ["https://example.org/a\\0", "BASE_BACKSLASH"],
+  ["https://example.org/a/../b", "BASE_NOT_CANONICAL"],
+  ["https://example.org//a", "BASE_NOT_CANONICAL"],
+  ["https://example.org/a/./b", "BASE_NOT_CANONICAL"],
+  ["https://example.org/a/b/c/d/e", "BASE_PATH_DEPTH"],
+  ["https://exa\tmple.org", "BASE_CONTROL_CHARS"],
+  ["https://exa\nmple.org", "BASE_CONTROL_CHARS"],
+  ["https://example.org‮", "BASE_CONTROL_CHARS"],
+  ["https://example.org:22", "BASE_UNSAFE_PORT"],
+  ["", "BASE_EMPTY"],
+  [`https://${"a".repeat(300)}.org`, "BASE_TOO_LONG"],
+];
+
+/** Legitimate base URLs, including the self-hosted cases the plan requires. */
+export const VALID_BASE_URLS = [
+  ["example.atlassian.net", "https://example.atlassian.net"],
+  ["https://example.atlassian.net", "https://example.atlassian.net"],
+  ["https://example.atlassian.net/", "https://example.atlassian.net"],
+  ["https://intra.example.org/jira", "https://intra.example.org/jira"],
+  ["http://jira:8080", "http://jira:8080"],
+  ["https://jira.example.org:8443/tickets", "https://jira.example.org:8443/tickets"],
+];

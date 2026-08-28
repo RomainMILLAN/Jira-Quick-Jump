@@ -1,0 +1,23 @@
+{
+  "name": "jira-quick-jump",
+  "version": "0.1.0",
+  "description": "Type JIR-1234 in the address bar and land straight on the Jira issue.",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "icons": "node scripts/make-icons.mjs",
+    "build:chrome-src": "node scripts/build-chrome-src.mjs",
+    "build:firefox-src": "node scripts/build-firefox-src.mjs",
+    "lint": "npm run build:firefox-src && web-ext lint --source-dir=build/firefox",
+    "build:chrome": "npm run build:chrome-src && web-ext build --source-dir=build/chrome --filename=jira-quick-jump-chrome-{version}.zip --overwrite-dest",
+    "build:firefox": "npm run build:firefox-src && web-ext build --source-dir=build/firefox --filename=jira-quick-jump-firefox-{version}.zip --overwrite-dest",
+    "sign:firefox": "npm run build:firefox-src && web-ext sign --source-dir=build/firefox --channel=unlisted",
+    "start:firefox": "web-ext run --source-dir=src",
+    "start:chromium": "web-ext run --source-dir=src --target=chromium"
+  },
+  "devDependencies": {
+    "chrome-webstore-upload-cli": "4.0.1",
+    "web-ext": "10.6.0"
+  }
+}
