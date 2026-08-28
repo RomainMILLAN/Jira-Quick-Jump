@@ -76,6 +76,23 @@
       return Dom.el("a", { ...props, rel: "noopener noreferrer", target: "_blank" }, children);
     },
 
+    /**
+     * The one place that builds a download. `href` and `download` are deliberately
+     * absent from the attribute whitelist above, so an object URL cannot be
+     * attached to an element from anywhere else — a single reviewed exit rather
+     * than a widened rule.
+     */
+    downloadFile(filename, text) {
+      const url = URL.createObjectURL(new Blob([text], { type: "application/json" }));
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = filename;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+    },
+
     clear(node) {
       while (node.firstChild) node.removeChild(node.firstChild);
     },

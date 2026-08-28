@@ -18,12 +18,12 @@
      * wholesale replacements would transiently empty the rules -- precisely when
      * the user has just granted access and is testing.
      */
-    async install(policy) {
+    async install(policy, quarantinedCount = 0) {
       if (pending) {
         queued = policy;
         return pending;
       }
-      pending = this._install(policy).finally(() => {
+      pending = this._install(policy, quarantinedCount).finally(() => {
         pending = null;
         const next = queued;
         queued = null;
@@ -32,7 +32,7 @@
       return pending;
     },
 
-    async _install(policy) {
+    async _install(policy, quarantinedCount = 0) {
       const { rules, skipped } = RuleFactory.buildRules(policy, SearchEngineCatalog);
       const supported = [];
       for (const rule of rules) {
@@ -47,7 +47,7 @@
         removeRuleIds: existing.map((r) => r.id),
         addRules: supported,
       });
-      return this.report(policy, skipped);
+      return this.report(policy, skipped, quarantinedCount);
     },
 
     /**
@@ -55,13 +55,16 @@
      * rule without host access simply never fires, and becomes active on its own
      * the moment permission is granted, with no further sync.
      */
-    async report(policy, skipped = []) {
+    async report(policy, skipped = [], quarantinedCount = 0) {
       const origins = OriginRequirements.requiredOrigins(policy, SearchEngineCatalog);
       const originsGranted = await Platform.grantedOrigins(origins);
       const applied = (await dnr().getDynamicRules()).length;
+      // The quarantine count has to travel all the way here, or PARTIAL_POLICY
+      // can never fire and the parameter is decoration: a configuration missing
+      // entries would report itself as merely lacking permissions.
       return {
         applied,
-        diagnosis: policy.diagnose({ originsGranted }),
+        diagnosis: policy.diagnose({ originsGranted, quarantinedCount }),
         skipped,
         missingOrigins: originsGranted ? [] : origins,
       };

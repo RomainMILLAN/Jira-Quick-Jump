@@ -20,6 +20,9 @@
   "armThis": {
     "message": "Arm this shortcut"
   },
+  "cancel": {
+    "message": "Cancel"
+  },
   "changedAck": {
     "message": "I have checked it"
   },
@@ -32,8 +35,20 @@
   "changedWas": {
     "message": "It used to point to"
   },
+  "delete": {
+    "message": "Delete"
+  },
   "destination": {
     "message": "Destination"
+  },
+  "diffChanged": {
+    "message": "Changed"
+  },
+  "diffNew": {
+    "message": "New"
+  },
+  "diffRemoved": {
+    "message": "Removed"
   },
   "engines": {
     "message": "Search engines"
@@ -41,14 +56,38 @@
   "enginesNote": {
     "message": "Only searches from these are rewritten."
   },
+  "export": {
+    "message": "Export…"
+  },
   "extensionDescription": {
     "message": "Type ABC-1234 in the address bar and land straight on the Jira issue."
   },
   "extensionName": {
     "message": "Quick Jump for Jira"
   },
+  "fix": {
+    "message": "Fix"
+  },
   "grant": {
     "message": "Grant access"
+  },
+  "import": {
+    "message": "Import…"
+  },
+  "importConfirm": {
+    "message": "Import, disarmed"
+  },
+  "importDisarmed": {
+    "message": "Everything arrives disarmed, and warnings you accepted before are not carried over."
+  },
+  "importDropped": {
+    "message": "Some entries were refused and will not be imported."
+  },
+  "importLede": {
+    "message": "Check where each key would send you. A configuration file can point a key you already use at a different server."
+  },
+  "importTooBig": {
+    "message": "That file is too large to be a configuration."
   },
   "key": {
     "message": "Key"
@@ -58,6 +97,15 @@
   },
   "popupSub": {
     "message": "Address bar to issue."
+  },
+  "quarantine": {
+    "message": "Could not be read back"
+  },
+  "quarantineFoot": {
+    "message": "It produces no rule, and it stays here until you decide."
+  },
+  "quarantineNote": {
+    "message": "Kept, never deleted on your behalf."
   },
   "remove": {
     "message": "Remove this shortcut"
@@ -77,8 +125,35 @@
   "statusDisarmed": {
     "message": "Jumping is off"
   },
+  "storage": {
+    "message": "Storage"
+  },
+  "storageLocal": {
+    "message": "This device only"
+  },
+  "storageMovedLocal": {
+    "message": "Your configuration is on this device only, and the synced copy was removed."
+  },
+  "storageMovedSync": {
+    "message": "Your configuration now syncs. Copies already on other devices may remain."
+  },
+  "storageNote": {
+    "message": "Syncing sends your Jira host names to your browser account."
+  },
+  "storageSync": {
+    "message": "Sync across devices"
+  },
+  "storageTooBig": {
+    "message": "This configuration is too large to sync."
+  },
   "toggleAll": {
     "message": "Arm or disarm every shortcut"
+  },
+  "transfer": {
+    "message": "Import and export"
+  },
+  "transferNote": {
+    "message": "Imported shortcuts always arrive disarmed."
   },
   "tryIt": {
     "message": "Try a URL"

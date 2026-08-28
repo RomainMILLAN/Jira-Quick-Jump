@@ -25,8 +25,11 @@
       const ctx = {
         stored: () => stored,
         apply,
-        report: () => RuleInstaller.report(stored.policy()),
+        report: () => RuleInstaller.report(stored.policy(), [], stored.quarantinedCount()),
         journal: DestinationJournal,
+        // For the rare write that lands OUTSIDE the policy — a journal entry, an
+        // acknowledgement of it — since only a policy write triggers a redraw.
+        refresh: () => render(),
       };
 
       /**
@@ -42,7 +45,14 @@
           // otherwise log the same change up to three times.
           await DestinationJournal.record(result.events, result.rev, "MANUAL", Date.now());
         }
-        if (!result.ok) showFailure(result);
+        if (!result.ok) {
+          // A refused mutation changed nothing, so there is nothing to redraw —
+          // and redrawing would throw away the correction the user is in the
+          // middle of typing, which is the one thing they must not lose after
+          // being told their input was refused.
+          showFailure(result);
+          return result;
+        }
         await reload();
         return result;
       }

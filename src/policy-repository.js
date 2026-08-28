@@ -44,6 +44,30 @@
       });
     },
 
+    /**
+     * Moving between storage areas is explicit, one direction at a time.
+     *
+     * Leaving sync REMOVES the entry rather than abandoning it: the point of
+     * switching to local is that the host names stop living in the browser
+     * account. Copies already replicated to other devices or to the provider's
+     * backups may survive, and the UI says so rather than implying otherwise.
+     */
+    async migrateTo(target) {
+      const from = await Platform.storageArea();
+      const { value } = await VersionedEntry.read(from, ENTRY);
+      await Platform.setStorageArea(target);
+      const to = await Platform.storageArea();
+      if (to === from) return MutationResult.ok(target);
+      try {
+        if (value !== undefined) await to.set({ [ENTRY]: { rev: 1, value } });
+      } catch (error) {
+        await Platform.setStorageArea(target === "sync" ? "local" : "sync");
+        return MutationResult.refused("QUOTA_EXCEEDED", String(error));
+      }
+      if (target === "local") await from.remove(ENTRY);
+      return MutationResult.ok(target);
+    },
+
     onPolicyChanged(listener) {
       Platform.api.storage.onChanged.addListener((changes, areaName) => {
         if (changes[ENTRY]) listener(areaName);

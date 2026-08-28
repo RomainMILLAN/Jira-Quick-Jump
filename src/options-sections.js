@@ -381,7 +381,7 @@
 
   // --------------------------------------------------------- Test & transfer
 
-  const TestTransfer = {
+  const Preview = {
     mount(root, ctx) {
       root.appendChild(label(t("tryIt", "Try a URL"), t("tryItNote", "Paste a search URL to see where it would land.")));
       this.input = el("input", {
@@ -421,5 +421,240 @@
     INPUT_TOO_LONG: "That is too long to be a search URL.",
   };
 
-  global.OptionsSections = [Status, Shortcuts, Engines, Access, TestTransfer];
+  // -------------------------------------------------------------- Transfer
+
+  const Transfer = {
+    proposal: null,
+
+    mount(root, ctx) {
+      root.appendChild(label(t("transfer", "Import and export"),
+        t("transferNote", "Imported shortcuts always arrive disarmed.")));
+      this.file = el("input", { type: "file", hidden: true, "aria-label": t("import", "Import…") });
+      this.file.accept = "application/json";
+      this.file.addEventListener("change", () => this.read(ctx));
+      this.review = el("div");
+      root.appendChild(el("div", { class: "btn-row" }, [
+        el("button", { class: "btn", text: t("export", "Export…"), onClick: () => this.export(ctx) }),
+        el("button", { class: "btn", text: t("import", "Import…"), onClick: () => this.file.click() }),
+      ]));
+      root.appendChild(this.file);
+      root.appendChild(this.review);
+    },
+
+    render(stored, ctx) {
+      Dom.clear(this.review);
+      if (!this.proposal) return;
+      this.review.appendChild(this.diff(stored, ctx));
+    },
+
+    export(ctx) {
+      // toTransfer() is defined by what it REMOVES: no acknowledgements, no
+      // quarantine. A file cannot carry a decision the reader has not made.
+      const json = JSON.stringify(ctx.stored().policy().toTransfer(), null, 2);
+      Dom.downloadFile("quick-jump-for-jira.json", json);
+    },
+
+    async read(ctx) {
+      const file = this.file.files && this.file.files[0];
+      this.file.value = "";
+      if (!file) return;
+      if (file.size > 64 * 1024) {
+        this.fail(t("importTooBig", "That file is too large to be a configuration."));
+        return;
+      }
+      const parsed = global.ShortcutAdmission.parseJson(await file.text());
+      if (!parsed.ok) {
+        this.fail(parsed.message);
+        return;
+      }
+      const proposed = global.JumpPolicy.proposeImport(parsed.value);
+      if (!proposed.ok) {
+        this.fail(proposed.message);
+        return;
+      }
+      this.proposal = proposed;
+      this.render(ctx.stored(), ctx);
+    },
+
+    fail(message) {
+      this.proposal = null;
+      Dom.clear(this.review);
+      this.review.appendChild(el("p", { class: "row-msg refused", text: message }));
+    },
+
+    /**
+     * The security-sensitive screen: a shared file pointing a key you already use
+     * at a look-alike host. Changed destinations are shown was/now so the swap
+     * cannot pass unnoticed, and the comparison is on the WHOLE base URL — an
+     * origin-only diff would hide /jira becoming /jira-fake.
+     */
+    diff(stored, ctx) {
+      const current = new Map(stored.policy().shortcuts().map((s) => [s.key().toString(), s]));
+      const incoming = new Map(this.proposal.policy.shortcuts().map((s) => [s.key().toString(), s]));
+      const rows = [];
+
+      for (const [key, shortcut] of incoming) {
+        const before = current.get(key);
+        const changed = before && before.instance().baseUrl() !== shortcut.instance().baseUrl();
+        rows.push(el("div", { class: `row${changed ? " is-refused" : ""}` }, [
+          el("span", { class: "tag " + (changed ? "bad" : "ok"),
+            text: changed ? t("diffChanged", "Changed") : t("diffNew", "New") }),
+          el("span", { class: "dest", text: key }),
+          el("span", {}, changed
+            ? [destination(before.instance(), "dest was"), destination(shortcut.instance(), "dest now")]
+            : [destination(shortcut.instance())]),
+        ]));
+      }
+      for (const [key, shortcut] of current) {
+        if (incoming.has(key)) continue;
+        rows.push(el("div", { class: "row" }, [
+          el("span", { class: "tag off", text: t("diffRemoved", "Removed") }),
+          el("span", { class: "dest", text: key }),
+          destination(shortcut.instance()),
+        ]));
+      }
+
+      return el("div", {}, [
+        el("p", { class: "hint", text: t("importLede",
+          "Check where each key would send you. A configuration file can point a key you already use at a different server.") }),
+        el("div", { class: "rows" }, rows),
+        this.proposal.dropped.length > 0
+          ? el("p", { class: "row-msg refused",
+              text: t("importDropped", "Some entries were refused and will not be imported.") })
+          : null,
+        el("p", { class: "hint", text: t("importDisarmed",
+          "Everything arrives disarmed, and warnings you accepted before are not carried over.") }),
+        el("div", { class: "btn-row" }, [
+          el("button", { class: "btn plain", text: t("cancel", "Cancel"),
+            onClick: () => { this.proposal = null; this.render(ctx.stored(), ctx); } }),
+          el("button", { class: "btn primary", text: t("importConfirm", "Import, disarmed"),
+            onClick: () => this.confirm(ctx) }),
+        ]),
+      ]);
+    },
+
+    async confirm(ctx) {
+      const proposed = this.proposal.policy;
+      this.proposal = null;
+
+      // The change journal is what surfaces a swapped destination BEFORE the next
+      // jump, and an import is exactly the source it exists to attribute. The
+      // previous destinations therefore have to be read BEFORE the write: after
+      // it, `stored` already holds the imported policy and every comparison finds
+      // nothing — which is silence exactly where the alarm belongs.
+      const before = ctx.stored().policy();
+      const events = [];
+      for (const shortcut of proposed.shortcuts()) {
+        const old = before.shortcuts().find((s) => s.key().toString() === shortcut.key().toString());
+        if (old && old.instance().baseUrl() !== shortcut.instance().baseUrl()) {
+          events.push({
+            shortcutId: shortcut.id(), key: shortcut.key().toString(),
+            oldBaseUrl: old.instance().baseUrl(), newBaseUrl: shortcut.instance().baseUrl(),
+          });
+        }
+      }
+      await ctx.apply((s) => MutationResult.ok(s.withPolicy(proposed)));
+      if (events.length > 0) {
+        await ctx.journal.record(events, 0, "IMPORT", Date.now());
+        // The journal is not the policy, so nothing has redrawn it yet.
+        await ctx.refresh();
+      }
+    },
+  };
+
+  // ------------------------------------------------------------- Quarantine
+
+  const Quarantine = {
+    mount(root, ctx) {
+      this.root = root;
+      this.body = el("div");
+      root.appendChild(this.body);
+    },
+
+    render(stored, ctx) {
+      const entries = stored.quarantined();
+      // A section with nothing to say says nothing.
+      this.root.hidden = entries.length === 0;
+      Dom.clear(this.body);
+      if (entries.length === 0) return;
+
+      this.body.appendChild(label(t("quarantine", "Could not be read back"),
+        t("quarantineNote", "Kept, never deleted on your behalf.")));
+      entries.forEach((raw, index) => {
+        const message = el("div", { class: "row-msg refused", hidden: true });
+        // Fixing means EDITING what could not be read, then sending it back
+        // through the one door — re-submitting the same rejected bytes would just
+        // reproduce the same refusal, which is honest and useless.
+        const key = el("input", { class: "f key", value: String((raw && raw.key) ?? ""),
+          "aria-label": t("key", "Key") });
+        const url = el("input", { class: "f", value: String((raw && raw.baseUrl) ?? ""),
+          "aria-label": t("destination", "Destination") });
+        this.body.appendChild(el("div", { class: "row is-pending" }, [
+          el("div", { class: "f-key" }, [key]),
+          el("div", { class: "f-url" }, [url]),
+          el("div", { class: "f-arm" }, [el("button", { class: "btn", text: t("fix", "Fix"),
+            onClick: () => this.fix(index, key.value, url.value, message, ctx) })]),
+          el("div", { class: "f-del" }, [el("button", { class: "btn plain", text: t("delete", "Delete"),
+            onClick: () => ctx.apply((s) => s.dropQuarantined(index)) })]),
+          message,
+        ]));
+      });
+      this.body.appendChild(el("p", { class: "hint",
+        text: t("quarantineFoot", "It produces no rule, and it stays here until you decide.") }));
+    },
+
+    /**
+     * Fixing goes back through the ONE door, so it can legitimately collide:
+     * key uniqueness does not extend to quarantine, and the corrected entry may
+     * clash with a shortcut created since.
+     */
+    async fix(index, rawKey, rawUrl, message, ctx) {
+      const key = ProjectKey.parse(rawKey);
+      const instance = JiraInstance.parse(rawUrl);
+      const failure = !key.ok ? key : !instance.ok ? instance : null;
+      if (failure) {
+        message.hidden = false;
+        message.textContent = failure.message;
+        return;
+      }
+      const result = await ctx.apply((s) => s.promote(index, key.value, instance.value));
+      message.hidden = result.ok;
+      if (!result.ok) message.textContent = result.message;
+    },
+  };
+
+  // ---------------------------------------------------------------- Storage
+
+  const Storage = {
+    mount(root, ctx) {
+      root.appendChild(label(t("storage", "Storage"),
+        t("storageNote", "Syncing sends your Jira host names to your browser account.")));
+      this.chips = el("div", { class: "chips" });
+      this.msg = el("p", { class: "hint" });
+      root.appendChild(this.chips);
+      root.appendChild(this.msg);
+    },
+
+    async render(stored, ctx) {
+      const current = (await Platform.api.storage.local.get("storageArea")).storageArea || "local";
+      Dom.clear(this.chips);
+      for (const [area, text] of [["local", t("storageLocal", "This device only")],
+                                  ["sync", t("storageSync", "Sync across devices")]]) {
+        this.chips.appendChild(el("button", {
+          class: "chip", "aria-pressed": String(current === area), text,
+          onClick: async () => {
+            const result = await global.PolicyRepository.migrateTo(area);
+            this.msg.textContent = result.ok
+              ? (area === "sync"
+                  ? t("storageMovedSync", "Your configuration now syncs. Copies already on other devices may remain.")
+                  : t("storageMovedLocal", "Your configuration is on this device only, and the synced copy was removed."))
+              : t("storageTooBig", "This configuration is too large to sync.");
+            this.render(ctx.stored(), ctx);
+          },
+        }));
+      }
+    },
+  };
+
+  global.OptionsSections = [Status, Shortcuts, Engines, Access, Preview, Transfer, Quarantine, Storage];
 })(globalThis);

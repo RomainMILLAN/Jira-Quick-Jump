@@ -38,7 +38,7 @@
     if (!loaded.ok) return;
     await reconcile(loaded.stored.policy());
     lastKnown = loaded.stored.policy();
-    await RuleInstaller.install(loaded.stored.policy());
+    await RuleInstaller.install(loaded.stored.policy(), loaded.stored.quarantinedCount());
   };
 
   /**

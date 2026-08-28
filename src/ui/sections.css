@@ -539,3 +539,24 @@ input.f[aria-invalid="true"] {
 .is-compact .site-foot {
   display: none;
 }
+
+/* Import review and quarantine rows are content, not form: they lay out as a
+   simple flex line rather than the four-column shortcut grid. */
+.section .row.is-refused > .tag,
+.section .row.is-pending > .tag {
+  flex-shrink: 0;
+}
+.rows .row:has(> .tag) {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+}
+.dest.was {
+  color: var(--faint);
+  text-decoration: line-through;
+  display: block;
+}
+.dest.now .host {
+  color: var(--red);
+  display: block;
+}
