@@ -167,3 +167,25 @@ test("the background script list matches the files on disk", () => {
     assert.ok(existsSync(join(ROOT, "src", script)), `manifest lists missing ${script}`);
   }
 });
+
+test("the store listing justifies exactly the permissions the manifest asks for", () => {
+  // A listing that drifts from the manifest is how a review gets refused, and how
+  // a permission nobody justified ends up shipped.
+  const listing = read("STORE_LISTING.md");
+  for (const permission of manifest.permissions) {
+    assert.ok(listing.includes(permission), `STORE_LISTING.md does not justify ${permission}`);
+  }
+  for (const origin of manifest.optional_host_permissions) {
+    assert.ok(listing.includes(origin), `STORE_LISTING.md does not mention ${origin}`);
+  }
+  assert.ok(listing.includes(manifest.name), "STORE_LISTING.md does not carry the manifest name");
+});
+
+test("the search-suggestion caveat survives", () => {
+  // The extension removes the search REQUEST, not the suggestion traffic that the
+  // browser sends while you type. Dropping this sentence would make a document
+  // published on a store untrue, so it is asserted rather than trusted.
+  for (const doc of ["PRIVACY.md", "README.md"]) {
+    assert.match(read(doc), /suggestion/i, `${doc} no longer states the suggestion caveat`);
+  }
+});
