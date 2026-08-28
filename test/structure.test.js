@@ -129,3 +129,13 @@ test("the vendored signature declares its provenance", () => {
     assert.match(read("src/options.html"), /Romain-MILLAN-Tag@[0-9a-f]{40}/);
   }
 });
+
+test("no workflow exposes secrets to pull request code", () => {
+  // This guard used to live in ci.yml as a grep over ci.yml itself, so it
+  // matched its own pattern and failed on every run -- the kind of always-red
+  // check that gets relaxed until it verifies nothing. As a test it reads a
+  // different file than the one it lives in, and it runs locally.
+  const ci = read(".github/workflows/ci.yml");
+  assert.equal(/pull_request_target/.test(ci), false, "a fork PR must never run with secrets in scope");
+  assert.equal(/secrets\./.test(ci), false, "ci.yml must not reference any secret");
+});
