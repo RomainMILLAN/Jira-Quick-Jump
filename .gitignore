@@ -3,3 +3,4 @@ build/
 web-ext-artifacts/
 *.log
 .DS_Store
+.playwright-mcp/

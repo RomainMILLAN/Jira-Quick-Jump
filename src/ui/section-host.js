@@ -84,7 +84,35 @@
         render();
       }
 
-      function render() {
+      /**
+       * Renders are SERIALISED and bursts are coalesced into one extra pass.
+       *
+       * Several sections await before they write (the rule count, the journal), so
+       * two overlapping renders would otherwise land out of order and leave the
+       * older state on screen while storage holds the newer one.
+       *
+       * Abandoning a superseded render mid-loop looks like the obvious fix and is
+       * wrong: the first section is the slow one, so a burst of writes makes every
+       * pass give up before reaching the later sections, which then never redraw
+       * at all. Finishing the pass and repeating it once is what avoids starving
+       * them.
+       */
+      let rendering = false;
+      let again = false;
+      async function render() {
+        if (rendering) {
+          again = true;
+          return;
+        }
+        rendering = true;
+        do {
+          again = false;
+          await renderOnce();
+        } while (again);
+        rendering = false;
+      }
+
+      async function renderOnce() {
         for (const section of sections) {
           // Never re-render the subtree holding the field being typed in: doing so
           // replaces the value and sends the caret back to the start. It is
@@ -94,7 +122,7 @@
             continue;
           }
           section.dirty = false;
-          section.render(stored, ctx);
+          await section.render(stored, ctx);
         }
       }
 

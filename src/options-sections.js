@@ -167,6 +167,14 @@
       }
     },
 
+    setArmed(id, desired, ctx) {
+      return ctx.apply((s) => {
+        const policy = s.policy();
+        const next = desired ? policy.armShortcut(id) : policy.disarmShortcut(id);
+        return next.ok ? MutationResult.ok(s.withPolicy(next.value), next.events) : next;
+      });
+    },
+
     savedRow(shortcut, ctx) {
       const id = shortcut.id();
       const pending = shortcut.unacknowledgedWarnings();
@@ -191,11 +199,10 @@
         ]),
         el("div", { class: "f-arm" }, [toggle(
           shortcut.armed(),
-          () => ctx.apply((s) => {
-            const policy = s.policy();
-            const next = shortcut.armed() ? policy.disarmShortcut(id) : policy.armShortcut(id);
-            return next.ok ? MutationResult.ok(s.withPolicy(next.value), next.events) : next;
-          }),
+          // ABSOLUTE, never a flip: the user saw an off switch and asked for on.
+          // A relative toggle re-derived inside the intention would come back
+          // armed when the compare-and-set replays it after a conflict.
+          () => this.setArmed(id, !shortcut.armed(), ctx),
           t("armThis", "Arm this shortcut"),
           pending.length > 0,
         )]),
