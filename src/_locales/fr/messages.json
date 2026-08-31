@@ -17,6 +17,9 @@
   "add": {
     "message": "Ajouter"
   },
+  "addCatchAll": {
+    "message": "Ajouter un attrape-tout"
+  },
   "addDomain": {
     "message": "Ajouter un domaine"
   },
@@ -26,11 +29,29 @@
   "addShortcut": {
     "message": "Ajouter un raccourci"
   },
+  "alreadyFirst": {
+    "message": "Déjà en première position."
+  },
+  "alreadyLast": {
+    "message": "Déjà en dernière position."
+  },
   "armThis": {
     "message": "Armer ce raccourci"
   },
   "cancel": {
     "message": "Annuler"
+  },
+  "catchAllExists": {
+    "message": "Il ne peut y avoir qu’un seul attrape-tout."
+  },
+  "catchAllInsecure": {
+    "message": "Ensemble : toute recherche en forme de clé partira en clair."
+  },
+  "catchAllKey": {
+    "message": "N’importe quelle clé"
+  },
+  "catchAllNote": {
+    "message": "Tout texte en forme de clé part vers cette destination."
   },
   "changedAck": {
     "message": "Je l’ai vérifié"
@@ -53,11 +74,23 @@
   "destination": {
     "message": "Destination"
   },
+  "diagAllAwaitingAck": {
+    "message": "Chaque raccourci armé attend l’acceptation d’un avertissement."
+  },
   "diagAllOff": {
     "message": "Tous les raccourcis sont désarmés."
   },
+  "diagAllShadowed": {
+    "message": "Tous les raccourcis sont sous l’attrape-tout : aucun ne se déclenche."
+  },
+  "diagCatchAllNotInstalled": {
+    "message": "L’attrape-tout n’a pas pu être installé : il ne capte rien."
+  },
   "diagDisarmed": {
     "message": "Tous les raccourcis sont désactivés. Les recherches se comportent normalement."
+  },
+  "diagInstallFailed": {
+    "message": "Les règles n’ont pas pu être installées. Ce qui tourne peut différer de ce que vous voyez."
   },
   "diagMissingOrigins": {
     "message": "Les règles sont installées mais ne peuvent pas s’appliquer : l’accès manque."
@@ -73,6 +106,9 @@
   },
   "diagReady": {
     "message": "Prêt."
+  },
+  "diagSomeShadowed": {
+    "message": "Certains raccourcis sont sous l’attrape-tout et ne se déclenchent jamais."
   },
   "diffChanged": {
     "message": "Modifié"
@@ -101,6 +137,18 @@
   "extensionName": {
     "message": "Quick Jump for Jira"
   },
+  "factAppeared": {
+    "message": "a été ajouté, pointant vers"
+  },
+  "factRemoved": {
+    "message": "a été supprimé. Il pointait vers"
+  },
+  "factReplaced": {
+    "message": "Toute la configuration a changé ailleurs. Vérifiez chaque destination."
+  },
+  "factShadowed": {
+    "message": "Ces clés partent désormais vers l’attrape-tout :"
+  },
   "fix": {
     "message": "Corriger"
   },
@@ -125,8 +173,26 @@
   "importTooBig": {
     "message": "Ce fichier est trop volumineux pour être une configuration."
   },
+  "installDiffers": {
+    "message": "La configuration installée diffère de celle que vous voyez."
+  },
+  "journalOverflowed": {
+    "message": "Certains changements n’ont pas pu être enregistrés."
+  },
   "key": {
     "message": "Clé"
+  },
+  "moveDown": {
+    "message": "Descendre"
+  },
+  "moveUp": {
+    "message": "Remonter"
+  },
+  "movedDown": {
+    "message": "Déplacé vers le bas."
+  },
+  "movedUp": {
+    "message": "Déplacé vers le haut."
   },
   "openSettings": {
     "message": "Ouvrir les réglages"
@@ -134,8 +200,35 @@
   "optionsSub": {
     "message": "Tapez une clé de ticket dans la barre d’adresse, atterrissez sur le ticket."
   },
+  "orderNote": {
+    "message": "Évalué de haut en bas. Le premier qui correspond gagne."
+  },
   "popupSub": {
     "message": "De la barre d’adresse au ticket."
+  },
+  "previewMatchedCatchAll": {
+    "message": "Correspond à l’attrape-tout."
+  },
+  "previewMatchedShortcut": {
+    "message": "Correspond à un raccourci nommé."
+  },
+  "previewNoMatch": {
+    "message": "Cette recherche passerait sans être modifiée."
+  },
+  "previewNotASearchUrl": {
+    "message": "Ce n’est pas une URL de recherche."
+  },
+  "previewNotAUrl": {
+    "message": "Ce n’est pas une URL."
+  },
+  "previewReservedPrefix": {
+    "message": "Retenu par un préfixe réservé : l’attrape-tout le laisse passer."
+  },
+  "previewTooLong": {
+    "message": "C’est trop long pour être une URL de recherche."
+  },
+  "previewTypedHint": {
+    "message": "Collez une URL de recherche, ou simplement le texte que vous taperiez dans la barre d’adresse."
   },
   "quarantine": {
     "message": "Impossible à relire"
@@ -152,11 +245,14 @@
   "removeDomain": {
     "message": "Supprimer ce domaine"
   },
+  "shadowed": {
+    "message": "Masqué"
+  },
+  "shadowedWhy": {
+    "message": "L’attrape-tout au-dessus correspond d’abord : ce raccourci ne se déclenche jamais. Placez-le au-dessus de l’attrape-tout."
+  },
   "shortcuts": {
     "message": "Raccourcis"
-  },
-  "shortcutsNote": {
-    "message": "Où chaque clé de ticket vous envoie."
   },
   "statusArmed": {
     "message": "Le saut est armé"
@@ -191,8 +287,20 @@
   "tagAllOff": {
     "message": "Tout désactivé"
   },
+  "tagAllShadowed": {
+    "message": "Tous masqués"
+  },
+  "tagAwaitingAck": {
+    "message": "Non accepté"
+  },
+  "tagCatchAllOff": {
+    "message": "Attrape-tout inactif"
+  },
   "tagEmpty": {
     "message": "Vide"
+  },
+  "tagInstallFailed": {
+    "message": "Non installé"
   },
   "tagNoAccess": {
     "message": "Aucun accès"
@@ -209,6 +317,9 @@
   "tagReady": {
     "message": "Prêt"
   },
+  "tagSomeShadowed": {
+    "message": "Certains masqués"
+  },
   "toggleAll": {
     "message": "Armer ou désarmer tous les raccourcis"
   },
@@ -224,7 +335,19 @@
   "tryItEmpty": {
     "message": "Rien pour l’instant."
   },
-  "tryItNote": {
-    "message": "Collez une URL de recherche pour voir où elle mènerait."
+  "warnCatchAll": {
+    "message": "Toute recherche en forme de clé sur vos moteurs partira vers cette destination."
+  },
+  "warnInsecureScheme": {
+    "message": "Le trafic et votre cookie de session Jira circulent en clair."
+  },
+  "warnInternalHost": {
+    "message": "Cette destination se trouve sur un réseau privé ou non public."
+  },
+  "warnLiteralIp": {
+    "message": "Cette destination est une adresse IP plutôt qu’un nom d’hôte."
+  },
+  "warnPunycode": {
+    "message": "Ce nom d’hôte utilise des caractères non ASCII et peut en imiter un autre."
   }
 }

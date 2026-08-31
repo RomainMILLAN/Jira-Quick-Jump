@@ -22,6 +22,15 @@
   // going exponential (see the ReDoS section of the plan).
   const KEY = /^[A-Z][A-Z0-9_]{1,19}$/;
 
+  // The SAME character set, written for a case-insensitive rule. Two literals
+  // rather than one derived from the other: the catch-all's DNR rule runs with
+  // isUrlFilterCaseSensitive false, and letting that flag widen the captured set
+  // behind the reader's back is exactly the validator/matcher drift this header
+  // forbids. The post-condition below is what makes the pair unable to drift --
+  // it THROWS at load time rather than producing a matcher wider than the
+  // validator.
+  const CASE_INSENSITIVE_SHAPE = "[A-Za-z][A-Za-z0-9_]{1,19}";
+
   // Control and invisible characters, refused BEFORE anything else. A message
   // saying "invalid character" about characters nobody can see is unusable, so
   // this gets its own code. Bidi overrides matter on their own: they let a host
@@ -31,14 +40,6 @@
       "\\u202a-\\u202e\\u2060-\\u2064\\ufeff]"
   );
 
-  // Prefixes that would silently sabotage ordinary web searches. Availability
-  // control, not security: mapping ISO makes the address bar stop working with
-  // no way for the user to understand why.
-  const AMBIGUOUS = new Set([
-    "CVE", "ISO", "RFC", "HTTP", "HTTPS", "SQL", "CSS", "API", "AWS",
-    "GPT", "PDF", "USB", "PR", "CI", "TODO", "FIXME",
-  ]);
-
   class ProjectKey {
     constructor(value) {
       this._value = value;
@@ -47,11 +48,75 @@
     equals(other) {
       return other instanceof ProjectKey && other._value === this._value;
     }
-    /** Non-blocking: the UI warns, it does not refuse. */
-    isAmbiguous() {
-      return AMBIGUOUS.has(this._value) || this._value.length === 2;
+    /**
+     * Non-blocking: the UI warns, it does not refuse.
+     *
+     * NOT `isReservedPrefix`: this is the UNION of the reserved list and the
+     * two-character rule, and the two answer different questions. T1 collides
+     * with ordinary searches AND must be claimed by a catch-all, so a single
+     * predicate named after the list would lie for half its answers.
+     *
+     * ReservedPrefix is resolved AT CALL TIME, never destructured at the top of
+     * the file: the load order would otherwise decide whether this works.
+     */
+    collidesWithOrdinarySearches() {
+      return global.ReservedPrefix.has(this._value) || this._value.length === 2;
+    }
+    isCatchAll() {
+      return false;
+    }
+    /** A named key claims itself, and nothing else. */
+    captures(projectKey) {
+      return this.equals(projectKey);
+    }
+    exampleKey() {
+      return this;
+    }
+    /**
+     * Which separators this key accepts between itself and the issue number.
+     *
+     * A DOMAIN rule, not a regex detail: the airlock maps these through IN_URL.
+     * Written here so that ShortcutRegistry.claimantFor and the emitted DNR rule
+     * cannot disagree -- which is what the agreement test proves.
+     */
+    separators() {
+      return global.IssueReference.SEPARATORS;
     }
   }
+
+  /**
+   * The mechanical post-condition that makes the two literals unable to drift.
+   *
+   * Everything KEY accepts must be accepted by the case-insensitive shape. A
+   * one-character divergence between the validator and the matcher is the bug
+   * class this file exists to prevent, so it THROWS at load time -- the failure
+   * is a dead extension, never a wider matcher.
+   *
+   * Frozen with defineProperty because every file shares globalThis: an
+   * assignment of ProjectKey.CASE_INSENSITIVE_SHAPE before the airlock builds
+   * its pattern would turn the extension into a universal redirector.
+   */
+  (function assertShapesCannotDrift() {
+    const insensitive = new RegExp("^" + CASE_INSENSITIVE_SHAPE + "$");
+    for (const sample of ["AB", "A_9", "ABCDEFGHIJKLMNOPQRST", "A1"]) {
+      if (KEY.test(sample) && !insensitive.test(sample)) {
+        throw new Error("key shape drifted: " + sample);
+      }
+    }
+    // And the reverse direction, on what must stay OUT of both.
+    for (const sample of ["A", "1AB", "_AB", "A-B", "A.B", "ABCDEFGHIJKLMNOPQRSTU"]) {
+      if (insensitive.test(sample) !== KEY.test(sample.toUpperCase())) {
+        throw new Error("key shape drifted on a rejected sample: " + sample);
+      }
+    }
+  })();
+
+  Object.defineProperty(ProjectKey, "CASE_INSENSITIVE_SHAPE", {
+    value: CASE_INSENSITIVE_SHAPE,
+    writable: false,
+    configurable: false,
+    enumerable: true,
+  });
 
   ProjectKey.parse = function (input) {
     if (typeof input !== "string") {
@@ -134,9 +199,6 @@
     }
     permissionOrigin() {
       return this._url.protocol + "//" + this._url.host + "/*";
-    }
-    warnings() {
-      return global.DestinationWarning.forInstance(this);
     }
     equals(other) {
       return other instanceof JiraInstance && other._baseUrl === this._baseUrl;
@@ -263,25 +325,51 @@
     consent() { return this._consent; }
     armed() { return this._consent.armed(); }
 
+    /**
+     * The entity hands over its PARTS rather than itself, which is what lets the
+     * options page compute a key-scoped warning while a destination is still
+     * being typed -- no throwaway shortcut needed.
+     */
     unacknowledgedWarnings() {
-      return this._instance.warnings().filter((w) => !this._consent.acknowledged(w.kind));
+      return global.ShortcutWarning.forShortcut(this).filter((w) => !this._consent.acknowledged(w.kind));
     }
 
+    /** exampleKey(), never the key itself: a catch-all would render "*-1", which
+     *  is not an issue reference and answers nobody's question. */
     exampleReference() {
-      return global.IssueReference.of(this._key, "1").value;
+      return global.IssueReference.of(this._key.exampleKey(), "1").value;
     }
 
     withConsent(consent) {
       return new ProjectShortcut(this._id, this._key, this._instance, consent);
     }
+    /**
+     * THROWS when the nature of the key changes, because no caller can
+     * legitimately ask for it.
+     *
+     * Without this, a named shortcut that is already armed and acknowledged
+     * could become a catch-all WHILE KEEPING ITS CONSENT -- a universal
+     * redirector obtained without ever seeing the CATCH_ALL warning. Guarding
+     * this in the registry does not protect the entity, and the UI showing a
+     * read-only key protects nothing at all.
+     *
+     * A throw, not a MutationResult: the entity's three other withX return a
+     * shortcut, and this is a programming error rather than a refusal the user
+     * should read. The refusal with its message belongs to
+     * ShortcutRegistry.withKeyFor.
+     */
     withKey(key) {
+      if (key.isCatchAll() !== this._key.isCatchAll()) {
+        throw new Error("a shortcut cannot change the nature of its key");
+      }
       return new ProjectShortcut(this._id, key, this._instance, this._consent);
     }
-    /** Consent is given to a destination, so changing it forgets the acknowledgements. */
+    /** Consent is given to a destination, so changing it forgets the
+     *  DESTINATION acknowledgements -- and only those. */
     withInstance(instance) {
       const consent = instance.equals(this._instance)
         ? this._consent
-        : this._consent.forgettingAcknowledgements();
+        : this._consent.forgettingDestinationAcknowledgements();
       return new ProjectShortcut(this._id, this._key, instance, consent);
     }
 

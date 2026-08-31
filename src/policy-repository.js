@@ -12,16 +12,43 @@
   const PolicyRepository = {
     async load() {
       const area = await Platform.storageArea();
+      // READ ONCE, BEFORE any compare-and-set. _restore is synchronous and runs
+      // inside a replayed mutate closure, so it can never await this itself.
+      const acknowledgements = await global.KeyAcknowledgements.read();
       const { value } = await VersionedEntry.read(area, ENTRY);
-      return this._restore(value);
+      return this._restore(value, acknowledgements);
     },
 
-    _restore(value) {
+    /**
+     * The separate context of key-scoped acknowledgements is CLOSED BACK HERE,
+     * before the aggregate exists.
+     *
+     * Merging them at reconstitution is what lets activeBindings() keep its
+     * signature: injecting the store into the keystone instead would make it
+     * parameterised, and rule-factory, jump-preview, origin-requirements and the
+     * badge could then each pass a different set. A cell whose organelles must be
+     * supplied from outside is no longer a cell.
+     */
+    _restore(value, acknowledgements = {}) {
       if (value === undefined) return { ok: true, stored: StoredPolicy.empty(), dropped: [] };
-      const restored = JumpPolicy.restore(value.policy ?? value);
+      const restored = JumpPolicy.restore(value.policy === undefined ? value : value.policy);
       if (!restored.ok) return restored;
+      const merged = this._merge(restored.policy, acknowledgements);
       const quarantine = [...(Array.isArray(value.quarantine) ? value.quarantine : []), ...restored.quarantine];
-      return { ok: true, stored: new StoredPolicy(restored.policy, quarantine), dropped: restored.dropped };
+      return { ok: true, stored: new StoredPolicy(merged, quarantine), dropped: restored.dropped };
+    },
+
+    _merge(policy, acknowledgements) {
+      let merged = policy;
+      for (const shortcut of policy.shortcuts()) {
+        const kinds = acknowledgements[global.KeyAcknowledgements.rowKey(shortcut)];
+        if (!Array.isArray(kinds)) continue;
+        for (const kind of kinds) {
+          const next = merged.acknowledge(shortcut.id(), kind);
+          if (next.ok) merged = next.value;
+        }
+      }
+      return merged;
     },
 
     /**
@@ -35,13 +62,24 @@
      */
     async apply(intention) {
       const area = await Platform.storageArea();
-      return VersionedEntry.update(area, ENTRY, (value) => {
-        const restored = this._restore(value);
+      const acknowledgements = await global.KeyAcknowledgements.read();
+      let committed;
+      const result = await VersionedEntry.update(area, ENTRY, (value) => {
+        const restored = this._restore(value, acknowledgements);
         if (!restored.ok) return restored;
-        const result = intention(restored.stored);
-        if (!result.ok) return result;
-        return { ok: true, value: result.value.toJSON(), events: result.events ?? [] };
+        const outcome = intention(restored.stored);
+        if (!outcome.ok) return outcome;
+        committed = outcome.value;
+        // THE SINGLE PRODUCER, computed here from the RE-READ value -- hence up
+        // to three times, and only the winning attempt survives. Safe because it
+        // is PURE: calculating is not journaling.
+        const facts = global.PolicyDiff.between(restored.stored.policy(), outcome.value.policy());
+        return { ok: true, value: outcome.value.toJSON(), events: facts };
       });
+      // Written AFTER the winning commit, by the same single writer as the
+      // journal: a key-scoped acknowledgement never travels with the policy.
+      if (result.ok && committed) await global.KeyAcknowledgements.record(committed.policy());
+      return result;
     },
 
     /**

@@ -65,7 +65,12 @@ without the same mechanism: the search request does not happen.
   never opens the path to user input.
 - Vocabulary, used everywhere including the UI: *issue reference*, *shortcut*,
   *instance*, *armed / disarmed*, *destination* (the whole base URL, never just
-  its origin), *engine*, *rule*, *origin*, *quarantine*, *consent*.
+  its origin), *engine*, *rule*, *origin*, *quarantine*, *consent*,
+  *catch-all* (the shortcut that claims every reference), *shadowed* (a shortcut
+  a catch-all placed above it claims first, so it never fires), *reserved prefix*
+  (a word a catch-all deliberately does not claim), *projection* (the last
+  installed policy, kept locally so a change can be detected across a restart).
+  One word per concept: not *wildcard*, not *unreachable*, not *deny-list*.
 
 ## Brand Commitments
 

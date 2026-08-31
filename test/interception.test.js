@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { loadCore } from "./load-core.js";
-import { POSITIVE, NEGATIVE } from "./fixtures/search-urls.js";
+import { POSITIVE, NEGATIVE, NEGATIVE_WITH_CATCH_ALL } from "./fixtures/search-urls.js";
 
 const g = await loadCore();
 const ID = "11111111-1111-4111-8111-111111111111";
@@ -12,9 +12,15 @@ const policy = (() => {
   return p.armShortcut(ID).value;
 })();
 
+/**
+ * The rules AS DELIVERED, which is what the preview now consumes. A simulator
+ * that simulates a different programme from the installed one is a stage set.
+ */
+const delivered = (p, catalog = g.SearchEngineCatalog) => g.RuleFactory.buildRules(p, catalog).rules();
+
 test("real search URLs land on the issue", () => {
   for (const url of POSITIVE.filter((u) => !u.includes("google.fr") && !u.includes("google.co.uk"))) {
-    const result = g.JumpPreview.forSearchUrl(url, policy, g.SearchEngineCatalog);
+    const result = g.JumpPreview.forSearchUrl(url, delivered(policy));
     assert.equal(result.ok, true, `${url} was not intercepted`);
     assert.match(result.destination, /^https:\/\/example\.atlassian\.net\/browse\/ABC-\d+$/);
   }
@@ -22,7 +28,7 @@ test("real search URLs land on the issue", () => {
 
 test("ordinary searches go through untouched", () => {
   for (const url of NEGATIVE) {
-    const result = g.JumpPreview.forSearchUrl(url, policy, g.SearchEngineCatalog);
+    const result = g.JumpPreview.forSearchUrl(url, delivered(policy));
     assert.equal(result.ok, false, `${url} was intercepted: ${result.destination}`);
   }
 });
@@ -42,7 +48,7 @@ test("the anchor seam is locked against a literal expectation", () => {
     g.SearchEngineCatalog.find("google.com").searchUrlPattern("FRAGMENT"),
     "^https://(?:www\\.)?google\\.com/search\\?(?:.*&)?q=FRAGMENT(?:&|$)"
   );
-  const { rules } = g.RuleFactory.buildRules(policy, g.SearchEngineCatalog);
+  const rules = delivered(policy);
   assert.equal(
     rules[0].condition.regexFilter,
     "^https://(?:www\\.)?google\\.com/search\\?(?:.*&)?q=ABC(?:-|\\+|%20)(\\d+)(?:&|$)"
@@ -62,7 +68,7 @@ test("every rule is main_frame only, and never uses excludedResourceTypes", () =
   // If rules applied to sub-resources, any web page could map the visitor's
   // intranet with an <img> tag: which keys are configured, which internal hosts
   // exist and answer, and how far away they are.
-  const { rules } = g.RuleFactory.buildRules(policy, g.SearchEngineCatalog);
+  const rules = delivered(policy);
   assert.equal(rules.length, 3);
   for (const rule of rules) {
     assert.deepEqual(rule.condition.resourceTypes, ["main_frame"]);
@@ -72,24 +78,24 @@ test("every rule is main_frame only, and never uses excludedResourceTypes", () =
 
 test("an unknown engine id is reported rather than crashing or being skipped in silence", () => {
   const withGhost = policy.withEngines(["google.com", "ghost"]).value;
-  const { rules, skipped } = g.RuleFactory.buildRules(withGhost, g.SearchEngineCatalog);
-  assert.equal(rules.length, 1);
-  assert.deepEqual(skipped.map((s) => s.code), ["UNKNOWN_ENGINE"]);
+  const set = g.RuleFactory.buildRules(withGhost, g.SearchEngineCatalog);
+  assert.equal(set.rules().length, 1);
+  assert.deepEqual(set.skipped().map((s) => s.code), ["UNKNOWN_ENGINE"]);
 });
 
 test("the case of the typed key does not change the destination", () => {
-  const lower = g.JumpPreview.forSearchUrl("https://www.google.com/search?q=abc-7", policy, g.SearchEngineCatalog);
+  const lower = g.JumpPreview.forSearchUrl("https://www.google.com/search?q=abc-7", delivered(policy));
   assert.equal(lower.destination, "https://example.atlassian.net/browse/ABC-7");
 });
 
 test("the preview refuses an oversized input before compiling anything", () => {
   const huge = "https://www.google.com/search?q=" + "&".repeat(g.JumpPreview.MAX_INPUT);
-  assert.equal(g.JumpPreview.forSearchUrl(huge, policy, g.SearchEngineCatalog).code, "INPUT_TOO_LONG");
+  assert.equal(g.JumpPreview.forSearchUrl(huge, delivered(policy)).code, "INPUT_TOO_LONG");
 });
 
 test("the preview never returns null", () => {
-  assert.equal(g.JumpPreview.forSearchUrl("not a url", policy, g.SearchEngineCatalog).code, "NOT_A_URL");
-  assert.equal(g.JumpPreview.forSearchUrl("https://example.org/", policy, g.SearchEngineCatalog).code, "NO_MATCH");
+  assert.equal(g.JumpPreview.forSearchUrl("not a url", delivered(policy)).code, "NOT_A_URL");
+  assert.equal(g.JumpPreview.forSearchUrl("https://example.org/", delivered(policy)).code, "NO_MATCH");
 });
 
 test("required origins cover engines and every shortcut, disarmed ones included", () => {
@@ -110,7 +116,7 @@ test("a self-hosted destination with a path keeps its path", () => {
   p = p.register(ID, g.ProjectKey.parse("ABC").value, g.JiraInstance.parse("https://intra.example.org/jira").value).value;
   p = p.acknowledge(ID, "INTERNAL_HOST").value;
   p = p.armShortcut(ID).value;
-  const result = g.JumpPreview.forSearchUrl("https://www.google.com/search?q=ABC-9", p, g.SearchEngineCatalog);
+  const result = g.JumpPreview.forSearchUrl("https://www.google.com/search?q=ABC-9", delivered(p));
   assert.equal(result.destination, "https://intra.example.org/jira/browse/ABC-9");
 });
 
@@ -126,7 +132,7 @@ test("a domain the user adds becomes a working engine", () => {
   p = p.armShortcut(ID).value;
 
   const catalog = g.SearchEngineCatalog.forPolicy(p);
-  const result = g.JumpPreview.forSearchUrl("https://www.google.it/search?q=ABC-9", p, catalog);
+  const result = g.JumpPreview.forSearchUrl("https://www.google.it/search?q=ABC-9", delivered(p, catalog));
   assert.equal(result.ok, true, "the added domain does not jump");
   assert.equal(result.destination, "https://example.atlassian.net/browse/ABC-9");
 
@@ -170,4 +176,252 @@ test("an engine selection written before the split still works", () => {
     schemaVersion: 1, armed: true, engines: ["google", "bing", "duckduckgo"], shortcuts: [],
   });
   assert.deepEqual(restored.policy.engineIds(), ["google.com", "bing.com", "duckduckgo.com"]);
+});
+
+// ------------------------------------------------- three bands, and the catch-all
+
+const ABC = "aaaaaaaa-1111-4111-8111-111111111111";
+const OPS = "bbbbbbbb-2222-4222-8222-222222222222";
+const STAR = "cccccccc-3333-4333-8333-333333333333";
+
+/** The configuration of the golden rule set: two named keys, then a catch-all. */
+const withCatchAll = (engines = ["google.com"]) => {
+  let p = g.JumpPolicy.empty().withEngines(engines).value;
+  p = p.register(ABC, g.ProjectKey.parse("ABC").value, g.JiraInstance.parse("https://example.atlassian.net").value).value;
+  p = p.register(OPS, g.ProjectKey.parse("OPS").value, g.JiraInstance.parse("https://ops.example.com/jira").value).value;
+  p = p.registerCatchAll(STAR, g.JiraInstance.parse("https://catchall.atlassian.net").value).value;
+  p = p.acknowledge(STAR, "CATCH_ALL").value;
+  return p.armShortcut(ABC).value.armShortcut(OPS).value.armShortcut(STAR).value;
+};
+
+test("the whole rule set is locked against a literal expectation", () => {
+  // The golden test. Everything else in this file explains one line of it.
+  const rules = delivered(withCatchAll());
+  assert.deepEqual(rules.map(({ engineId, isCatchAll, ...rule }) => rule), [
+    {
+      id: 1, priority: 3,
+      action: { type: "redirect", redirect: { regexSubstitution: "https://example.atlassian.net/browse/ABC-\\1" } },
+      condition: {
+        regexFilter: "^https://(?:www\\.)?google\\.com/search\\?(?:.*&)?q=ABC(?:-|\\+|%20)(\\d+)(?:&|$)",
+        isUrlFilterCaseSensitive: false, resourceTypes: ["main_frame"],
+      },
+    },
+    {
+      id: 2, priority: 3,
+      action: { type: "redirect", redirect: { regexSubstitution: "https://ops.example.com/jira/browse/OPS-\\1" } },
+      condition: {
+        regexFilter: "^https://(?:www\\.)?google\\.com/search\\?(?:.*&)?q=OPS(?:-|\\+|%20)(\\d+)(?:&|$)",
+        isUrlFilterCaseSensitive: false, resourceTypes: ["main_frame"],
+      },
+    },
+    {
+      id: 3, priority: 1,
+      action: { type: "redirect", redirect: { regexSubstitution: "https://catchall.atlassian.net/browse/\\1-\\2" } },
+      condition: {
+        regexFilter: "^https://(?:www\\.)?google\\.com/search\\?(?:.*&)?q=([A-Za-z][A-Za-z0-9_]{1,19})-(\\d+)(?:&|$)",
+        isUrlFilterCaseSensitive: false, resourceTypes: ["main_frame"],
+      },
+    },
+    {
+      id: 1001, priority: 2,
+      action: { type: "allow" },
+      condition: {
+        // Built from the list rather than pasted, so adding a prefix does not
+        // rewrite a golden string -- but the SHAPE around it is literal.
+        regexFilter: "^https://(?:www\\.)?google\\.com/search\\?(?:.*&)?q=(?:" +
+          g.ReservedPrefix.ALL.join("|") + ")-\\d+(?:&|$)",
+        isUrlFilterCaseSensitive: false, resourceTypes: ["main_frame"],
+      },
+    },
+  ]);
+});
+
+test("three bands are enough, and they are strictly ordered", () => {
+  // Two named keys can never match one URL: the key is the maximal run before the
+  // first separator character, and none of -, + or % is a key character. So the
+  // only frontiers are named > reserved > catch-all.
+  assert.ok(g.RuleRanking.NAMED > g.RuleRanking.RESERVED_PREFIX);
+  assert.ok(g.RuleRanking.RESERVED_PREFIX > g.RuleRanking.CATCH_ALL);
+  assert.ok(g.RuleRanking.CATCH_ALL >= 1, "DNR demands an integer >= 1");
+  for (const rule of delivered(withCatchAll())) {
+    assert.ok(Number.isInteger(rule.priority) && rule.priority >= 1);
+  }
+});
+
+test("the order between named keys has no effect on the rules, because they cannot collide", () => {
+  const before = delivered(withCatchAll());
+  const swapped = delivered(withCatchAll().withOrder([OPS, ABC, STAR]).value);
+  const shape = (rules) => rules.map((r) => r.action.redirect ? r.action.redirect.regexSubstitution : "allow").sort();
+  assert.deepEqual(shape(before), shape(swapped));
+});
+
+test("a reserved prefix reaches the search engine untouched while the catch-all is armed", () => {
+  const rules = delivered(withCatchAll());
+  for (const url of NEGATIVE_WITH_CATCH_ALL) {
+    const result = g.JumpPreview.forSearchUrl(url, rules);
+    assert.equal(result.ok, false, `${url} was intercepted: ${result.destination}`);
+  }
+});
+
+test("a reserved prefix that is itself the prefix of another one is still held back", () => {
+  // HTTP is a prefix of HTTPS. RE2 is an automaton and finds the match if one
+  // exists; the JS engine backtracks into the next alternative. Both are correct,
+  // but it earns its own test.
+  const rules = delivered(withCatchAll());
+  for (const word of ["HTTP", "HTTPS"]) {
+    const result = g.JumpPreview.forSearchUrl(`https://www.google.com/search?q=${word}-1`, rules);
+    assert.equal(result.code, "RESERVED_PREFIX", `${word}-1 was not held back`);
+  }
+});
+
+test("a project genuinely named API still wins over the reserved prefixes", () => {
+  // The whole answer to "what if the user owns a project called API": a named key
+  // sits in band 3, the reserved prefixes in band 2, and DNR compares the priority
+  // BEFORE the action type.
+  let p = g.JumpPolicy.empty().withEngines(["google.com"]).value;
+  p = p.register(ABC, g.ProjectKey.parse("API").value, g.JiraInstance.parse("https://api.atlassian.net").value).value;
+  p = p.registerCatchAll(STAR, g.JiraInstance.parse("https://catchall.atlassian.net").value).value;
+  p = p.acknowledge(STAR, "CATCH_ALL").value;
+  p = p.armShortcut(ABC).value.armShortcut(STAR).value;
+  const result = g.JumpPreview.forSearchUrl("https://www.google.com/search?q=api-42", delivered(p));
+  assert.equal(result.ok, true);
+  assert.equal(result.destination, "https://api.atlassian.net/browse/API-42");
+});
+
+test("the catch-all forwards the case that was typed, because a substitution cannot upper-case", () => {
+  // Pinned rather than left silent: DNR cannot transform a backreference, so Jira
+  // canonicalises it -- verified against Atlassian Cloud and Data Center.
+  const result = g.JumpPreview.forSearchUrl("https://www.google.com/search?q=ban-123", delivered(withCatchAll()));
+  assert.equal(result.destination, "https://catchall.atlassian.net/browse/ban-123");
+  // While a NAMED key keeps landing upper-cased, since its substitution is a
+  // literal.
+  const named = g.JumpPreview.forSearchUrl("https://www.google.com/search?q=abc-7", delivered(withCatchAll()));
+  assert.equal(named.destination, "https://example.atlassian.net/browse/ABC-7");
+});
+
+test("the catch-all accepts the hyphen only, so two tokens ending in a number never leave", () => {
+  // Not availability: an outbound data flow. SALARY 2024 would land in the Jira
+  // instance's access logs as /browse/SALARY-2024.
+  const rules = delivered(withCatchAll());
+  for (const q of ["SALARY+2024", "BUDGET%202024", "PAYROLL+7"]) {
+    assert.equal(g.JumpPreview.forSearchUrl(`https://www.google.com/search?q=${q}`, rules).ok, false, q);
+  }
+  // A NAMED key keeps all three separators: it was declared, hence consented to.
+  assert.equal(g.JumpPreview.forSearchUrl("https://www.google.com/search?q=ABC+7", rules).ok, true);
+});
+
+test("a shadowed shortcut produces no rule at all", () => {
+  const shadowed = withCatchAll().withOrder([STAR, ABC, OPS]).value;
+  const rules = delivered(shadowed);
+  assert.equal(rules.filter((r) => r.action.type === "redirect").length, 1);
+  assert.equal(rules.filter((r) => r.isCatchAll).length, 1);
+});
+
+test("the reserved prefixes are one allow rule per engine, never one per prefix", () => {
+  const rules = delivered(withCatchAll(["google.com", "bing.com"]));
+  const allows = rules.filter((r) => r.action.type === "allow");
+  assert.equal(allows.length, 2, "one per engine");
+  assert.deepEqual(allows.map((r) => r.engineId).sort(), ["bing.com", "google.com"]);
+});
+
+test("the reserved prefixes are installed only where a catch-all is active", () => {
+  let p = g.JumpPolicy.empty().withEngines(["google.com"]).value;
+  p = p.register(ABC, g.ProjectKey.parse("API").value, g.JiraInstance.parse("https://api.atlassian.net").value).value;
+  p = p.armShortcut(ABC).value;
+  assert.deepEqual(delivered(p).filter((r) => r.action.type === "allow"), []);
+});
+
+test("a catch-all whose reserved prefixes could not be installed is dropped with them", () => {
+  // Deny by default: a partial reserved list is exactly the invisible failure the
+  // unit exists to close, and its violation is an outbound flow.
+  const set = g.RuleFactory.buildRules(withCatchAll(), g.SearchEngineCatalog);
+  const guard = set.rules().find((r) => r.action.type === "allow");
+  const pruned = set.withoutRules([guard.id]);
+  assert.equal(pruned.rules().some((r) => r.isCatchAll), false, "the catch-all fell with its guard");
+  assert.equal(pruned.catchAllInstalled(true), false);
+  assert.ok(pruned.skipped().length >= 2, "both halves of the unit are reported");
+});
+
+test("dropping a shortcut on one engine leaves the catch-all standing on the others", () => {
+  const set = g.RuleFactory.buildRules(withCatchAll(["google.com", "bing.com"]), g.SearchEngineCatalog);
+  const bing = set.rules().find((r) => r.isCatchAll && r.engineId === "bing.com");
+  const pruned = set.withoutRules([bing.id]);
+  assert.equal(pruned.rules().some((r) => r.isCatchAll && r.engineId === "google.com"), true);
+  assert.equal(pruned.rules().some((r) => r.isCatchAll && r.engineId === "bing.com"), false);
+});
+
+test("rule ids are unique across bindings and reserved prefixes", () => {
+  const ids = delivered(withCatchAll(["google.com", "bing.com", "duckduckgo.com"])).map((r) => r.id);
+  assert.equal(new Set(ids).size, ids.length);
+});
+
+test("every rule is main_frame only, allow rules included", () => {
+  for (const rule of delivered(withCatchAll(["google.com", "bing.com"]))) {
+    assert.deepEqual(rule.condition.resourceTypes, ["main_frame"]);
+    assert.equal("excludedResourceTypes" in rule.condition, false);
+  }
+});
+
+test("a duplicate engine at the same host is deduplicated, so the canary stays unreachable", () => {
+  // Otherwise two rules with the same priority, the same action and the same
+  // regexFilter would reach DNR's unspecified tie-break through a perfectly
+  // legitimate configuration -- and a canary firing there would break the user's
+  // options page.
+  const custom = g.CustomEngine.parse({ host: "google.com", shape: "search-q" });
+  assert.equal(custom.ok, true);
+  let p = withCatchAll().withCustomEngine(custom.value).value;
+  p = p.withEngines(["google.com", "custom:google.com"]).value;
+  const rules = delivered(p, g.SearchEngineCatalog.forPolicy(p));
+  const signatures = rules.map((r) => r.condition.regexFilter + "|" + r.priority + "|" + r.action.type);
+  assert.equal(new Set(signatures).size, signatures.length, "no two rules are indistinguishable");
+});
+
+// ------------------------------------------- the domain and the simulator agree
+
+test("the domain and the simulator always agree on where a key lands", () => {
+  // THE test that keeps the core and the airlock from drifting. claimantFor lives
+  // on the aggregate precisely so this can hold: it needs arming, acknowledgements
+  // and the ticked engines, which the registry knows nothing about.
+  const policy = withCatchAll();
+  const rules = delivered(policy);
+  const corpus = [
+    "ABC-1", "abc-1", "OPS-9", "PAYROLL-3", "BAN-123", "T1-123", "BESSON-42",
+    "ISO-9001", "COVID-19", "WD-40", "HTTPS-1", "CVE-2024", "ABC 7", "PAYROLL 5",
+    "ABC", "ABC-", "ABCDEFGHIJKLMNOPQRSTU-1",
+  ];
+  for (const typed of corpus) {
+    const reference = g.IssueReference.parse(typed, (k) => g.ProjectKey.parse(k));
+    const fromDomain = reference.ok ? policy.claimantFor(reference.value) : { code: "NO_MATCH" };
+    const engine = g.SearchEngineCatalog.find("google.com");
+    const fromRules = g.JumpPreview.forTypedText(typed, rules, engine);
+    const simulated = fromRules.ok ? fromRules.code : fromRules.code === "RESERVED_PREFIX" ? "RESERVED_PREFIX" : "NO_MATCH";
+    assert.equal(
+      simulated,
+      fromDomain.code,
+      `${JSON.stringify(typed)}: the domain says ${fromDomain.code} and the rules say ${simulated}`
+    );
+  }
+});
+
+test("an adversarial input still completes well inside a quarter of a second at the cap", () => {
+  // The winner search can no longer exit on the first match, so the budget is
+  // measured with every engine ticked and the reserved prefixes installed -- a
+  // one-shortcut policy would prove nothing.
+  let p = g.JumpPolicy.empty().withEngines(["google.com", "bing.com", "duckduckgo.com"]).value;
+  for (let i = 0; i < 60; i += 1) {
+    const id = `id-${String(i).padStart(4, "0")}`;
+    p = p.register(id, g.ProjectKey.parse("K" + String(i).padStart(3, "0")).value, g.JiraInstance.parse("https://a.atlassian.net").value).value;
+    p = p.armShortcut(id).value;
+  }
+  p = p.registerCatchAll(STAR, g.JiraInstance.parse("https://catchall.atlassian.net").value).value;
+  p = p.acknowledge(STAR, "CATCH_ALL").value;
+  p = p.armShortcut(STAR).value;
+  const rules = delivered(p);
+  assert.ok(rules.length > 150, `the cap is exercised: ${rules.length} rules`);
+
+  const hostile = "https://www.google.com/search?q=" + "&".repeat(g.JumpPreview.MAX_INPUT - 40);
+  const started = Date.now();
+  g.JumpPreview.forSearchUrl(hostile, rules);
+  const elapsed = Date.now() - started;
+  assert.ok(elapsed < 250, `took ${elapsed}ms`);
 });

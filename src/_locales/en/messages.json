@@ -17,6 +17,9 @@
   "add": {
     "message": "Add"
   },
+  "addCatchAll": {
+    "message": "Add a catch-all"
+  },
   "addDomain": {
     "message": "Add a domain"
   },
@@ -26,11 +29,29 @@
   "addShortcut": {
     "message": "Add shortcut"
   },
+  "alreadyFirst": {
+    "message": "Already first."
+  },
+  "alreadyLast": {
+    "message": "Already last."
+  },
   "armThis": {
     "message": "Arm this shortcut"
   },
   "cancel": {
     "message": "Cancel"
+  },
+  "catchAllExists": {
+    "message": "There can only be one catch-all."
+  },
+  "catchAllInsecure": {
+    "message": "Together: every key-shaped search will leave in clear text."
+  },
+  "catchAllKey": {
+    "message": "Any key"
+  },
+  "catchAllNote": {
+    "message": "Any key-shaped text goes to this destination."
   },
   "changedAck": {
     "message": "I have checked it"
@@ -53,11 +74,23 @@
   "destination": {
     "message": "Destination"
   },
+  "diagAllAwaitingAck": {
+    "message": "Every armed shortcut is waiting for a warning to be accepted."
+  },
   "diagAllOff": {
     "message": "Every shortcut is disarmed."
   },
+  "diagAllShadowed": {
+    "message": "Every shortcut sits below the catch-all, so none of them fires."
+  },
+  "diagCatchAllNotInstalled": {
+    "message": "The catch-all could not be installed, so it claims nothing."
+  },
   "diagDisarmed": {
     "message": "Every shortcut is off. Searches behave normally."
+  },
+  "diagInstallFailed": {
+    "message": "The rules could not be installed. What is running may differ from what you see."
   },
   "diagMissingOrigins": {
     "message": "Rules are installed but cannot fire: access is missing."
@@ -73,6 +106,9 @@
   },
   "diagReady": {
     "message": "Ready."
+  },
+  "diagSomeShadowed": {
+    "message": "Some shortcuts sit below the catch-all and never fire."
   },
   "diffChanged": {
     "message": "Changed"
@@ -101,6 +137,18 @@
   "extensionName": {
     "message": "Quick Jump for Jira"
   },
+  "factAppeared": {
+    "message": "was added, pointing to"
+  },
+  "factRemoved": {
+    "message": "was removed. It pointed to"
+  },
+  "factReplaced": {
+    "message": "The whole configuration changed elsewhere. Check every destination."
+  },
+  "factShadowed": {
+    "message": "These keys now go to the catch-all:"
+  },
   "fix": {
     "message": "Fix"
   },
@@ -125,8 +173,26 @@
   "importTooBig": {
     "message": "That file is too large to be a configuration."
   },
+  "installDiffers": {
+    "message": "The installed configuration differs from the one you see."
+  },
+  "journalOverflowed": {
+    "message": "Some changes could not be recorded."
+  },
   "key": {
     "message": "Key"
+  },
+  "moveDown": {
+    "message": "Move down"
+  },
+  "moveUp": {
+    "message": "Move up"
+  },
+  "movedDown": {
+    "message": "Moved down."
+  },
+  "movedUp": {
+    "message": "Moved up."
   },
   "openSettings": {
     "message": "Open settings"
@@ -134,8 +200,35 @@
   "optionsSub": {
     "message": "Type an issue key in the address bar, land on the issue."
   },
+  "orderNote": {
+    "message": "Evaluated from top to bottom. The first match wins."
+  },
   "popupSub": {
     "message": "Address bar to issue."
+  },
+  "previewMatchedCatchAll": {
+    "message": "Matched the catch-all."
+  },
+  "previewMatchedShortcut": {
+    "message": "Matched a named shortcut."
+  },
+  "previewNoMatch": {
+    "message": "This search would go through untouched."
+  },
+  "previewNotASearchUrl": {
+    "message": "That is not a search URL."
+  },
+  "previewNotAUrl": {
+    "message": "That is not a URL."
+  },
+  "previewReservedPrefix": {
+    "message": "Held back by a reserved prefix, so the catch-all leaves it alone."
+  },
+  "previewTooLong": {
+    "message": "That is too long to be a search URL."
+  },
+  "previewTypedHint": {
+    "message": "Paste a search URL, or just the text you would type in the address bar."
   },
   "quarantine": {
     "message": "Could not be read back"
@@ -152,11 +245,14 @@
   "removeDomain": {
     "message": "Remove this domain"
   },
+  "shadowed": {
+    "message": "Shadowed"
+  },
+  "shadowedWhy": {
+    "message": "The catch-all above it matches first, so this shortcut never fires. Move it above the catch-all."
+  },
   "shortcuts": {
     "message": "Shortcuts"
-  },
-  "shortcutsNote": {
-    "message": "Where each issue key sends you."
   },
   "statusArmed": {
     "message": "Jumping is armed"
@@ -191,8 +287,20 @@
   "tagAllOff": {
     "message": "All off"
   },
+  "tagAllShadowed": {
+    "message": "All shadowed"
+  },
+  "tagAwaitingAck": {
+    "message": "Not accepted"
+  },
+  "tagCatchAllOff": {
+    "message": "Catch-all off"
+  },
   "tagEmpty": {
     "message": "Empty"
+  },
+  "tagInstallFailed": {
+    "message": "Not installed"
   },
   "tagNoAccess": {
     "message": "No access"
@@ -209,6 +317,9 @@
   "tagReady": {
     "message": "Ready"
   },
+  "tagSomeShadowed": {
+    "message": "Some shadowed"
+  },
   "toggleAll": {
     "message": "Arm or disarm every shortcut"
   },
@@ -224,7 +335,19 @@
   "tryItEmpty": {
     "message": "Nothing yet."
   },
-  "tryItNote": {
-    "message": "Paste a search URL to see where it would land."
+  "warnCatchAll": {
+    "message": "Every key-shaped search on your engines will leave for this destination."
+  },
+  "warnInsecureScheme": {
+    "message": "Traffic and your Jira session cookie travel in clear text."
+  },
+  "warnInternalHost": {
+    "message": "This destination is on a private or non-public network."
+  },
+  "warnLiteralIp": {
+    "message": "This destination is an IP address rather than a host name."
+  },
+  "warnPunycode": {
+    "message": "This host name uses non-ASCII characters and may imitate another one."
   }
 }

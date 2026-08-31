@@ -63,6 +63,17 @@
        * EXACTLY an issue reference, nothing more" — the decision that bounds false
        * positives.
        */
+      /**
+       * The URL this engine would build for that text. The engine's FORMAT must
+       * not have two homes, so the preview asks rather than assembling.
+       */
+      searchUrlFor(text) {
+        return (
+          "https://" + domain + (form.pathPattern === "/" ? "/" : form.pathPattern) +
+          "?" + form.queryParam + "=" + encodeURIComponent(text)
+        );
+      },
+
       searchUrlPattern(typedTextFragment) {
         return (
           "^https://" +
@@ -98,13 +109,23 @@
     /** Built-ins plus this policy's own domains — the lookup every caller needs. */
     forPolicy(policy) {
       const entries = new Map(builtIn);
+      // Deduplicated by (hostPattern, shape), not by id. A custom domain
+      // duplicating a built-in one (custom:google.com next to google.com) would
+      // otherwise emit two rules with the SAME priority, the SAME action and the
+      // SAME regexFilter -- reaching DNR's unspecified tie-break through a
+      // perfectly legitimate configuration.
+      const seen = new Set([...builtIn.values()].map((e) => e.hostPattern + "|" + e.shape));
       for (const custom of policy.customEngines()) {
         const entry = build({
           id: custom.id(), label: custom.label(), domain: custom.host(), shape: custom.shape(),
         });
         // An unknown shape is filtered here, exactly as an unknown engine id is:
         // translate AND filter is the airlock's job.
-        if (entry) entries.set(entry.id, entry);
+        if (!entry) continue;
+        const signature = entry.hostPattern + "|" + entry.shape;
+        if (seen.has(signature)) continue;
+        seen.add(signature);
+        entries.set(entry.id, entry);
       }
       return view(entries);
     },

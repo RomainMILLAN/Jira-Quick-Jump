@@ -347,3 +347,33 @@ test("the Firefox add-on id is frozen", () => {
   // already signed, so the mistake is not reversible.
   assert.equal(manifest.browser_specific_settings.gecko.id, "jira-quick-jump@romainmillan");
 });
+
+test("the options page never calls the storage door's key parser", () => {
+  // ShortcutKey.parse is the ONLY place where a string becomes a catch-all key,
+  // and the typed field must never reach it. The UI expresses a gesture
+  // (registerCatchAll) and the core forges the key.
+  const ui = read("src/options-sections.js");
+  assert.equal(/ShortcutKey\.parse/.test(ui), false, "options-sections.js must not parse a shortcut key");
+  assert.equal(/CatchAllKey\.only/.test(ui), false, "options-sections.js must not mint a catch-all key");
+});
+
+test("the written form of the catch-all key has one owner", () => {
+  // Bounded to src/: test/ must legitimately contain "*" for the hostile corpus.
+  // And it looks for the QUOTED literal, not the character -- permissionOrigin
+  // returns ".../*" and would otherwise fail an innocent line.
+  const walk = (dir, out = []) => {
+    for (const entry of readdirSync(join(ROOT, dir), { withFileTypes: true })) {
+      if (entry.isDirectory()) walk(join(dir, entry.name), out);
+      else if (entry.name.endsWith(".js")) out.push(join(dir, entry.name));
+    }
+    return out;
+  };
+  for (const file of walk("src")) {
+    if (file.endsWith("catch-all-key.js")) continue;
+    assert.equal(
+      /["']\*["']/.test(read(file)),
+      false,
+      `${file} spells the catch-all's written form; only catch-all-key.js may`
+    );
+  }
+});

@@ -203,10 +203,15 @@ code {
   flex-direction: column;
   gap: 7px;
 }
+ol.rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
 .row {
   display: grid;
-  grid-template-columns: 7rem 1fr auto auto;
-  grid-template-areas: "key url arm del";
+  grid-template-columns: auto 7rem 1fr auto auto;
+  grid-template-areas: "ord key url arm del";
   align-items: center;
   gap: 11px;
   border: 1px solid var(--line);
@@ -219,6 +224,57 @@ code {
 }
 .row.is-pending {
   border-color: var(--amber-line);
+}
+/* A dashed border and NO opacity: dimming the row would push its text under the
+   4.5:1 contrast floor. The text chip and the written reason carry the state, so
+   colour is never the only signal. */
+.row.is-shadowed {
+  border-style: dashed;
+  border-color: var(--amber-line);
+}
+/* The catch-all key is text, not a field: readonly is not in the DOM whitelist,
+   and a read-only input is focusable and useless. */
+.f.is-static {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  color: var(--muted);
+}
+.f.is-static code {
+  font-family: var(--mono, monospace);
+}
+.preview-why {
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+/* Announced but not shown. Not display:none, which is not announced either. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.f-ord {
+  grid-area: ord;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+/* 28x28, above the 24x24 minimum of WCAG 2.2 rule 2.5.8. */
+.btn.move {
+  width: 28px;
+  min-height: 28px;
+  padding: 0;
+}
+/* aria-disabled, never disabled: a disabled button is not focusable, so moving a
+   row to the top would drop focus to <body>. */
+.btn[aria-disabled="true"] {
+  color: var(--line);
+  cursor: default;
 }
 .f-key {
   grid-area: key;
@@ -527,10 +583,10 @@ input.f[aria-invalid="true"] {
   padding: 15px 0;
 }
 .is-compact .row {
-  grid-template-columns: 1fr auto auto;
+  grid-template-columns: auto 1fr auto auto;
   grid-template-areas:
-    "key arm del"
-    "url url url";
+    "ord key arm del"
+    "url url url url";
   gap: 9px 10px;
 }
 .is-compact .field-label {

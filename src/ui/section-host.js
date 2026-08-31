@@ -12,7 +12,7 @@
 (function (global) {
   "use strict";
 
-  const { Platform, PolicyRepository, DestinationJournal, RuleInstaller } = global;
+  const { Platform, PolicyRepository, DestinationJournal, RuleInstaller, MutationResult } = global;
 
   const DEBOUNCE_MS = 500;
 
@@ -25,7 +25,18 @@
       const ctx = {
         stored: () => stored,
         apply,
-        report: () => RuleInstaller.report(stored.policy(), [], stored.quarantinedCount()),
+        /**
+         * The ten-times-copied idiom, named once. It also removes the chance of
+         * forgetting next.events -- which used to be what fed the trust banner,
+         * and is now computed by PolicyDiff at the commit instead.
+         */
+        applyToPolicy: (mutate, coalesceKey) =>
+          apply((s) => {
+            const next = mutate(s.policy());
+            return next.ok ? MutationResult.ok(s.withPolicy(next.value)) : next;
+          }, coalesceKey),
+        cancel,
+        report: () => report(),
         journal: DestinationJournal,
         // For the rare write that lands OUTSIDE the policy — a journal entry, an
         // acknowledgement of it — since only a policy write triggers a redraw.
@@ -50,11 +61,44 @@
           // and redrawing would throw away the correction the user is in the
           // middle of typing, which is the one thing they must not lose after
           // being told their input was refused.
+          //
+          // ORDER_STALE is the exception: the section is holding an optimistic
+          // order the storage does not have, and showFailure alone would leave
+          // that wrong order on screen indefinitely.
           showFailure(result);
+          if (result.code === "ORDER_STALE") await reload();
           return result;
         }
         await reload();
         return result;
+      }
+
+      /**
+       * Memoised per render, refreshed on every reload and after each install --
+       * NEVER per keystroke. The preview consumes the rules AS INSTALLED, and
+       * asking the platform on each character would make it asynchronous and
+       * collide head-on with the ReDoS budget.
+       */
+      let lastReport = null;
+      async function report() {
+        if (!lastReport) {
+          lastReport = await RuleInstaller.report(stored.policy(), [], stored.quarantinedCount());
+        }
+        return lastReport;
+      }
+
+      /**
+       * Cancels a pending coalesced write.
+       *
+       * Needed when a foreign change alters the SET of ids: the queued write
+       * still carries the now-stale absolute order and would leave only to
+       * collect ORDER_STALE.
+       */
+      function cancel(coalesceKey) {
+        const existing = pending.get(coalesceKey);
+        if (!existing) return;
+        clearTimeout(existing.timer);
+        pending.delete(coalesceKey);
       }
 
       function apply(intention, coalesceKey) {
@@ -91,6 +135,7 @@
           return;
         }
         stored = loaded.stored;
+        lastReport = null;
         render();
       }
 

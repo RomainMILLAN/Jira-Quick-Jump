@@ -22,8 +22,15 @@
 
   const SHORTCUT_FIELDS = new Set(["id", "key", "baseUrl", "consent"]);
   const DOCUMENT_FIELDS = new Set(["schemaVersion", "armed", "engines", "customEngines", "shortcuts"]);
-  const MAX_SHORTCUTS = 200;
   const MAX_QUARANTINE = 50;
+
+  // Unbounded resources, closed on the way past: readDocument capped `shortcuts`
+  // and left `customEngines` open, while withCustomEngine does a linear scan per
+  // addition. Every engine now also adds one reserved-prefix allow rule and one
+  // isRegexSupported round trip, so a hostile synced document carrying fifty
+  // thousand engines would freeze the service worker. Fail-closed and no leak,
+  // but free to close.
+  const MAX_CUSTOM_ENGINES = 20;
 
   const refuse = (code, message) => ({ ok: false, code, message });
 
@@ -41,10 +48,11 @@
           return refuse("UNKNOWN_FIELD", `Unknown field "${field}" on a shortcut.`);
         }
       }
-      if (typeof raw.id !== "string" || raw.id.length === 0 || raw.id.length > 64) {
-        return refuse("ENTRY_BAD_ID", "A shortcut needs an identifier.");
-      }
-      const key = ProjectKey.parse(raw.key);
+      const id = global.ShortcutId.parse(raw.id);
+      if (!id.ok) return id;
+      // ShortcutKey.parse, not ProjectKey.parse: this is the storage and import
+      // door, and it is the ONLY place where a string becomes a catch-all key.
+      const key = global.ShortcutKey.parse(raw.key);
       if (!key.ok) return key;
       const instance = JiraInstance.parse(raw.baseUrl);
       if (!instance.ok) return instance;
@@ -97,6 +105,22 @@
     return result;
   };
 
+  /**
+   * Puts the surviving shortcuts back into the document's order.
+   *
+   * A no-op when nothing was quarantined, and never a repair: an id the policy
+   * does not hold is simply absent from the list.
+   */
+  const reassertOrder = (policy, rawShortcuts) => {
+    const held = new Set(policy.registry().orderedIds());
+    const wanted = rawShortcuts
+      .map((entry) => (entry && typeof entry.id === "string" ? entry.id : undefined))
+      .filter((id) => id !== undefined && held.has(id));
+    if (wanted.length !== held.size) return policy;
+    const ordered = policy.withOrder(wanted);
+    return ordered.ok ? ordered.value : policy;
+  };
+
   const readDocument = (raw) => {
     if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
       return refuse("NOT_A_DOCUMENT", "The configuration must be an object.");
@@ -112,7 +136,7 @@
     if (!Array.isArray(raw.shortcuts)) {
       return refuse("SHORTCUTS_NOT_A_LIST", "`shortcuts` must be a list.");
     }
-    if (raw.shortcuts.length > MAX_SHORTCUTS) {
+    if (raw.shortcuts.length > JumpPolicy.MAX_SHORTCUTS) {
       return refuse("TOO_MANY_SHORTCUTS", "This configuration has too many shortcuts.");
     }
     const rawEngines = raw.engines === undefined ? [] : raw.engines;
@@ -125,6 +149,9 @@
     const customEngines = raw.customEngines === undefined ? [] : raw.customEngines;
     if (!Array.isArray(customEngines)) {
       return refuse("CUSTOM_ENGINES_NOT_A_LIST", "`customEngines` must be a list.");
+    }
+    if (customEngines.length > MAX_CUSTOM_ENGINES) {
+      return refuse("TOO_MANY_CUSTOM_ENGINES", "This configuration has too many domains.");
     }
     return {
       ok: true,
@@ -180,6 +207,12 @@
       policy = registered.value;
     }
 
+    // The document's order IS the evaluation order, and it must survive the
+    // round trip. register appends, so replaying the array in sequence already
+    // preserves it -- but quarantine SHIFTS the positions of everything after a
+    // rejected entry, so the surviving order is reasserted explicitly.
+    policy = reassertOrder(policy, document.value.shortcuts);
+
     if (quarantine.length > MAX_QUARANTINE) {
       // Discarding would be exactly what quarantine exists to prevent, so we
       // refuse to load instead, like SCHEMA_TOO_NEW.
@@ -226,10 +259,11 @@
       }
       policy = registered.value;
     }
+    policy = reassertOrder(policy, document.value.shortcuts);
     return { ok: true, policy, dropped };
   };
 
-  ShortcutAdmission.MAX_SHORTCUTS = MAX_SHORTCUTS;
+  ShortcutAdmission.MAX_CUSTOM_ENGINES = MAX_CUSTOM_ENGINES;
   ShortcutAdmission.MAX_QUARANTINE = MAX_QUARANTINE;
   global.ShortcutAdmission = ShortcutAdmission;
 })(globalThis);

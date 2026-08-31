@@ -29,11 +29,11 @@ test("full-width look-alikes are refused before normalisation can rewrite them",
   assert.equal(g.ProjectKey.parse("ＡＢＣ").code, "KEY_NOT_NORMALISED");
 });
 
-test("ambiguous keys are flagged but not refused", () => {
-  assert.equal(g.ProjectKey.parse("ISO").value.isAmbiguous(), true);
-  assert.equal(g.ProjectKey.parse("CVE").value.isAmbiguous(), true);
-  assert.equal(g.ProjectKey.parse("AB").value.isAmbiguous(), true, "two letters collide massively");
-  assert.equal(g.ProjectKey.parse("PAYROLL").value.isAmbiguous(), false);
+test("a key that collides with ordinary searches is flagged but not refused", () => {
+  assert.equal(g.ProjectKey.parse("ISO").value.collidesWithOrdinarySearches(), true);
+  assert.equal(g.ProjectKey.parse("CVE").value.collidesWithOrdinarySearches(), true);
+  assert.equal(g.ProjectKey.parse("AB").value.collidesWithOrdinarySearches(), true, "two letters collide massively");
+  assert.equal(g.ProjectKey.parse("PAYROLL").value.collidesWithOrdinarySearches(), false);
 });
 
 test("hostile base URLs are refused, each with its own distinct code", () => {
@@ -80,4 +80,184 @@ test("a forged storage entry produces no rule at all", () => {
   assert.deepEqual(restored.dropped.map((d) => d.code), ["KEY_SHAPE", "BASE_SCHEME"]);
   const { rules } = g.RuleFactory.buildRules(restored.policy, g.SearchEngineCatalog);
   assert.equal(rules.length, 0);
+});
+
+// ---------------------------------------------------------- the catch-all key
+
+test("the typed field's parser never accepts a star, and only the storage door builds a catch-all", () => {
+  // ProjectKey.parse is not relaxed by a single character. The corpus above
+  // already replays every hostile key through it; this pins the one that only
+  // became hostile when a catch-all existed.
+  assert.equal(g.ProjectKey.parse("*").ok, false);
+  assert.equal(g.ProjectKey.parse("*").code, "KEY_SHAPE");
+  assert.equal(g.ShortcutKey.parse("*").ok, true);
+  assert.equal(g.ShortcutKey.parse("*").value.isCatchAll(), true);
+});
+
+test("hostile keys are refused by the storage door too, not only by ProjectKey", () => {
+  // ShortcutKey.parse is a THIRD security function: it is the only place where a
+  // string becomes a catch-all key, so the hostile corpus goes through it as well.
+  for (const key of HOSTILE_KEYS) {
+    if (key === "*") continue; // the one value it legitimately accepts
+    assert.equal(g.ShortcutKey.parse(key).ok, false, `${JSON.stringify(key)} was accepted`);
+  }
+});
+
+test("a full-width asterisk is refused rather than folded into a catch-all", () => {
+  // NFKC would fold U+FF0A onto `*`, so the comparison is strict and normalises
+  // nothing: refuse rather than clean.
+  const refused = g.ShortcutKey.parse("\uff0a");
+  assert.equal(refused.ok, false);
+  assert.equal(refused.code, "KEY_NOT_NORMALISED");
+});
+
+test("the catch-all's character set is literally the one ProjectKey enforces, flag included", () => {
+  // The rule ships with isUrlFilterCaseSensitive false, so the corpus is replayed
+  // WITH the real flag. Testing the case-sensitive form would validate a
+  // different regex from the one delivered.
+  const shape = new RegExp("^" + g.ProjectKey.CASE_INSENSITIVE_SHAPE + "$", "i");
+  for (const key of HOSTILE_KEYS) {
+    if (typeof key !== "string") continue;
+    assert.equal(shape.test(key), false, `${JSON.stringify(key)} is matched by the catch-all shape`);
+  }
+  for (const [input] of VALID_KEYS) {
+    assert.equal(shape.test(input.trim()), true, `${JSON.stringify(input)} is not matched`);
+  }
+});
+
+test("the case-insensitive shape cannot be rewritten by another file", () => {
+  // Every file shares globalThis, so an assignment before the airlock builds its
+  // pattern would turn the extension into a universal redirector.
+  const before = g.ProjectKey.CASE_INSENSITIVE_SHAPE;
+  try {
+    g.ProjectKey.CASE_INSENSITIVE_SHAPE = ".*";
+  } catch {
+    /* strict mode throws, sloppy mode ignores; both are fine */
+  }
+  assert.equal(g.ProjectKey.CASE_INSENSITIVE_SHAPE, before);
+});
+
+test("a catch-all claims any well-formed key, T1 included, and never a reserved prefix", () => {
+  const star = g.ShortcutKey.parse("*").value;
+  for (const key of ["PAYROLL", "BAN", "T1", "BESSON", "AB"]) {
+    assert.equal(star.captures(g.ProjectKey.parse(key).value), true, `${key} is not claimed`);
+  }
+  for (const key of ["ISO", "CVE", "COVID", "WD", "HTTPS"]) {
+    assert.equal(star.captures(g.ProjectKey.parse(key).value), false, `${key} is claimed`);
+  }
+});
+
+test("a named shortcut on a reserved prefix still works: the list bounds the catch-all, not the user", () => {
+  // Excluding a word means "declare that one explicitly", never "that one is
+  // forbidden".
+  const iso = g.ProjectKey.parse("ISO").value;
+  assert.equal(iso.captures(iso), true);
+  assert.equal(g.ReservedPrefix.has("ISO"), true);
+});
+
+test("the reserved prefixes have one owner, and every entry is key-shaped", () => {
+  // An alternative that cannot be a key is dead code guarding nothing.
+  for (const word of g.ReservedPrefix.ALL) {
+    assert.equal(g.ProjectKey.parse(word).ok, true, `${word} is not a valid key`);
+  }
+  // The advice and the hard exclusion read the SAME array, but they are two
+  // questions: the two-character rule belongs to the advice alone.
+  assert.equal(g.ProjectKey.parse("T1").value.collidesWithOrdinarySearches(), true);
+  assert.equal(g.ReservedPrefix.has("T1"), false);
+});
+
+// ------------------------------------------------- consent cannot be imported
+
+test("a forged storage entry cannot pre-acknowledge a catch-all, so it produces no rule at all", () => {
+  // The cheapest sync attack: point a catch-all at a host the user has already
+  // granted, and acknowledge the warning on their behalf. Consent.parse drops the
+  // key-scoped acknowledgement, the entry is still ADMITTED (quarantining it would
+  // hit the legitimate path on every device), and activeBindings excludes it.
+  const restored = g.JumpPolicy.restore({
+    schemaVersion: 1,
+    armed: true,
+    engines: ["google.com"],
+    shortcuts: [{
+      id: "11111111-1111-4111-8111-111111111111",
+      key: "*",
+      baseUrl: "https://already-granted.atlassian.net",
+      consent: { armed: true, acknowledged: ["CATCH_ALL"] },
+    }],
+  });
+  assert.equal(restored.ok, true, "the entry must be admitted, not quarantined");
+  assert.equal(restored.quarantine.length, 0, "quarantine is for what we cannot READ");
+  const shortcut = restored.policy.shortcuts()[0];
+  assert.equal(shortcut.consent().acknowledged("CATCH_ALL"), false, "the acknowledgement did not travel");
+  assert.equal(restored.policy.activeBindings().length, 0, "an unacknowledged catch-all installs nothing");
+  const { rules } = { rules: g.RuleFactory.buildRules(restored.policy, g.SearchEngineCatalog).rules() };
+  assert.deepEqual(rules, []);
+});
+
+test("a destination-scoped acknowledgement still travels, because it was always destination-bound", () => {
+  const restored = g.JumpPolicy.restore({
+    schemaVersion: 1,
+    armed: true,
+    engines: ["google.com"],
+    shortcuts: [{
+      id: "22222222-2222-4222-8222-222222222222",
+      key: "ABC",
+      baseUrl: "http://intra.example.org/jira",
+      consent: { armed: true, acknowledged: ["INSECURE_SCHEME", "INTERNAL_HOST"] },
+    }],
+  });
+  assert.equal(restored.ok, true);
+  const shortcut = restored.policy.shortcuts()[0];
+  assert.equal(shortcut.consent().acknowledged("INSECURE_SCHEME"), true);
+  assert.equal(shortcut.unacknowledgedWarnings().length, 0);
+});
+
+test("a key-scoped acknowledgement is never projected into the document", () => {
+  const consent = g.Consent.fresh().acknowledging("CATCH_ALL").acknowledging("INSECURE_SCHEME");
+  assert.deepEqual(consent.toJSON().acknowledged, ["INSECURE_SCHEME"]);
+  // It survives in memory, which is what lets the local store carry it.
+  assert.equal(consent.acknowledged("CATCH_ALL"), true);
+});
+
+test("editing a destination forgets the destination acknowledgements and keeps the key one", () => {
+  // withInstance runs on EVERY keystroke that parses, so wiping the key scope
+  // there would make the user re-tick a box while typing a URL.
+  const consent = g.Consent.fresh().acknowledging("CATCH_ALL").acknowledging("INSECURE_SCHEME");
+  const after = consent.forgettingDestinationAcknowledgements();
+  assert.deepEqual(after.acknowledgedKinds(), ["CATCH_ALL"]);
+});
+
+test("an unknown acknowledgement is still a hard refusal, because a misspelling is a silent failure", () => {
+  assert.equal(g.Consent.parse({ armed: true, acknowledged: ["NOT_A_KIND"] }).code, "UNKNOWN_WARNING_KIND");
+});
+
+// ------------------------------------------------------------ hostile ids
+
+test("a hostile shortcut id is refused, including through the quarantine door", () => {
+  // The options page keeps the rendered node's reference rather than querying by
+  // an interpolated data-id, and this closes the class at its source: a
+  // quarantined entry reaches register without passing through admitEntry.
+  const instance = g.JiraInstance.parse("https://example.atlassian.net").value;
+  const key = g.ProjectKey.parse("ABC").value;
+  const registry = g.ShortcutRegistry.empty();
+  for (const id of ['a"] , [data-field="del', "", "x".repeat(65), "a b"]) {
+    assert.equal(registry.register(id, key, instance).code, "ENTRY_BAD_ID", `${JSON.stringify(id)} accepted`);
+  }
+  // promote mints a fresh id rather than trusting the raw one.
+  const stored = new g.StoredPolicy(g.JumpPolicy.empty(), [{ id: 'a"] , [x', key: "ABC", baseUrl: "https://example.atlassian.net" }]);
+  const promoted = stored.promote(0, key, instance);
+  assert.equal(promoted.ok, true);
+  assert.equal(g.ShortcutId.isWellFormed(promoted.value.policy().shortcuts()[0].id()), true);
+});
+
+test("a quarantined catch-all is repairable without the UI ever typing a star", () => {
+  // "Fix" used to demand a typed key, and the options page has no right to type
+  // `*`, which made a legitimately quarantined catch-all unrepairable.
+  const instance = g.JiraInstance.parse("https://example.atlassian.net").value;
+  const stored = new g.StoredPolicy(g.JumpPolicy.empty(), [
+    { id: "33333333-3333-4333-8333-333333333333", key: "*", baseUrl: "https://example.atlassian.net" },
+  ]);
+  const promoted = stored.promote(0, undefined, instance);
+  assert.equal(promoted.ok, true);
+  assert.equal(promoted.value.policy().shortcuts()[0].key().isCatchAll(), true);
+  assert.equal(promoted.value.quarantined().length, 0);
 });

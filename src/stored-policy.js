@@ -33,17 +33,32 @@
       return new StoredPolicy(policy, this._quarantine);
     }
 
-    /** "Fix": goes back through the ONE door and may legitimately fail. */
+    /**
+     * "Fix": goes back through the ONE door and may legitimately fail.
+     *
+     * `key` is OPTIONAL. A quarantined catch-all cannot be repaired by a typed
+     * key -- the options page has no right to type `*` -- so when the raw entry's
+     * own key still parses, it is READMITTED as it stands. That is a named door
+     * on the same side of the membrane, and it is what keeps a legitimately
+     * quarantined catch-all (a device that stayed on an older build wrote it)
+     * from being unrepairable except by deletion.
+     *
+     * The id goes through ShortcutId inside register, so a fresh UUID replaces
+     * anything malformed: this entry comes from quarantine, hence by hypothesis
+     * from an attacker.
+     */
     promote(index, key, instance) {
       const raw = this._quarantine[index];
       if (raw === undefined) {
         return MutationResult.refused("UNKNOWN_QUARANTINED", "This entry is no longer in quarantine.");
       }
-      const id = typeof raw?.id === "string" && raw.id.length > 0 ? raw.id : global.crypto.randomUUID();
-      const registered = this._policy.register(id, key, instance);
+      const readmitted = key === undefined ? global.ShortcutKey.parse(raw?.key) : { ok: true, value: key };
+      if (!readmitted.ok) return readmitted;
+      const id = global.ShortcutId.isWellFormed(raw?.id) ? raw.id : global.crypto.randomUUID();
+      const registered = this._policy.register(id, readmitted.value, instance);
       if (!registered.ok) return registered;
       const quarantine = this._quarantine.filter((_, i) => i !== index);
-      return MutationResult.ok(new StoredPolicy(registered.value, quarantine), registered.events);
+      return MutationResult.ok(new StoredPolicy(registered.value, quarantine));
     }
 
     /** Deleting is a deliberate gesture by the user, never a side effect. */

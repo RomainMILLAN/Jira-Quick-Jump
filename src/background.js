@@ -8,37 +8,74 @@
     importScripts(
       "platform.js",
       "core/mutation-result.js",
+      "core/reserved-prefix.js",
       "core/issue-reference.js",
-      "core/destination-warning.js",
+      "core/shortcut-warning.js",
       "core/consent.js",
       "core/project-shortcut.js",
+      "core/catch-all-key.js",
+      "core/shortcut-key.js",
+      "core/shortcut-id.js",
       "core/shortcut-registry.js",
+      "core/custom-engine.js",
       "core/jump-policy.js",
+      "core/policy-diff.js",
       "core/admission.js",
       "interception/search-engine-catalog.js",
       "interception/reference-pattern.js",
+      "interception/rule-ranking.js",
+      "interception/rule-set.js",
       "interception/rule-factory.js",
       "interception/origin-requirements.js",
       "interception/jump-preview.js",
       "versioned-entry.js",
       "stored-policy.js",
+      "key-acknowledgements.js",
+      "installed-projection.js",
       "policy-repository.js",
       "destination-journal.js",
       "rule-installer.js"
     );
   }
 
-  const { Platform, PolicyRepository, DestinationJournal, RuleInstaller, JumpPolicy } = global;
+  const { Platform, PolicyRepository, DestinationJournal, RuleInstaller, JumpPolicy,
+          InstalledProjection, PolicyDiff } = global;
   const api = Platform.api;
 
-  let lastKnown = null;
+  let lastReport = null;
 
+  /**
+   * FAIL CLOSED when the policy cannot be read.
+   *
+   * It used to `return` on a failed load, which left THE PREVIOUS RULES ALIVE
+   * while refreshBadge -- reading the policy rather than the installed reality --
+   * printed `off` over them. Disarming a compromised shortcut then stopped
+   * propagating. So: empty the rules, and say so on screen.
+   */
   const sync = async () => {
     const loaded = await PolicyRepository.load();
-    if (!loaded.ok) return;
-    await reconcile(loaded.stored.policy());
-    lastKnown = loaded.stored.policy();
-    await RuleInstaller.install(loaded.stored.policy(), loaded.stored.quarantinedCount());
+    if (!loaded.ok) {
+      try {
+        const existing = await api.declarativeNetRequest.getDynamicRules();
+        await api.declarativeNetRequest.updateDynamicRules({
+          removeRuleIds: existing.map((r) => r.id),
+          addRules: [],
+        });
+      } catch {
+        /* nothing better to do: the rules stay as they are and the badge says so */
+      }
+      lastReport = null;
+      return;
+    }
+    const policy = loaded.stored.policy();
+    await reconcile(policy);
+    lastReport = await RuleInstaller.install(policy, loaded.stored.quarantinedCount());
+    // AFTER reconciliation, and NOT AT ALL if the install failed -- a stale
+    // comparison base would re-diff the same gap at every wake-up and fill a
+    // twenty-entry journal with duplicates.
+    if (lastReport && lastReport.diagnosis !== "INSTALL_FAILED") {
+      await InstalledProjection.record(policy, await DestinationJournal.lastLoggedRev());
+    }
   };
 
   /**
@@ -55,32 +92,43 @@
    * a detector must fail by over-signalling, never by under-signalling.
    */
   const reconcile = async (policy) => {
-    const previous = lastKnown;
-    if (!previous) return;
-    const before = new Map(previous.shortcuts().map((s) => [s.id(), s]));
-    const events = [];
-    for (const shortcut of policy.shortcuts()) {
-      const old = before.get(shortcut.id());
-      if (!old) continue;
-      // Whole baseUrl, never the origin: with a path allowed in the base URL,
-      // .../jira -> .../jira-fake shares an origin and would be a non-event.
-      const oldBaseUrl = old.instance().baseUrl();
-      const newBaseUrl = shortcut.instance().baseUrl();
-      if (oldBaseUrl !== newBaseUrl) {
-        events.push({ shortcutId: shortcut.id(), key: shortcut.key().toString(), oldBaseUrl, newBaseUrl });
+    const { policy: previous, loggedRev } = await InstalledProjection.read();
+    if (!previous) {
+      // ABSENT means the detector has no baseline -- a wiped storage.local, a
+      // fresh profile, a new device. Returning here would move the in-memory hole
+      // thirty lines rather than close it, so an armed non-empty policy is
+      // reported as an unattributed change instead of being swallowed.
+      if (policy.armed() && policy.shortcuts().length > 0) {
+        await DestinationJournal.record(
+          [{ type: "PolicyReplaced", changedCount: policy.shortcuts().length }],
+          0,
+          "UNKNOWN",
+          Date.now()
+        );
+        await refreshBadge();
       }
+      return;
     }
-    if (events.length > 0) {
-      await DestinationJournal.record(events, 0, "UNKNOWN", Date.now());
+    // THE SAME function as the door. One implementation, one corpus, and both
+    // paths of the trust model covered -- the door and the window.
+    const facts = PolicyDiff.between(previous, policy);
+    if (facts.length > 0) {
+      await DestinationJournal.record(facts, loggedRev, "UNKNOWN", Date.now());
       await refreshBadge();
     }
   };
 
+  /**
+   * The badge reads the INSTALLED REALITY, not the intention.
+   *
+   * Deriving it from policy.armed() is what let an emergency stop print `off`
+   * over rules that were still live. rule-installer already reports `applied`, so
+   * there is one owner of "what is really installed" and two consumers.
+   */
   const refreshBadge = async () => {
     const journal = await DestinationJournal.read();
-    const loaded = await PolicyRepository.load();
-    const armed = loaded.ok && loaded.stored.policy().armed();
-    const text = !armed ? "off" : journal.acknowledged ? "" : "!";
+    const applied = lastReport ? lastReport.applied : 0;
+    const text = applied === 0 ? "off" : journal.acknowledged ? "" : "!";
     try {
       await api.action.setBadgeText({ text });
     } catch {

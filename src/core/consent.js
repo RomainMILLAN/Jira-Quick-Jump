@@ -42,13 +42,38 @@
       return new Consent(this._armed, next);
     }
 
-    /** A consent is given to a destination, never to a shortcut. */
-    forgettingAcknowledgements() {
-      return new Consent(this._armed, new Set());
+    /**
+     * A consent is given to a destination, never to a shortcut -- so changing the
+     * destination forgets the DESTINATION acknowledgements, and only those.
+     *
+     * NO SCOPE PARAMETER, by the criterion written above: the body would branch
+     * on it. The scope stays with its owner, ShortcutWarning.kindsInScope, and
+     * this method reads like a sentence at its call site.
+     *
+     * FAIL CLOSED: a kind whose scope cannot be placed is FORGOTTEN, never kept.
+     * A future kind must not silently survive a change of destination.
+     */
+    forgettingDestinationAcknowledgements() {
+      const kept = global.ShortcutWarning.kindsInScope("key");
+      return new Consent(this._armed, new Set(this.acknowledgedKinds().filter((k) => kept.includes(k))));
     }
 
+    /**
+     * ONLY the destination-scoped acknowledgements are persisted here.
+     *
+     * A key-scoped acknowledgement never travels with the configuration: it
+     * would let a compromised sync account write acknowledged:["CATCH_ALL"] and
+     * install a universal redirector without a single screen or click. Same
+     * argument as the journal -- A CONTROL THAT TRAVELS BY THE CHANNEL IT IS
+     * MEANT TO WATCH IS WORTHLESS. Its home is a separate storage.local entry
+     * (see key-acknowledgements.js), merged back in at reconstitution.
+     */
     toJSON() {
-      return { armed: this._armed, acknowledged: this.acknowledgedKinds() };
+      const scoped = global.ShortcutWarning.kindsInScope("destination");
+      return {
+        armed: this._armed,
+        acknowledged: this.acknowledgedKinds().filter((k) => scoped.includes(k)),
+      };
     }
   }
 
@@ -68,14 +93,29 @@
     if (!Array.isArray(kinds)) {
       return { ok: false, code: "CONSENT_NOT_A_LIST", message: "`acknowledged` must be a list." };
     }
+    // What a document may say about acknowledgements, as a table -- because the
+    // two halves ("refuse the key scope" and "admit the entry anyway") read in
+    // opposite directions, and the wrong direction is a self-quarantine loop:
+    // the user acknowledges, toJSON writes, storage.onChanged wakes sync(),
+    // restore refuses, and the entry the user just authorised lands in
+    // quarantine seconds later -- on every device, every time, unrepairable.
+    //
+    //   destination scope -> KEPT
+    //   key scope         -> DROPPED SILENTLY, the entry is still admitted
+    //   unknown           -> HARD REFUSAL (a misspelled acknowledgement stays a
+    //                        silent failure of a security control)
+    //
+    // Quarantine is for what we cannot READ. Here we read perfectly well; we
+    // refuse to BELIEVE.
     const seen = new Set();
     for (const kind of kinds) {
-      if (!global.DestinationWarning.has(kind)) {
+      if (!global.ShortcutWarning.has(kind)) {
         return { ok: false, code: "UNKNOWN_WARNING_KIND", message: `Unknown warning kind "${kind}".` };
       }
       if (seen.has(kind)) {
         return { ok: false, code: "DUPLICATE_ACKNOWLEDGEMENT", message: `"${kind}" acknowledged twice.` };
       }
+      if (global.ShortcutWarning.scopeOf(kind) === "key") continue;
       seen.add(kind);
     }
     return { ok: true, value: new Consent(raw.armed, seen) };

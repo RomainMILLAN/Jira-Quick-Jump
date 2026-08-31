@@ -19,6 +19,14 @@
     "placeholder", "disabled", "checked", "hidden", "tabindex", "name",
     "aria-label", "aria-checked", "aria-pressed", "aria-invalid", "aria-live",
     "aria-hidden", "aria-describedby", "data-id", "data-kind", "data-field",
+    // aria-disabled, never disabled, at the ends of a reorderable list: a
+    // disabled button is not focusable, so a keyboard user who moves a row to
+    // position one loses focus to <body>. aria-atomic goes with the live region
+    // that announces the move. Deliberately NOT added: readonly (a read-only
+    // field is focusable and useless -- static text is more honest) and
+    // draggable (drag and drop needs a keyboard alternative anyway, which is
+    // exactly these buttons).
+    "aria-disabled", "aria-atomic",
     "width", "height", "viewBox", "fill", "stroke", "stroke-width",
     "stroke-linecap", "stroke-linejoin", "d", "rel", "target",
   ]);

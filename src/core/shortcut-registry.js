@@ -1,15 +1,36 @@
 /**
- * The directory of shortcuts, guardian of key uniqueness.
+ * The directory of shortcuts, guardian of key uniqueness AND of evaluation
+ * order.
  *
  * Not `Mapping`: that is the name of the dictionary used to implement it, not of
  * the responsibility. This is a registry -- you ask it for ABC, it gives you the
  * address, and it refuses two entries under the same name.
  *
+ * THE MAP'S INSERTION ORDER *IS* THE EVALUATION ORDER, first to last. That used
+ * to be an accident of implementation; it is now a named, tested invariant, and
+ * a piece of DOMAIN DATA persisted as the order of the `shortcuts` array. There
+ * is exactly ONE representation of it: an order held both by the Map and by a
+ * separate array would let the two diverge unobservably, on the very datum this
+ * feature adds. `_with(id, shortcut)` relies on Map.set PRESERVING THE POSITION
+ * of an existing key, so editing a destination never moves a row.
+ *
+ * `register` APPENDS, always. It is the single way in, and JumpPolicy.restore
+ * replays it entry by entry to rebuild from storage: a register that also placed
+ * rows would silently rewrite the persisted order on every read, changing an
+ * effective destination with no user gesture and no event. A customs officer
+ * stamps or refuses; he does not rearrange the suitcases. The convenience of
+ * being born above the catch-all is an APPLICATION intention, and it lives
+ * inside the membrane (see JumpPolicy.registerAboveCatchAll).
+ *
  * EVERY mutation is addressed BY IDENTITY, never by key. Otherwise: the options
  * page has a debounced keystroke on ABC, the popup renames ABC to XYZ, the
  * compare-and-set correctly re-reads... and withBaseUrlFor('ABC', ...) aims at a
- * ghost. The coalesceKey only decides which pending write replaces which; it does
- * not protect the target of the mutator.
+ * ghost.
+ *
+ * NO MUTATION EMITS EVENTS ANY MORE. A comparison between two states is the work
+ * of neither state: PolicyDiff.between is the single producer, called once per
+ * commit. A mutator that journals is no longer pure, and the compare-and-set
+ * replays it up to three times.
  */
 (function (global) {
   "use strict";
@@ -28,8 +49,83 @@
       this._byId = byId;
     }
 
+    /** In EVALUATION ORDER, first to last. First claimant wins. */
     shortcuts() {
       return [...this._byId.values()];
+    }
+
+    orderedIds() {
+      return [...this._byId.keys()];
+    }
+
+    positionOf(id) {
+      return this.orderedIds().indexOf(id);
+    }
+
+    /**
+     * Reordering, stated ABSOLUTELY: the full ordered list of ids.
+     *
+     * NOT moveUp/swapWith. VersionedEntry replays this intention on a value that
+     * may already contain its own effect, so "move up by one" would move up by
+     * two. Applying withOrder twice is a no-op, which is the only property that
+     * makes a replay safe. The UI's up/down buttons compute the list from their
+     * snapshot; the intention that crosses the boundary is never relative.
+     *
+     * ORDER_STALE rather than "apply what is known and append the rest": the
+     * latter would silently drop a concurrently added shortcut BELOW the
+     * catch-all, which is to say kill it.
+     */
+    withOrder(ids) {
+      const current = this.orderedIds();
+      const sameSet =
+        Array.isArray(ids) &&
+        ids.length === current.length &&
+        new Set(ids).size === ids.length &&
+        ids.every((id) => this._byId.has(id));
+      if (!sameSet) {
+        return MutationResult.refused("ORDER_STALE", "The order changed elsewhere. Try again.");
+      }
+      if (ids.every((id, i) => id === current[i])) return MutationResult.ok(this);
+      const next = new Map();
+      for (const id of ids) next.set(id, this._byId.get(id));
+      return MutationResult.ok(new ShortcutRegistry(next));
+    }
+
+    /**
+     * Which shortcuts a catch-all placed before them makes unreachable.
+     *
+     * Derived from the DOMAIN rule -- "the catch-all claims every reference, the
+     * order is first-wins, so nothing after it can be claimed" -- and NOT from
+     * the priority of any DNR rule. That rule is true with zero reserved
+     * prefixes, and it is what the arithmetic implements rather than founds.
+     */
+    shadowedIds() {
+      const ids = this.orderedIds();
+      const catchAll = this.catchAll();
+      if (!catchAll) return [];
+      return ids.slice(ids.indexOf(catchAll.id()) + 1);
+    }
+
+    isShadowed(id) {
+      return this.shadowedIds().includes(id);
+    }
+
+    /**
+     * The first shortcut that claims this reference, among those offered.
+     *
+     * `eligible` is the set the CALLER considers live -- armed, acknowledged, and
+     * with engines ticked. The registry knows none of that, which is why the
+     * question is asked from JumpPolicy and answered here only for the ordering
+     * and the lookup.
+     */
+    claimantFor(reference, eligible) {
+      const key = reference.key();
+      for (const shortcut of this._byId.values()) {
+        if (eligible && !eligible(shortcut)) continue;
+        if (!shortcut.key().separators().includes(reference.separator())) continue;
+        if (shortcut.key().captures(key)) return shortcut;
+      }
+      return undefined;
     }
 
     size() {
@@ -53,19 +149,47 @@
       return false;
     }
 
+    /** The catch-all shortcut, or undefined. A registry knows its own shortcuts;
+     *  an order of identifiers could not tell which one is a catch-all. */
+    catchAll() {
+      for (const shortcut of this._byId.values()) {
+        if (shortcut.key().isCatchAll()) return shortcut;
+      }
+      return undefined;
+    }
+
+    _holdsCatchAll(exceptId) {
+      const existing = this.catchAll();
+      return existing !== undefined && existing.id() !== exceptId;
+    }
+
     /**
-     * The single way in. The id is supplied by the caller (crypto.randomUUID),
-     * which makes register IDEMPOTENT: replayed with the same id it is a no-op
-     * rather than a DUPLICATE_KEY. That matters because the compare-and-set
-     * replays intentions, and it gives DUPLICATE_KEY back its exact meaning -- a
-     * real collision coming from the other surface, never a retry artefact.
+     * The single way in, and it APPENDS. The id is supplied by the caller
+     * (crypto.randomUUID), which makes register IDEMPOTENT: replayed with the
+     * same id it is a no-op rather than a DUPLICATE_KEY. That matters because the
+     * compare-and-set replays intentions, and it gives DUPLICATE_KEY back its
+     * exact meaning -- a real collision coming from the other surface, never a
+     * retry artefact.
+     *
+     * The id SHAPE is enforced here rather than at the admission door, because
+     * StoredPolicy.promote reaches register without passing through admitEntry,
+     * carrying an id taken from quarantine.
      */
     register(id, key, instance, consent = Consent.fresh()) {
+      const wellFormed = global.ShortcutId.parse(id);
+      if (!wellFormed.ok) return MutationResult.refused(wellFormed.code, wellFormed.message);
       const existing = this._byId.get(id);
       if (existing) {
         if (existing.key().equals(key) && existing.instance().equals(instance)) {
           return MutationResult.ok(this);
         }
+      }
+      // Before _holdsKey, or CatchAllKey.equals would answer DUPLICATE_KEY and
+      // the code would lose its precise meaning. Kept as a better MESSAGE, not
+      // as a second control: _holdsKey already refuses, and two controls end up
+      // disagreeing.
+      if (key.isCatchAll() && this._holdsCatchAll(id)) {
+        return MutationResult.refused("DUPLICATE_CATCH_ALL", "There is already a catch-all shortcut.");
       }
       if (this._holdsKey(key, id)) {
         return MutationResult.refused("DUPLICATE_KEY", `The key ${key} is already used.`);
@@ -97,32 +221,36 @@
     }
 
     /**
-     * Emits DestinationChanged when the destination actually changes -- and
-     * nothing when it does not, otherwise a compare-and-set replay would
-     * fabricate an event where old === new.
-     *
-     * The event carries no `when` and no `source`: those are STAMPED BY THE
-     * WRITER (see background.js). An inferred source would label the other
-     * surface's legitimate edit as suspicious, and a badge that cries wolf is a
-     * badge people learn to ignore.
+     * EMITS NOTHING. It used to build a DestinationChanged here, and PolicyDiff
+     * now derives the same fact once per commit -- keeping both would put the
+     * same change twice into a journal capped at twenty entries.
      */
     withBaseUrlFor(id, instance) {
       const shortcut = this._byId.get(id);
       if (!shortcut) return MutationResult.refused("UNKNOWN_SHORTCUT", "This shortcut no longer exists.");
       if (shortcut.instance().equals(instance)) return MutationResult.ok(this);
-      const event = {
-        shortcutId: id,
-        key: shortcut.key().toString(),
-        oldBaseUrl: shortcut.instance().baseUrl(),
-        newBaseUrl: instance.baseUrl(),
-      };
-      return MutationResult.ok(this._with(id, shortcut.withInstance(instance)), [event]);
+      return MutationResult.ok(this._with(id, shortcut.withInstance(instance)));
     }
 
+    /**
+     * Refuses a change of NATURE, and carries the message.
+     *
+     * Without it, a named shortcut that is already armed and acknowledged could
+     * become a catch-all while keeping its consent -- a universal redirector
+     * obtained without ever seeing the CATCH_ALL warning. The entity throws on
+     * the same condition (see ProjectShortcut.withKey): the throw is the
+     * post-condition, this refusal is the sentence the user reads.
+     */
     withKeyFor(id, key) {
       const shortcut = this._byId.get(id);
       if (!shortcut) return MutationResult.refused("UNKNOWN_SHORTCUT", "This shortcut no longer exists.");
       if (shortcut.key().equals(key)) return MutationResult.ok(this);
+      if (shortcut.key().isCatchAll() !== key.isCatchAll()) {
+        return MutationResult.refused(
+          "KEY_NATURE_IMMUTABLE",
+          "A catch-all cannot be renamed, and a shortcut cannot become a catch-all."
+        );
+      }
       if (this._holdsKey(key, id)) {
         return MutationResult.refused("DUPLICATE_KEY", `The key ${key} is already used.`);
       }
@@ -134,7 +262,7 @@
       if (!shortcut) return MutationResult.refused("UNKNOWN_SHORTCUT", "This shortcut no longer exists.");
       // An acknowledgement that acknowledges nothing because the string is
       // misspelled is a silent failure of a security control.
-      if (!global.DestinationWarning.has(kind)) {
+      if (!global.ShortcutWarning.has(kind)) {
         return MutationResult.refused("UNKNOWN_WARNING_KIND", `Unknown warning kind "${kind}".`);
       }
       return MutationResult.ok(this._with(id, shortcut.withConsent(shortcut.consent().acknowledging(kind))));

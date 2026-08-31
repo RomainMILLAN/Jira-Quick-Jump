@@ -28,7 +28,30 @@ installed are inspectable.
 
 Your shortcuts — issue keys and their Jira base URLs — plus which engines you
 selected and what you acknowledged. Also a short journal, capped at 20 entries,
-of when a destination changed.
+of when a destination changed, and two small local records described below.
+
+**A catch-all sends more than you might expect.** With a catch-all armed, *any*
+text shaped like an issue key — `PAYROLL-3`, `BAN-123`, a project you never
+declared — leaves for that Jira instance and lands in its access logs as
+`/browse/PAYROLL-3`. That is a real outbound flow, and it is the extension that
+creates it, so it is stated here rather than left for you to discover. Two things
+bound it: a catch-all accepts the hyphen only, so `SALARY 2024` and `WINDOWS 11`
+never leave; and a closed list of reserved prefixes (`ISO`, `CVE`, `COVID`, `WD`
+and about forty-five more) is left alone. The list is a mitigation, never a
+completeness claim — `MP3-320` and `X1-9` are key-shaped and will be caught.
+
+Two records live in **local storage only**, never synced and never exported, for
+the same reason the journal does — *a control that travels by the channel it is
+meant to watch is worthless*:
+
+- **Which catch-all warnings you accepted.** Keyed by the shortcut, its
+  destination and its nature. It stays local so that a compromised browser
+  account cannot accept a universal redirect on your behalf. The consequence is
+  visible: on a second device you accept the warning again.
+- **The last policy that was installed**, so that a change made while the
+  extension was not running still raises a banner. It holds the same Jira host
+  names as your configuration, which means those host names exist in two local
+  records rather than one.
 
 **Storage is local to the device by default.** It never leaves your browser
 profile.

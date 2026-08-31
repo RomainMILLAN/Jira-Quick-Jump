@@ -45,9 +45,27 @@ signed build for a team.
 2. **Add a shortcut.** A key (`ABC`) and where it points
    (`example.atlassian.net`). Self-hosted works: a port and a path are both
    accepted, so `intra.example.org/jira` is fine, and so is `http://jira:8080`.
-3. **Grant access.** One browser prompt, naming the host. Nothing redirects
+   The list is **evaluated from top to bottom and the first match wins**, and the
+   arrows on each row reorder it.
+3. **Or add a catch-all.** One entry, keyed `*`, that claims every issue key you
+   have not declared. Put your exceptions above it:
+
+   ```
+   ECR  →  bnee-web.atlassian.net
+   JUL  →  spiriit.atlassian.net
+   *    →  spiriit.atlassian.net     ← BAN-123, GAIN-123, T1-123 all land here
+   ```
+
+   Anything placed *below* it is **shadowed** — the catch-all claims it first, so
+   it never fires, and the row says so. A catch-all accepts the hyphen only, and
+   leaves a closed list of reserved prefixes (`ISO`, `CVE`, `COVID`…) alone. It
+   also asks for one extra acknowledgement before it will arm, because its blast
+   radius is every search you type.
+4. **Grant access.** One browser prompt, naming the host. Nothing redirects
    before you do this — see [Trust model](#trust-model).
-4. **Arm it**, then try the jump once and look at where you land.
+5. **Arm it**, then try the jump once and look at where you land. **Try a URL**
+   also accepts the bare text you would type, so you can check what a catch-all
+   does and does not claim.
 
 ## Trust model
 
@@ -65,7 +83,12 @@ So the extension shows you the destination everywhere else:
   `/jira-fake`.
 - **Any change of destination raises a banner** before your next jump, naming the
   old and new host and where the change came from. Not after you have typed your
-  password into a copy of your Jira.
+  password into a copy of your Jira. **Reordering counts as a change**: moving a
+  catch-all above a named key changes where that key's traffic goes without
+  touching a single URL, so it raises the banner too, and the banner names the
+  host the traffic now leaves for. The comparison is against the last policy that
+  was actually *installed*, kept locally, so a change made while the extension
+  was asleep is caught on the next wake-up rather than swallowed.
 - The destination **path is not configurable**. A shortcut always resolves to
   `<base>/browse/<KEY-N>`, never to a path an attacker could choose.
 
@@ -80,7 +103,10 @@ So the extension shows you the destination everywhere else:
   update: rules install, and simply never fire.
 - **Nothing is intercepted until you arm it.** Imported shortcuts always arrive
   disarmed, and warnings you accepted before are never carried over — a file
-  cannot pre-approve its own warnings.
+  cannot pre-approve its own warnings. A **catch-all** goes further: accepting its
+  warning is recorded locally and never travels, so a stored or synced
+  configuration cannot arrive pre-approved. On a second device you accept it
+  again, deliberately.
 
 ### What it does not guarantee
 
@@ -100,10 +126,26 @@ refuse it and open an issue.
   *Settings → Search → Provide search suggestions*.
 - **Coupled to your default search engine.** Rules are built for the engines you
   select. Switching to an engine that is not in the catalogue stops the jumps.
-- **False positives are possible but bounded.** A rule matches only when the whole
+- **False positives are bounded differently once a catch-all is armed.** Without
+  one, the bound is that *you chose the key*: a rule matches only when the whole
   search is exactly an issue reference, so `CVE-2024-1234` and `ABC-1234 status`
-  go through untouched. Mapping a key that people genuinely search for — `ISO`,
-  `RFC` — would intercept those searches, and the UI warns you when you try.
+  go through untouched, and the UI warns you if you map something people
+  genuinely search for.
+
+  With a catch-all the bound is no longer your choice, it is two mechanical
+  limits: it accepts **the hyphen only** (so `SALARY 2024`, `WINDOWS 11` and
+  every other "two tokens ending in a number" go through), and it leaves a
+  **closed list of reserved prefixes** alone (`ISO`, `CVE`, `RFC`, `COVID`, `WD`,
+  `MP`, `PS`, `GTA` and about forty more). That list is a **mitigation, never a
+  guarantee of completeness**: `MP3-320`, `X1-9` and `T2-500` are key-shaped and
+  will be caught. If that is not a trade you want, declare your keys instead —
+  they keep working exactly as before.
+- **A catch-all forwards the case you typed.** `ban-123` becomes
+  `/browse/ban-123`, because `declarativeNetRequest` cannot upper-case a captured
+  group. Jira canonicalises it (verified on Atlassian Cloud and Data Center), so
+  you land on `BAN-123` — but the canonicalisation is the destination server's,
+  not ours. A Jira behind a case-sensitive path-rewriting proxy may differ. A
+  declared key is unaffected: its rule writes the key in upper case.
 - **Between machines, last write wins.** With sync enabled, two devices editing at
   once will lose one of the two changes. Storage is local by default.
 

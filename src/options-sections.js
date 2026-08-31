@@ -12,7 +12,7 @@
   "use strict";
 
   const { Dom, Platform, MutationResult, ProjectKey, JiraInstance, SearchEngineCatalog,
-          OriginRequirements, JumpPreview, DestinationWarning } = global;
+          OriginRequirements, JumpPreview, ShortcutWarning } = global;
   const t = (k, f) => Platform.t(k, f);
   const el = Dom.el;
 
@@ -24,6 +24,8 @@
     }, [].concat(d).map((path) => el("path", { d: path })));
 
   const TRASH = "M4 6h16M9 6V4h6v2M18 6l-1 14H7L6 6";
+  const CHEVRON_UP = "M6 15l6-6 6 6";
+  const CHEVRON_DOWN = "M6 9l6 6 6-6";
 
   /** Host in weight, path dimmed -- but the path is ALWAYS rendered. */
   const destination = (instance, className = "dest") => {
@@ -92,18 +94,16 @@
         const last = entries.entries[0];
         Dom.clear(this.banner);
         this.banner.appendChild(el("div", { class: "alert-t", text: t("changedTitle", "A destination changed") }));
-        this.banner.appendChild(el("div", { class: "alert-s" }, [
-          el("span", { class: "dest", text: last.key }),
-          " ",
-          t("changedNow", "now points to"),
-          " ",
-          el("span", { class: "dest host", text: last.newBaseUrl }),
-          ". ",
-          t("changedWas", "It used to point to"),
-          " ",
-          el("span", { class: "dest", text: last.oldBaseUrl }),
-          ".",
-        ]));
+        this.banner.appendChild(el("div", { class: "alert-s" }, FACT_SENTENCE(last)));
+        if (entries.overflowed) {
+          // STICKY, and it says the evidence is MISSING rather than merely that
+          // something overflowed. A camera that no longer films is useless; one
+          // that says "tape full" is worth half a tape.
+          this.banner.appendChild(el("div", {
+            class: "row-msg pending",
+            text: t("journalOverflowed", "Some changes could not be recorded."),
+          }));
+        }
         this.banner.appendChild(el("div", { class: "btn-row" }, [
           el("button", {
             class: "btn", text: t("changedAck", "I have checked it"),
@@ -117,14 +117,95 @@
     },
   };
 
+  /**
+   * One sentence per fact TYPE, as a table.
+   *
+   * The banner used to read `last.key` and `last.newBaseUrl` flat, which was true
+   * when there was only one kind of fact. ShadowingChanged has no `key` and
+   * PolicyReplaced has neither, so the surface whose whole job is to be believed
+   * would render `undefined`. Composed from DOM NODES rather than concatenated
+   * strings, so no label depends on English word order.
+   */
+  const FACT_SENTENCE = (fact) => {
+    const host = (text) => el("span", { class: "dest host", text });
+    const plain = (text) => el("span", { class: "dest", text });
+    switch (fact.type) {
+      case "ShortcutAppeared":
+      case "CatchAllAppeared":
+        return [
+          plain(fact.key || t("catchAllKey", "Any key")),
+          " ",
+          t("factAppeared", "was added, pointing to"),
+          " ",
+          host(fact.baseUrl),
+          ".",
+        ];
+      case "ShortcutRemoved":
+      case "CatchAllRemoved":
+        return [
+          plain(fact.key || t("catchAllKey", "Any key")),
+          " ",
+          t("factRemoved", "was removed. It pointed to"),
+          " ",
+          host(fact.baseUrl),
+          ".",
+        ];
+      case "ShadowingChanged":
+        return [
+          t("factShadowed", "These keys now go to the catch-all:"),
+          " ",
+          plain((fact.affectedKeys || []).join(", ")),
+          " ",
+          t("changedNow", "now points to"),
+          " ",
+          host(fact.catchAllBaseUrl),
+          ".",
+        ];
+      case "PolicyReplaced":
+        return [t("factReplaced", "The whole configuration changed elsewhere. Check every destination.")];
+      default:
+        return [
+          plain(fact.key),
+          " ",
+          t("changedNow", "now points to"),
+          " ",
+          host(fact.newBaseUrl),
+          ". ",
+          t("changedWas", "It used to point to"),
+          " ",
+          plain(fact.oldBaseUrl),
+          ".",
+        ];
+    }
+  };
+
   // The core returns a CODE; the sentence is written here, and therefore
   // translated here. Built lazily: t() reads the browser's locale, which is not
   // available while this file is still being evaluated in a service worker.
+  /**
+   * The four warning messages never went through t(), so the French build was
+   * half English on exactly the screens this feature adds. Lazy, like DIAGNOSIS
+   * below: t() reads the locale, which is not available while this file is still
+   * being evaluated in a service worker.
+   */
+  const WARNING_MESSAGE = () => ({
+    INSECURE_SCHEME: t("warnInsecureScheme", "Traffic and your Jira session cookie travel in clear text."),
+    INTERNAL_HOST: t("warnInternalHost", "This destination is on a private or non-public network."),
+    LITERAL_IP: t("warnLiteralIp", "This destination is an IP address rather than a host name."),
+    PUNYCODE: t("warnPunycode", "This host name uses non-ASCII characters and may imitate another one."),
+    CATCH_ALL: t("warnCatchAll", "Every key-shaped search on your engines will leave for this destination."),
+  });
+
   const DIAGNOSIS = () => ({
     DISARMED: t("diagDisarmed", "Every shortcut is off. Searches behave normally."),
     NO_SHORTCUTS: t("diagNoShortcuts", "No shortcut yet, so nothing is intercepted."),
     NO_ENGINES: t("diagNoEngines", "No search engine selected, so no rule can be built."),
     ALL_SHORTCUTS_DISARMED: t("diagAllOff", "Every shortcut is disarmed."),
+    ALL_SHORTCUTS_AWAITING_ACKNOWLEDGEMENT: t("diagAllAwaitingAck", "Every armed shortcut is waiting for a warning to be accepted."),
+    ALL_SHORTCUTS_SHADOWED: t("diagAllShadowed", "Every shortcut sits below the catch-all, so none of them fires."),
+    CATCH_ALL_NOT_INSTALLED: t("diagCatchAllNotInstalled", "The catch-all could not be installed, so it claims nothing."),
+    INSTALL_FAILED: t("diagInstallFailed", "The rules could not be installed. What is running may differ from what you see."),
+    SOME_SHADOWED: t("diagSomeShadowed", "Some shortcuts sit below the catch-all and never fire."),
     PARTIAL_POLICY: t("diagPartial", "Some saved entries could not be read back."),
     MISSING_ORIGINS: t("diagMissingOrigins", "Rules are installed but cannot fire: access is missing."),
     READY: t("diagReady", "Ready."),
@@ -134,6 +215,11 @@
     NO_SHORTCUTS: t("tagEmpty", "Empty"),
     NO_ENGINES: t("tagNoEngine", "No engine"),
     ALL_SHORTCUTS_DISARMED: t("tagAllOff", "All off"),
+    ALL_SHORTCUTS_AWAITING_ACKNOWLEDGEMENT: t("tagAwaitingAck", "Not accepted"),
+    ALL_SHORTCUTS_SHADOWED: t("tagAllShadowed", "All shadowed"),
+    CATCH_ALL_NOT_INSTALLED: t("tagCatchAllOff", "Catch-all off"),
+    INSTALL_FAILED: t("tagInstallFailed", "Not installed"),
+    SOME_SHADOWED: t("tagSomeShadowed", "Some shadowed"),
     PARTIAL_POLICY: t("tagPartial", "Partial"),
     MISSING_ORIGINS: t("tagNoAccess", "No access"),
     READY: t("tagReady", "Ready"),
@@ -141,35 +227,139 @@
   const TAG_TONE = {
     READY: "ok", MISSING_ORIGINS: "warn", PARTIAL_POLICY: "warn",
     NO_ENGINES: "warn", NO_SHORTCUTS: "off", ALL_SHORTCUTS_DISARMED: "off", DISARMED: "off",
+    ALL_SHORTCUTS_AWAITING_ACKNOWLEDGEMENT: "warn", ALL_SHORTCUTS_SHADOWED: "warn",
+    CATCH_ALL_NOT_INSTALLED: "warn", SOME_SHADOWED: "warn",
+    // The only state where the installed reality contradicts the whole screen.
+    INSTALL_FAILED: "warn",
   };
 
   // ------------------------------------------------------------- Shortcuts
 
   const Shortcuts = {
     drafts: [],
+    // The OPTIMISTIC order: an array of ids while a coalesced write is pending,
+    // null otherwise. section-host re-renders this subtree (isEditing only
+    // protects INPUT and TEXTAREA), so it has to survive a redraw.
+    order: null,
 
     mount(root, ctx) {
-      root.appendChild(label(t("shortcuts", "Shortcuts"), t("shortcutsNote", "Where each issue key sends you.")));
-      this.rows = el("div", { class: "rows rows-spaced" });
+      root.appendChild(label(
+        t("shortcuts", "Shortcuts"),
+        t("orderNote", "Evaluated from top to bottom. The first match wins.")
+      ));
+      // An <ol>, so screen readers announce "item 2 of 5" NATIVELY, in the
+      // reader's own language, with zero strings to translate. Which is why the
+      // placeholder ban in the locale test is not weakened for an aria-label.
+      this.rows = el("ol", { class: "rows rows-spaced" });
+      this.announcer = el("div", {
+        class: "sr-only", role: "status", "aria-live": "polite", "aria-atomic": true,
+      });
       root.appendChild(this.rows);
-      root.appendChild(el("div", { class: "btn-row" }, [
-        el("button", {
-          class: "btn", text: t("addShortcut", "Add shortcut"),
-          onClick: () => {
-            this.drafts.push({ rowId: crypto.randomUUID(), key: "", url: "" });
-            this.render(ctx.stored(), ctx);
-          },
-        }),
-      ]));
+      root.appendChild(this.announcer);
+      this.actions = el("div", { class: "btn-row" });
+      root.appendChild(this.actions);
     },
 
-    render(stored, ctx) {
-      Dom.clear(this.rows);
-      for (const shortcut of stored.policy().shortcuts()) {
-        this.rows.appendChild(this.savedRow(shortcut, ctx));
+    announce(sentence) {
+      if (this.announcer) this.announcer.textContent = sentence;
+    },
+
+    /** The order to draw, reconciled with what storage actually holds. */
+    displayedOrder(stored) {
+      const ids = stored.policy().registry().orderedIds();
+      if (!this.order) return ids;
+      const sameSet = this.order.length === ids.length && this.order.every((id) => ids.includes(id));
+      // A foreign change to the SET makes the optimistic order meaningless, and
+      // the queued write would only collect ORDER_STALE.
+      if (!sameSet) {
+        this.order = null;
+        return ids;
       }
+      if (this.order.every((id, i) => id === ids[i])) {
+        this.order = null; // storage caught up
+        return ids;
+      }
+      return this.order;
+    },
+
+    move(id, delta, stored, ctx) {
+      const shown = [...this.displayedOrder(stored)];
+      const from = shown.indexOf(id);
+      const to = from + delta;
+      if (to < 0 || to >= shown.length) {
+        this.announce(delta < 0
+          ? t("alreadyFirst", "Already first.")
+          : t("alreadyLast", "Already last."));
+        return;
+      }
+      shown.splice(to, 0, ...shown.splice(from, 1));
+      this.order = shown;
+      // ABSOLUTE, never a step: the compare-and-set replays this intention on a
+      // value that may already contain its own effect.
+      ctx.applyToPolicy((policy) => policy.withOrder(shown), "shortcuts:order");
+      this.render(ctx.stored(), ctx, { focus: { id, delta } });
+      this.announce(delta < 0 ? t("movedUp", "Moved up.") : t("movedDown", "Moved down."));
+    },
+
+    render(stored, ctx, options = {}) {
+      const policy = stored.policy();
+      const ordered = this.displayedOrder(stored);
+      Dom.clear(this.rows);
+      let toFocus = null;
+      ordered.forEach((id, index) => {
+        const shortcut = policy.registry().find(id);
+        if (!shortcut) return;
+        const row = this.savedRow(shortcut, ctx, {
+          policy,
+          index,
+          total: ordered.length,
+          onMove: (delta) => this.move(id, delta, ctx.stored(), ctx),
+        });
+        this.rows.appendChild(row.node);
+        if (options.focus && options.focus.id === id) {
+          // The reference of the node we just built, never a querySelector with
+          // an interpolated data-id: that would be a selector injection in a page
+          // running with the extension's own privileges.
+          toFocus = options.focus.delta < 0 ? row.moveUp : row.moveDown;
+        }
+      });
       for (const draft of this.drafts) {
         this.rows.appendChild(this.draftRow(draft, ctx));
+      }
+      this.renderActions(policy, ctx);
+      if (toFocus) toFocus.focus();
+    },
+
+    renderActions(policy, ctx) {
+      Dom.clear(this.actions);
+      this.actions.appendChild(el("button", {
+        class: "btn", text: t("addShortcut", "Add shortcut"),
+        onClick: () => {
+          this.drafts.push({ rowId: crypto.randomUUID(), key: "", url: "", catchAll: false });
+          this.render(ctx.stored(), ctx);
+        },
+      }));
+      const existing = policy.catchAllShortcut();
+      this.actions.appendChild(el("button", {
+        class: "btn", text: t("addCatchAll", "Add a catch-all"),
+        // The model would refuse a second one, but the UI must not offer a
+        // doomed click -- and it says why.
+        "aria-disabled": existing !== undefined,
+        "aria-describedby": existing ? "catch-all-exists" : undefined,
+        onClick: () => {
+          if (policy.catchAllShortcut()) {
+            this.announce(t("catchAllExists", "There can only be one catch-all."));
+            return;
+          }
+          this.drafts.push({ rowId: crypto.randomUUID(), key: "", url: "", catchAll: true });
+          this.render(ctx.stored(), ctx);
+        },
+      }));
+      if (existing) {
+        this.actions.appendChild(el("span", {
+          class: "note", id: "catch-all-exists",
+          text: t("catchAllExists", "There can only be one catch-all."),
+        }));
       }
     },
 
@@ -181,25 +371,53 @@
       });
     },
 
-    savedRow(shortcut, ctx) {
+    savedRow(shortcut, ctx, { policy, index, total, onMove }) {
       const id = shortcut.id();
       const pending = shortcut.unacknowledgedWarnings();
+      // statusOf is the SOLE judge of a row, so the row's vocabulary is the one
+      // diagnose() speaks and two places never qualify the same line.
+      const status = policy.statusOf(id);
+      const isCatchAll = shortcut.key().isCatchAll();
 
-      const keyInput = el("input", {
-        class: "f key", value: shortcut.key().toString(),
-        "aria-label": t("key", "Key"),
-        onInput: (event) => this.editKey(event.target, id, ctx),
-      });
+      const arrow = (path, delta, ariaLabel, atEdge) =>
+        el("button", {
+          class: "btn icon move", "aria-label": ariaLabel,
+          // aria-disabled, never disabled: a disabled button is not focusable, so
+          // moving a row to the top would drop focus to <body>.
+          "aria-disabled": atEdge,
+          "data-field": delta < 0 ? "move-up" : "move-down",
+          onClick: () => onMove(delta),
+        }, [icon(path, 12)]);
 
-      const row = el("div", {
-        class: `row${pending.length > 0 ? " is-pending" : ""}`, "data-id": id,
+      const moveUp = arrow(CHEVRON_UP, -1, t("moveUp", "Move up"), index === 0);
+      const moveDown = arrow(CHEVRON_DOWN, 1, t("moveDown", "Move down"), index === total - 1);
+
+      // Static text rather than a read-only input: readonly is not in the DOM
+      // whitelist, and a read-only field is focusable and useless.
+      const keyCell = isCatchAll
+        ? el("div", { class: "f key is-static" }, [
+            el("span", { text: t("catchAllKey", "Any key") }),
+            el("code", { text: shortcut.key().toString() }),
+          ])
+        : el("input", {
+            class: "f key", value: shortcut.key().toString(),
+            "aria-label": t("key", "Key"),
+            onInput: (event) => this.editKey(event.target, id, ctx),
+          });
+
+      const reasonId = `why-${id}`;
+      const row = el("li", {
+        class: `row${pending.length > 0 ? " is-pending" : ""}${status === "SHADOWED" ? " is-shadowed" : ""}`,
+        "data-id": id,
       }, [
-        el("div", { class: "f-key" }, [el("div", { class: "field-label", text: t("key", "Key") }), keyInput]),
+        el("div", { class: "f-ord" }, [moveUp, moveDown]),
+        el("div", { class: "f-key" }, [el("div", { class: "field-label", text: t("key", "Key") }), keyCell]),
         el("div", { class: "f-url" }, [
           el("div", { class: "field-label", text: t("destination", "Destination") }),
           el("input", {
             class: "f", value: shortcut.instance().baseUrl(),
             "aria-label": t("destination", "Destination"),
+            "aria-describedby": status === "SHADOWED" ? reasonId : undefined,
             onInput: (event) => this.editUrl(event.target, id, ctx),
           }),
         ]),
@@ -214,46 +432,70 @@
         )]),
         el("div", { class: "f-del" }, [el("button", {
           class: "btn icon", "aria-label": t("remove", "Remove this shortcut"),
-          onClick: () => ctx.apply((s) => {
-            const next = s.policy().remove(id);
-            return next.ok ? MutationResult.ok(s.withPolicy(next.value), next.events) : next;
-          }),
+          onClick: () => ctx.applyToPolicy((p) => p.remove(id)),
         }, [icon(TRASH)])]),
       ]);
+
+      if (status === "SHADOWED") {
+        // A text chip, because state colour must never be the only signal -- and
+        // a WRITTEN reason, referenced by aria-describedby so a screen-reader
+        // user hears WHY rather than meeting a grey box. Every control stays
+        // operable: the row has to be movable back up, or deleted.
+        row.appendChild(el("span", { class: "tag off", text: t("shadowed", "Shadowed") }));
+        row.appendChild(el("div", {
+          class: "row-msg pending", id: reasonId,
+          text: t("shadowedWhy", "The catch-all above it matches first, so this shortcut never fires. Move it above the catch-all."),
+        }));
+      }
 
       if (pending.length > 0) {
         row.appendChild(el("div", { class: "acks" }, [
           ...pending.map((warning) => el("label", { class: "ack" }, [
             el("input", {
               type: "checkbox",
-              onChange: () => ctx.apply((s) => {
-                const next = s.policy().acknowledge(id, warning.kind);
-                return next.ok ? MutationResult.ok(s.withPolicy(next.value), next.events) : next;
-              }),
+              onChange: () => ctx.applyToPolicy((p) => p.acknowledge(id, warning.kind)),
             }),
-            warning.message,
+            WARNING_MESSAGE()[warning.kind] || warning.message,
           ])),
+          // Two independent high-severity warnings whose COMPOSITION means
+          // something neither says alone. A UI sentence, assembled from DOM
+          // nodes -- not a catalogue entry, which would belong to no scope and be
+          // forgotten on every keystroke in the destination field.
+          pending.some((w) => w.kind === "CATCH_ALL") && pending.some((w) => w.kind === "INSECURE_SCHEME")
+            ? el("span", { class: "row-msg pending", text: t("catchAllInsecure", "Together: every key-shaped search will leave in clear text.") })
+            : null,
           el("span", { class: "row-msg pending", text: t("ackBlocks", "Arming stays unavailable until these are accepted.") }),
         ]));
       }
-      return row;
+      return { node: row, moveUp, moveDown };
     },
 
     draftRow(draft, ctx) {
       const message = el("div", { class: "row-msg refused", hidden: true });
-      const row = el("div", { class: "row" }, [
-        el("div", { class: "f-key" }, [
-          el("div", { class: "field-label", text: t("key", "Key") }),
-          el("input", {
+      // The catch-all draft has NO key field at all: the Key input never sees `*`,
+      // at any point. The UI expresses a gesture and the core forges the key.
+      // No written form here: it belongs to the key, and a draft has no key yet.
+      // The saved row shows it, from shortcut.key().toString().
+      const keyCell = draft.catchAll
+        ? el("div", { class: "f key is-static" }, [
+            el("span", { text: t("catchAllKey", "Any key") }),
+          ])
+        : el("input", {
             class: "f key", placeholder: "ABC", value: draft.key, "aria-label": t("key", "Key"),
             onInput: (event) => { draft.key = event.target.value; this.tryRegister(draft, row, message, ctx); },
-          }),
+          });
+      const row = el("li", { class: "row" }, [
+        el("div", { class: "f-ord" }),
+        el("div", { class: "f-key" }, [
+          el("div", { class: "field-label", text: t("key", "Key") }),
+          keyCell,
         ]),
         el("div", { class: "f-url" }, [
           el("div", { class: "field-label", text: t("destination", "Destination") }),
           el("input", {
             class: "f", placeholder: "example.atlassian.net", value: draft.url,
             "aria-label": t("destination", "Destination"),
+            "aria-describedby": draft.catchAll ? "catch-all-note" : undefined,
             onInput: (event) => { draft.url = event.target.value; this.tryRegister(draft, row, message, ctx); },
           }),
         ]),
@@ -265,6 +507,12 @@
             this.render(ctx.stored(), ctx);
           },
         }, [icon(TRASH)])]),
+        draft.catchAll
+          ? el("div", {
+              class: "row-msg pending", id: "catch-all-note",
+              text: t("catchAllNote", "Any key-shaped text goes to this destination."),
+            })
+          : null,
         message,
       ]);
       return row;
@@ -272,7 +520,8 @@
 
     /** Validation runs on every keystroke; the write only happens once both parse. */
     tryRegister(draft, row, message, ctx) {
-      const key = ProjectKey.parse(draft.key);
+      // A catch-all draft has no key to parse: only its destination.
+      const key = draft.catchAll ? { ok: true } : ProjectKey.parse(draft.key);
       const instance = JiraInstance.parse(draft.url);
       const failure = !key.ok && draft.key !== "" ? key : !instance.ok && draft.url !== "" ? instance : null;
       message.hidden = failure === null;
@@ -282,30 +531,29 @@
 
       const id = draft.rowId;
       this.drafts = this.drafts.filter((d) => d !== draft);
-      ctx.apply((s) => {
-        const next = s.policy().register(id, key.value, instance.value);
-        return next.ok ? MutationResult.ok(s.withPolicy(next.value), next.events) : next;
-      });
+      ctx.applyToPolicy((policy) =>
+        draft.catchAll
+          ? policy.registerCatchAll(id, instance.value)
+          // The named door that keeps "a shortcut is useless below the catch-all"
+          // inside the membrane, and composes register + withOrder there.
+          : policy.registerAboveCatchAll(id, key.value, instance.value));
     },
 
     editKey(input, id, ctx) {
+      // ProjectKey.parse, deliberately: the typed field is NOT the storage door,
+      // and the only door that turns a string into a catch-all key must stay out
+      // of this file. A structure test greps for it literally, comments included.
       const parsed = ProjectKey.parse(input.value);
       input.setAttribute("aria-invalid", String(!parsed.ok));
       if (!parsed.ok) return;
-      ctx.apply((s) => {
-        const next = s.policy().withKeyFor(id, parsed.value);
-        return next.ok ? MutationResult.ok(s.withPolicy(next.value), next.events) : next;
-      }, `shortcut:${id}:key`);
+      ctx.applyToPolicy((policy) => policy.withKeyFor(id, parsed.value), `shortcut:${id}:key`);
     },
 
     editUrl(input, id, ctx) {
       const parsed = JiraInstance.parse(input.value);
       input.setAttribute("aria-invalid", String(!parsed.ok));
       if (!parsed.ok) return;
-      ctx.apply((s) => {
-        const next = s.policy().withBaseUrlFor(id, parsed.value);
-        return next.ok ? MutationResult.ok(s.withPolicy(next.value), next.events) : next;
-      }, `shortcut:${id}:baseUrl`);
+      ctx.applyToPolicy((policy) => policy.withBaseUrlFor(id, parsed.value), `shortcut:${id}:baseUrl`);
     },
   };
 
@@ -470,15 +718,20 @@
 
   const Preview = {
     mount(root, ctx) {
-      root.appendChild(label(t("tryIt", "Try a URL"), t("tryItNote", "Paste a search URL to see where it would land.")));
+      root.appendChild(label(
+        t("tryIt", "Try a URL"),
+        t("previewTypedHint", "Paste a search URL, or just the text you would type in the address bar.")
+      ));
       this.input = el("input", {
-        class: "f", placeholder: "https://www.google.com/search?q=ABC-1234",
+        class: "f", placeholder: "ABC-1234",
         "aria-label": t("tryIt", "Try a URL"),
         onInput: () => this.preview(ctx),
       });
       this.out = el("div", { class: "preview empty", text: t("tryItEmpty", "Nothing yet.") });
+      this.why = el("div", { class: "preview-why" });
       root.appendChild(this.input);
       root.appendChild(this.out);
+      root.appendChild(this.why);
       this.ctx = ctx;
     },
 
@@ -486,27 +739,65 @@
       /* Stateless: the preview only reflects what is typed into it. */
     },
 
-    preview(ctx) {
-      const result = JumpPreview.forSearchUrl(this.input.value, ctx.stored().policy(), SearchEngineCatalog.forPolicy(ctx.stored().policy()));
+    async preview(ctx) {
+      const typed = this.input.value;
+      // The rules AS INSTALLED, memoised per render by section-host -- never
+      // fetched per keystroke.
+      const report = await ctx.report();
+      const rules = report.rules || [];
+      const policy = ctx.stored().policy();
+      const catalog = SearchEngineCatalog.forPolicy(policy);
+      const engine = catalog.find(policy.engineIds()[0]);
+
+      // TWO NAMED DOORS, and the UI arbitrates -- it is the one that knows the
+      // intention. The gate is a SCHEME test, not "contains a space": `covid 19`
+      // and `iso 9001` are exactly the forms that justify this screen.
+      let result = JumpPreview.forSearchUrl(typed, rules);
+      if (result.code === "NOT_A_URL") result = JumpPreview.forTypedText(typed, rules, engine);
+
       Dom.clear(this.out);
+      Dom.clear(this.why);
       if (!result.ok) {
         this.out.className = "preview empty";
-        this.out.textContent = PREVIEW_MISS[result.code] || result.code;
+        this.out.textContent = PREVIEW_MISS()[result.code] || result.code;
+        if (result.code === "RESERVED_PREFIX") {
+          // THE sentence that makes the reserved prefixes verifiable by the user.
+          // A control the user cannot verify is not a control.
+          this.why.appendChild(el("span", { text: t("previewReservedPrefix", "Held back by a reserved prefix, so the catch-all leaves it alone.") }));
+        }
         return;
       }
       this.out.className = "preview";
       const url = new URL(result.destination);
       this.out.appendChild(el("span", { class: "host", text: url.origin }));
+      // Rendered AS IT IS, lower case included: the honest display is the point.
       this.out.appendChild(el("span", { class: "path", text: url.pathname }));
+      this.why.appendChild(el("span", {
+        text: result.code === "MATCHED_CATCH_ALL"
+          ? t("previewMatchedCatchAll", "Matched the catch-all.")
+          : t("previewMatchedShortcut", "Matched a named shortcut."),
+      }));
+      if (report.skipped && report.skipped.length > 0) {
+        this.why.appendChild(el("span", {
+          class: "row-msg pending",
+          text: t("installDiffers", "The installed configuration differs from the one you see."),
+        }));
+      }
     },
   };
 
-  const PREVIEW_MISS = {
-    NOT_A_URL: "That is not a URL.",
-    NOT_A_SEARCH_URL: "That is not a search URL.",
-    NO_MATCH: "This search would go through untouched.",
-    INPUT_TOO_LONG: "That is too long to be a search URL.",
-  };
+  /** Lazy and translated, like DIAGNOSIS: these four never went through t(). */
+  const PREVIEW_MISS = () => ({
+    NOT_A_URL: t("previewNotAUrl", "That is not a URL."),
+    NOT_A_SEARCH_URL: t("previewNotASearchUrl", "That is not a search URL."),
+    NO_MATCH: t("previewNoMatch", "This search would go through untouched."),
+    INPUT_TOO_LONG: t("previewTooLong", "That is too long to be a search URL."),
+    RESERVED_PREFIX: t("previewNoMatch", "This search would go through untouched."),
+    // NON_DETERMINISTIC is an assertion canary and must stay unreachable, so it
+    // deliberately has no sentence of its own: translating something nobody can
+    // see would be a stage set.
+    NON_DETERMINISTIC: t("previewNoMatch", "This search would go through untouched."),
+  });
 
   // -------------------------------------------------------------- Transfer
 

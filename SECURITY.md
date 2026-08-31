@@ -21,6 +21,25 @@ imported configuration arrive armed; an injection in the options page or popup.
 A report is most useful with the exact input, the resulting rule or destination,
 and which control you think it bypasses.
 
+## What a catch-all changes, and what it costs
+
+Two properties are worth knowing before reporting, because they are deliberate.
+
+**A catch-all makes the extension detectable, and gives any site a navigation
+primitive.** With one armed, a page can call
+`window.open("https://www.google.com/search?q=ZZZZZZ-1")` and force a top-level
+navigation to your Jira host with a path segment of its choosing. Detection is
+the symptom; the forced navigation towards an internal host is the fact. Before
+the catch-all, doing this required guessing a configured key. Rules still apply to
+top-level navigation only, so nothing can probe your network from a sub-resource.
+
+**Failing closed costs availability.** When the configuration cannot be read back
+at all, the dynamic rules are now emptied rather than left running, and the
+options page degrades to a recovery view. That is the right direction — a denied
+jump beats a hijacked one — but it means a compromised sync account can reliably
+*disable* the extension by writing enough unreadable entries. We accept that
+trade rather than leave stale rules firing under a badge that says `off`.
+
 ## The controls worth knowing about
 
 - **A redirect requires host access to its destination.** Nothing fires until the
@@ -37,7 +56,18 @@ and which control you think it bypasses.
   tag and learn which hosts answer.
 - **The destination path is fixed.** A shortcut always resolves to
   `<base>/browse/<KEY-N>`, so an attacker who controls a destination cannot choose
-  a more convincing or more dangerous path.
+  a more convincing or more dangerous path. A catch-all copies the key you typed
+  into that path, so the key's character set is asserted at emission and the
+  captured text can contain no `/`, `.`, `%`, `?`, `#` or backslash.
+- **A key-scoped acknowledgement never travels.** Accepting a catch-all's warning
+  is recorded in local storage, outside the configuration, so a compromised sync
+  account cannot accept a universal redirect on your behalf. The limit, stated:
+  this separates the **sync channel**, not a local attacker — who could write that
+  record just as easily as the configuration itself. Same limit as the journal.
+- **The change detector survives a restart.** The last installed policy is kept
+  locally and compared on every wake-up, so a write pushed while the service
+  worker was dead is still reported. Its absence is treated as a change, never as
+  silence.
 - **Extension pages cannot reach the network** (`connect-src 'none'`), build no
   HTML from strings, and create links only from re-parsed http(s) URLs.
 
