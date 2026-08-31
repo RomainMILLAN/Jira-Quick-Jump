@@ -704,10 +704,22 @@ input.f[aria-invalid="true"] {
 .popup-foot .ver {
   flex-grow: 1;
 }
-/* The only consumer is the Shortcuts section, so widening this touches nothing
-   else. */
-.rows-spaced {
-  margin-bottom: 18px;
+/* The space between the shortcut list and its two buttons.
+
+   It used to live on .rows-spaced, as a bottom margin on the list, and it was
+   SILENTLY DEAD: `ol.rows { margin: 0 }` -- added when the list became an <ol> to
+   drop a list's default margin -- has specificity 0-1-1, which outranks a bare
+   class at 0-1-0 whatever the source order. So the buttons sat flush against the
+   last card, and raising the dead rule from 11px to 18px changed nothing at all.
+   A class that looks like it spaces something and does not is a trap, so it is
+   gone rather than repaired.
+   
+   On the button row now, which is where it reads and where .row-actions already
+   puts it for the Access section -- a little wider than that 11px, because this
+   row follows a stack of cards rather than a run of text. No element-qualified
+   selector competes with it. */
+.shortcuts-actions {
+  margin-top: 18px;
 }
 .row-actions {
   margin-top: 11px;

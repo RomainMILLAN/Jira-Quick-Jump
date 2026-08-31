@@ -316,7 +316,7 @@
       // An <ol>, so screen readers announce "item 2 of 5" NATIVELY, in the
       // reader's own language, with zero strings to translate. Which is why the
       // placeholder ban in the locale test is not weakened for an aria-label.
-      this.rows = el("ol", { class: "rows rows-spaced" });
+      this.rows = el("ol", { class: "rows" });
       // NOT assigned to an attribute: sections have no teardown, SectionHost.stop
       // never calls them, and the listeners live as long as this.rows -- which
       // render only ever empties of its children. Storing a handle would promise a
@@ -333,7 +333,7 @@
       });
       root.appendChild(this.rows);
       root.appendChild(this.announcer);
-      this.actions = el("div", { class: "btn-row" });
+      this.actions = el("div", { class: "btn-row shortcuts-actions" });
       root.appendChild(this.actions);
       this.hint = el("p", { class: "hint", id: "catch-all-exists", hidden: true });
       root.appendChild(this.hint);

@@ -527,3 +527,53 @@ test("the section that can be frozen never owns the trust banner", () => {
   const ui = read("src/options-sections.js");
   assert.match(ui, /OptionsSections = \[Status,/, "Status is the first section");
 });
+
+test("a spacing class is never silently outranked on the same element", () => {
+  // The bug this exists for was invisible, and the FIRST attempt at this test was
+  // invisible too: it compared class NAMES, while the conflict is between two
+  // DIFFERENT classes on the SAME element. `class="rows rows-spaced"` with
+  // `ol.rows { margin: 0 }` (0-1-1) and `.rows-spaced { margin-bottom: 18px }`
+  // (0-1-0): both select that element, the element-qualified one wins whatever the
+  // source order, and the spacing silently does nothing -- so raising the number
+  // changes nothing and absorbs the next attempt to fix the symptom.
+  //
+  // So the class sets come from the JS, where co-occurrence actually lives.
+  const css = read("src/ui/sections.css");
+  const ui = read("src/options-sections.js");
+
+  const rules = [...css.matchAll(/^([^@{}\n][^{}\n]*)\{([^}]*)\}/gm)].map(([, selector, body]) => ({
+    selector: selector.trim(),
+    body,
+  }));
+  const shorthand = (body) => /(^|[\s;])margin\s*:/.test(body);
+  const longhand = (body) => /(^|[\s;])margin-(top|bottom|left|right)\s*:/.test(body);
+
+  // Every set of classes the UI puts on one element, in one attribute.
+  const classSets = [...ui.matchAll(/class:\s*"([^"]+)"/g)].map((m) => m[1].trim().split(/\s+/));
+
+  for (const set of classSets) {
+    const owned = new Set(set);
+    const matching = [];
+    for (const { selector, body } of rules) {
+      // A simple selector made only of classes from this set, optionally led by an
+      // element name: `.a`, `.a.b`, `ol.a`. Anything with a combinator, a
+      // pseudo-class or an attribute is out of scope for this check.
+      const simple = /^([a-z]*)((?:\.[A-Za-z0-9_-]+)+)$/.exec(selector);
+      if (!simple) continue;
+      const classes = simple[2].slice(1).split(".");
+      if (!classes.every((c) => owned.has(c))) continue;
+      if (!shorthand(body) && !longhand(body)) continue;
+      matching.push({ selector, body, weight: classes.length * 10 + (simple[1] ? 1 : 0) });
+    }
+    if (matching.length < 2) continue;
+    const strongest = matching.reduce((a, b) => (b.weight > a.weight ? b : a));
+    if (!shorthand(strongest.body)) continue;
+    for (const rule of matching) {
+      if (rule === strongest || rule.weight >= strongest.weight) continue;
+      assert.fail(
+        `${rule.selector} sets a margin on an element that also matches ${strongest.selector}, ` +
+        `which resets margin and outranks it — the spacing silently does nothing`
+      );
+    }
+  }
+});
