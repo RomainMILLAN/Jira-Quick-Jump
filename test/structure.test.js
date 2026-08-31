@@ -377,3 +377,153 @@ test("the written form of the catch-all key has one owner", () => {
     );
   }
 });
+
+const srcFiles = () => {
+  const walk = (dir, out = []) => {
+    for (const entry of readdirSync(join(ROOT, dir), { withFileTypes: true })) {
+      if (entry.isDirectory()) walk(join(dir, entry.name), out);
+      else if (entry.name.endsWith(".js")) out.push(join(dir, entry.name));
+    }
+    return out;
+  };
+  return walk("src");
+};
+
+test("the drag attribute has one reviewed exit, and it writes the literal string", () => {
+  // `draggable` stays OUT of the whitelist for the same reason `href` does. And it
+  // is an ENUMERATED attribute: Dom.el turns `true` into setAttribute(name, ""),
+  // and draggable="" means `auto`, which means NOT draggable -- so a whitelist
+  // entry would let someone ship a silently inert handle, and the obvious repair
+  // is to move the attribute onto the <li>, which hijacks text selection inside a
+  // field.
+  const writers = srcFiles().filter((f) => /setAttribute\(\s*["']draggable["']/.test(read(f)));
+  assert.deepEqual(writers, ["src/ui/dom.js"]);
+  assert.match(read("src/ui/dom.js"), /setAttribute\("draggable",\s*"true"\)/);
+  const attrs = read("src/ui/dom.js").slice(0, read("src/ui/dom.js").indexOf("const SVG_NS"));
+  assert.equal(/"draggable"\s*,/.test(attrs), false, "draggable must stay out of ATTRS");
+});
+
+test("a drag handle never ships without the arrows beside it", () => {
+  // The pointer gesture is the SECOND way to reorder, never the first: the handle
+  // is aria-hidden, so assistive technology only ever sees the two buttons. Delete
+  // them and this becomes a WCAG 2.2 failure (2.1.1, 2.5.7), not a style question.
+  //
+  // Written as an implication rather than a count, so it cannot go vacuous the day
+  // the handle moves file.
+  const ui = read("src/options-sections.js");
+  const handles = ui.match(/Dom\.dragHandle\(/g) || [];
+  assert.equal(handles.length, 1, "exactly one drag handle is built");
+  assert.match(ui, /"move-up"/);
+  assert.match(ui, /"move-down"/);
+  assert.match(ui, /t\("moveUp"/);
+  assert.match(ui, /t\("moveDown"/);
+});
+
+test("the dragged payload carries a constant, never an identifier", () => {
+  // The authority is the LOCAL GESTURE, which only exists in the document where
+  // dragstart happened -- the cloakroom hands the coat back against its own token,
+  // not against the name the customer announces. So the payload is decorative, and
+  // it TRAVELS: a drop released outside the surface hands it to whatever listens.
+  const reorder = read("src/ui/row-reorder.js");
+  const sets = reorder.match(/setData\([^)]*\)/g) || [];
+  assert.deepEqual(sets, ['setData(DRAG_TYPE, "row")']);
+  const gets = reorder.match(/getData\([^)]*\)/g) || [];
+  assert.deepEqual(gets, ["getData(DRAG_TYPE)"]);
+  // Lower case throughout: setData normalises the format, so a capital would make
+  // types.includes() permanently false on Firefox, with no console error.
+  const type = /DRAG_TYPE = "([^"]+)"/.exec(reorder)[1];
+  assert.equal(type, type.toLowerCase());
+  assert.equal(/jira|quick|jump/i.test(type), false, "the format name must not announce the product");
+});
+
+test("whatever accepts a drop cancels the default first", () => {
+  // An un-prevented drop navigates the document -- and `pagehide` triggers flush(),
+  // which calls commit() WITHOUT awaiting, so a navigation kills the document
+  // mid-write and the last intention is lost in silence.
+  const reorder = read("src/ui/row-reorder.js");
+  const drop = reorder.slice(reorder.indexOf('addEventListener("drop"'));
+  // "First" is the invariant, not merely "present": the default must be cancelled
+  // before anything reads the payload, because an un-prevented drop navigates.
+  const prevents = drop.indexOf("event.preventDefault()");
+  const reads = drop.indexOf("getData(");
+  assert.ok(prevents > 0, "drop prevents the default");
+  assert.ok(prevents < reads, "and it prevents BEFORE reading the payload");
+  const over = reorder.slice(reorder.indexOf("const over = (event)"), reorder.indexOf('addEventListener("dragenter"'));
+  assert.match(over, /event\.preventDefault\(\)/, "dragover prevents on a valid target");
+  // The host's own drop listener is what resumes its deferred render.
+  assert.equal(/stopPropagation/.test(reorder), false);
+  assert.equal(/stopPropagation/.test(read("src/options-sections.js")), false);
+});
+
+test("the host defers a render for whatever the user is holding, and still knows nothing about a shortcut", () => {
+  const host = read("src/ui/section-host.js");
+  for (const word of ["shortcut", "grip", "data-id", "closest", "dataTransfer"]) {
+    assert.equal(new RegExp(word, "i").test(host), false, `section-host.js must not mention ${word}`);
+  }
+  assert.match(host, /dragstart/, "it does learn that a gesture exists");
+  // onBlur is GONE: it replayed the render without consulting the latch, which is
+  // what destroyed the row under the pointer between pointerdown and dragstart.
+  const handlers = host.match(/addEventListener\("focusout"/g) || [];
+  assert.equal(handlers.length, 1, "exactly one focusout handler");
+});
+
+test("the host removes every listener it adds", () => {
+  const host = read("src/ui/section-host.js");
+  assert.equal(
+    (host.match(/\.addEventListener\(/g) || []).length,
+    (host.match(/\.removeEventListener\(/g) || []).length
+  );
+});
+
+test("every section declares its own reconcile, none is grafted by the host", () => {
+  // mutation-result.js: "a field that shows up only on some operations … would
+  // force every caller to write a presence test, which is the mistake". A signed
+  // empty body is an implementation; an empty body filled in by the neighbour is a
+  // patch -- and a typo would disable the compensation in silence.
+  const ui = read("src/options-sections.js");
+  const listed = /OptionsSections = \[([^\]]*)\]/.exec(ui)[1].split(",").length;
+  const declared = (ui.match(/^\s{4}reconcile\(/gm) || []).length;
+  assert.equal(declared, listed, "as many reconcile() as there are sections");
+  assert.equal(/section\.reconcile\s*=/.test(read("src/ui/section-host.js")), false);
+});
+
+test("reconcile never redraws, and only ever speaks constants", () => {
+  // It runs while the view is frozen, so it is the one path the tests cannot see
+  // through a render -- the best place for a future string from storage.
+  const ui = read("src/options-sections.js");
+  const bodies = [...ui.matchAll(/^\s{4}reconcile\([^)]*\)\s*\{([\s\S]*?)^\s{4}\},/gm)].map((m) => m[1]);
+  assert.ok(bodies.length > 0);
+  for (const body of bodies) {
+    for (const sink of ["appendChild", "Dom.clear", "Dom.el"]) {
+      assert.equal(body.includes(sink), false, `reconcile must not call ${sink}`);
+    }
+    for (const call of body.match(/announce\([^;]*\)/g) || []) {
+      assert.match(call, /t\("[A-Za-z0-9_]+",\s*"/, "reconcile announces literals only");
+    }
+  }
+});
+
+test("the aggregate is the spokesman: the UI never reaches past it to its collection", () => {
+  // statusOf declares itself the SOLE judge of a row. Offering one counter on the
+  // root and another on the registry is what invites the traversal, so the two
+  // delegations close the pair -- and the aggregate itself was using the back door.
+  for (const file of srcFiles()) {
+    if (!file.startsWith("src/ui/") && file !== "src/options-sections.js") continue;
+    assert.equal(/registry\(/.test(read(file)), false, `${file} must not reach the registry`);
+  }
+});
+
+test("the section that can be frozen never owns the trust banner", () => {
+  // heldSection names ONE section, so a drag freezes Shortcuts alone. The
+  // destination-changed banner lives in Status, and the failure banner is a SIBLING
+  // of #sections -- which is why the promise "any change of destination raises a
+  // banner before your next jump" survives a ten-second gesture.
+  for (const page of ["src/options.html", "src/popup.html"]) {
+    const markup = read(page);
+    const banner = markup.indexOf('id="host-banner"');
+    const sections = markup.indexOf('id="sections"');
+    assert.ok(banner > 0 && sections > banner, `${page}: the banner precedes #sections as a sibling`);
+  }
+  const ui = read("src/options-sections.js");
+  assert.match(ui, /OptionsSections = \[Status,/, "Status is the first section");
+});

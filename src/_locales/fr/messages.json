@@ -122,6 +122,9 @@
   "domain": {
     "message": "Domaine"
   },
+  "dragToReorder": {
+    "message": "Glissez pour réordonner"
+  },
   "engines": {
     "message": "Moteurs de recherche"
   },
@@ -194,11 +197,23 @@
   "movedUp": {
     "message": "Déplacé vers le haut."
   },
+  "noLongerShadowed": {
+    "message": "Plus masqué."
+  },
+  "noLongerShadowedActive": {
+    "message": "Plus masqué : ce raccourci se déclenche à nouveau."
+  },
+  "nowShadowed": {
+    "message": "Désormais masqué : ce raccourci ne se déclenche plus."
+  },
   "openSettings": {
     "message": "Ouvrir les réglages"
   },
   "optionsSub": {
     "message": "Tapez une clé de ticket dans la barre d’adresse, atterrissez sur le ticket."
+  },
+  "orderDropped": {
+    "message": "La liste a changé : votre déplacement a été abandonné."
   },
   "orderNote": {
     "message": "Évalué de haut en bas. Le premier qui correspond gagne."

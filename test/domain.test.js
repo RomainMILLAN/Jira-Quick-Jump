@@ -358,3 +358,112 @@ test("every mutation still returns the same shape, withOrder included, with even
     assert.deepEqual(result.events, []);
   }
 });
+
+// ------------------------------------------------- reordering around a catch-all
+
+const REACH = ["r-aaa", "r-star", "r-bbb", "r-ddd"];
+
+const withCatchAllInside = () => {
+  let p = g.JumpPolicy.empty().withEngines(["google.com"]).value;
+  p = p.register(REACH[0], g.ProjectKey.parse("AAA").value, instance("https://a.example.org")).value;
+  p = p.registerCatchAll(REACH[1], instance("https://c.example.org")).value;
+  p = p.register(REACH[2], g.ProjectKey.parse("BBB").value, instance("https://b.example.org")).value;
+  p = p.register(REACH[3], g.ProjectKey.parse("DDD").value, instance("https://d.example.org")).value;
+  return p;
+};
+
+test("the aggregate answers for the order and for one row, so nobody reaches past it", () => {
+  // Two delegations that close a pair: the aggregate accepts withOrder(ids), an
+  // absolute intention about the order, but could not tell you the current one.
+  // And it was reaching through its own registry to read it, in
+  // registerAboveCatchAll.
+  const p = withCatchAllInside();
+  assert.deepEqual(p.orderedIds(), REACH);
+  assert.equal(p.shortcutFor(REACH[1]).key().isCatchAll(), true);
+  assert.equal(p.shortcutFor("nope"), undefined);
+});
+
+test("every order is reachable without ever PICKING UP the catch-all", () => {
+  // This is what makes pinning it acceptable under WCAG 2.1.1, and it is only true
+  // because the step is constrained: withOrder is ABSOLUTE, so a single call
+  // reaches any permutation and a test "by a sequence of withOrder" would be a
+  // tautology. Each step here is an ADJACENT SWAP whose picked element is never the
+  // catch-all -- the exact model of the arrows.
+  //
+  // The mechanism, which is the part worth remembering: the catch-all IS moved,
+  // pushed by the others. It is never the one you pick up.
+  const swapPicking = (policy, index, delta) => {
+    const ids = [...policy.orderedIds()];
+    assert.notEqual(ids[index], REACH[1], "the catch-all is never the picked element");
+    const to = index + delta;
+    assert.ok(Math.abs(delta) === 1 && to >= 0 && to < ids.length, "adjacent swaps only");
+    ids.splice(to, 0, ...ids.splice(index, 1));
+    const moved = policy.withOrder(ids);
+    assert.equal(moved.ok, true);
+    return moved.value;
+  };
+
+  const targets = [
+    [REACH[1], REACH[0], REACH[2], REACH[3]],   // catch-all first: everything shadowed
+    [REACH[0], REACH[2], REACH[3], REACH[1]],   // catch-all last: nothing shadowed
+    [REACH[2], REACH[0], REACH[1], REACH[3]],   // a named key pulled to the top
+  ];
+
+  for (const target of targets) {
+    let policy = withCatchAllInside();
+    for (let guard = 0; guard < 24 && policy.orderedIds().join() !== target.join(); guard += 1) {
+      const ids = policy.orderedIds();
+      const wrong = ids.findIndex((id, i) => id !== target[i] && id !== REACH[1]);
+      assert.notEqual(wrong, -1, "a misplaced element that is not the catch-all always exists");
+      const want = target.indexOf(ids[wrong]);
+      policy = swapPicking(policy, wrong, want < wrong ? -1 : 1);
+    }
+    assert.deepEqual(policy.orderedIds(), target);
+  }
+});
+
+test("dropping a named key below the catch-all shadows it, and nothing above it", () => {
+  let p = withCatchAllInside().withOrder([REACH[0], REACH[1], REACH[2], REACH[3]]).value;
+  assert.deepEqual(p.shadowedShortcuts().map((s) => s.key().toString()), ["BBB", "DDD"]);
+  assert.equal(p.statusOf(REACH[0]), "DISARMED", "the row above is untouched");
+  assert.equal(p.statusOf(REACH[2]), "SHADOWED");
+  // And it comes back when the catch-all goes.
+  assert.deepEqual(p.remove(REACH[1]).value.shadowedShortcuts(), []);
+});
+
+test("at a constant id set, the status after a reorder depends on nothing but the order", () => {
+  // The property that makes moveTo's prediction trustworthy: it consults the domain
+  // on the future, and what it asks about -- shadowing -- is a pure function of the
+  // order and of which row is the catch-all. Arming and acknowledgements cannot
+  // change it, and "being a catch-all" is invariant under set-preserving mutations
+  // because withKeyFor refuses KEY_NATURE_IMMUTABLE.
+  const target = [REACH[1], REACH[0], REACH[2], REACH[3]];
+  const plain = withCatchAllInside().withOrder(target).value;
+
+  let armedFirst = withCatchAllInside();
+  armedFirst = armedFirst.armShortcut(REACH[0]).value;
+  armedFirst = armedFirst.acknowledge(REACH[1], "CATCH_ALL").value.armShortcut(REACH[1]).value;
+  const reordered = armedFirst.withOrder(target).value;
+
+  for (const id of REACH) {
+    assert.equal(
+      plain.registry().isShadowed(id),
+      reordered.registry().isShadowed(id),
+      `${id}: shadowing must not depend on arming`
+    );
+  }
+  // And the status the UI reads agrees with it, because SHADOWED is the FIRST test
+  // of the chain -- which is what lets one call answer both questions.
+  assert.equal(reordered.statusOf(REACH[0]), "SHADOWED");
+  assert.equal(plain.statusOf(REACH[0]) === "SHADOWED", plain.registry().isShadowed(REACH[0]));
+});
+
+test("which half of a row the pointer is in is three numbers, so it is tested like anything else", () => {
+  // The previous plan declared this untestable for want of a DOM harness. It was
+  // untestable of the DESIGN, not of the problem: extracting the collaborator left
+  // an arithmetic that needs no document at all.
+  assert.equal(g.RowReorder.dropsBefore(100, 40, 101), true, "just inside the top half");
+  assert.equal(g.RowReorder.dropsBefore(100, 40, 119), true, "still the top half");
+  assert.equal(g.RowReorder.dropsBefore(100, 40, 120), false, "the midpoint belongs below");
+  assert.equal(g.RowReorder.dropsBefore(100, 40, 139), false, "the bottom half");
+});

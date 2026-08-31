@@ -101,6 +101,11 @@ code {
 }
 .section:first-child {
   border-top: none;
+  /* Status is always the first section, and its border is removed, so the only
+     breathing room above "Jumping is armed" was .sections' 6px plus this padding.
+     The padding-top goes IN this rule rather than in a second one on the same
+     selector. */
+  padding-top: 26px;
 }
 .lbl {
   font-size: 12px;
@@ -210,8 +215,8 @@ ol.rows {
 }
 .row {
   display: grid;
-  grid-template-columns: auto 7rem 1fr auto auto;
-  grid-template-areas: "ord key url arm del";
+  grid-template-columns: auto auto 7rem 1fr auto auto;
+  grid-template-areas: "grip ord key url arm del";
   align-items: center;
   gap: 11px;
   border: 1px solid var(--line);
@@ -258,11 +263,57 @@ ol.rows {
   clip-path: inset(50%);
   white-space: nowrap;
 }
+/* THE INVARIANT, at its real scope: ANY CELL THAT CAN BE EMPTY HAS A FIXED WIDTH,
+   because a row is an isolated grid (.rows is display:flex, so nothing aligns
+   columns across rows) and an empty track collapses to 0. That is what keeps the
+   catch-all and the draft rows -- both of which render these cells empty -- lined
+   up with the saved ones. .f-arm and .f-del are `auto` and stay so: they are never
+   empty, which is how they fall outside the invariant by its definition rather
+   than by an excuse. */
+.f-grip-cell {
+  grid-area: grip;
+  width: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
 .f-ord {
   grid-area: ord;
+  width: 28px;
   display: flex;
   flex-direction: column;
   gap: 2px;
+}
+/* The SECOND way to reorder, never the only one: pointer-only by nature, so it is
+   aria-hidden and the move buttons beside it carry the keyboard path (WCAG 2.5.7).
+   28x28 matches .btn.move rather than sitting on the 24x24 floor of 2.5.8 -- the
+   house standard, and there is width to spare. */
+.f-grip {
+  width: 28px;
+  min-height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--faint);
+  cursor: grab;
+  user-select: none;
+}
+.f-grip:active {
+  cursor: grabbing;
+}
+/* THREE STATES, THREE DIFFERENT CSS PROPERTIES. A dashed border already belongs to
+   .row.is-shadowed, so borrowing it here would make a healthy row being dragged
+   look like a row that never fires -- on the very gesture whose subject is crossing
+   the catch-all. A signal belongs to one state only. No transition anywhere, so
+   prefers-reduced-motion has nothing new to ask for. */
+.row.is-dragging {
+  box-shadow: 0 0 0 2px var(--teal);
+}
+.row.is-drop-before {
+  box-shadow: inset 0 3px 0 0 var(--teal);
+}
+.row.is-drop-after {
+  box-shadow: inset 0 -3px 0 0 var(--teal);
 }
 /* 28x28, above the 24x24 minimum of WCAG 2.2 rule 2.5.8. */
 .btn.move {
@@ -467,6 +518,11 @@ input.f[aria-invalid="true"] {
   border-radius: 12px;
   padding: 13px 15px;
 }
+/* .alert carries no margin of its own, so a visible Status banner used to sit
+   flush against the status line. */
+.alert:not([hidden]) + .status {
+  margin-top: 13px;
+}
 .alert-t {
   font-weight: 600;
   font-size: 14px;
@@ -582,11 +638,15 @@ input.f[aria-invalid="true"] {
 .is-compact .section {
   padding: 15px 0;
 }
+.is-compact .section:first-child {
+  /* .is-compact .sections has no top padding at all, so the popup needs its own. */
+  padding-top: 20px;
+}
 .is-compact .row {
-  grid-template-columns: auto 1fr auto auto;
+  grid-template-columns: auto auto 1fr auto auto;
   grid-template-areas:
-    "ord key arm del"
-    "url url url url";
+    "grip ord key arm del"
+    "url  url url url url";
   gap: 9px 10px;
 }
 .is-compact .field-label {
@@ -602,10 +662,24 @@ input.f[aria-invalid="true"] {
 .section .row.is-pending > .tag {
   flex-shrink: 0;
 }
-.rows .row:has(> .tag) {
+/* Import and quarantine rows are content, not form -- they are div.row WITHOUT a
+   data-id. The :not() matters: savedRow appends a span.tag to a SHADOWED shortcut
+   row too, and that row is the only one whose whole job is to explain that it never
+   fires. Flattened to flex, its .row-msg -- which relies on grid-column 1 / -1 for
+   a row of its own -- compressed onto the controls line and the controls could
+   leave the frame, on a row that promises "every control stays operable". A
+   shortcut the user believes is armed, that never fires, and that they cannot
+   repair, is a failure of signal integrity. */
+.rows .row:has(> .tag):not([data-id]) {
   display: flex;
   align-items: center;
   gap: 11px;
+}
+/* The chip placed explicitly, like its two neighbours .row-msg and .acks which
+   already carry this -- .tag was the only direct child of .row that forgot it. */
+.row > .tag {
+  grid-column: 1 / -1;
+  justify-self: start;
 }
 .dest.was {
   color: var(--faint);
@@ -630,8 +704,10 @@ input.f[aria-invalid="true"] {
 .popup-foot .ver {
   flex-grow: 1;
 }
+/* The only consumer is the Shortcuts section, so widening this touches nothing
+   else. */
 .rows-spaced {
-  margin-bottom: 11px;
+  margin-bottom: 18px;
 }
 .row-actions {
   margin-top: 11px;

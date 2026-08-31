@@ -1,18 +1,19 @@
 /**
  * The lifecycle both surfaces share.
  *
- * This is not a loop over sections -- it owns six things that must exist exactly
- * once: the debounce and its queue, the flush on page hide, the change
- * subscription AND its teardown, the rule that a re-render must not tread on the
- * field being typed in, the single write path, and the banner shown when a
- * configuration cannot be read back. Duplicating a lifecycle guarantees one of
- * the two copies forgets to close the tap, and it is always the copy the tests
- * do not visit.
+ * This is not a loop over sections -- it owns seven things that must exist
+ * exactly once: the debounce and its queue, the flush on page hide, the change
+ * subscription AND its teardown, the rule that a re-render must not tread on WHAT
+ * THE USER IS MANIPULATING (the field being typed in, the row being dragged), the
+ * single write path, the refusal of a file dropped anywhere on the document, and
+ * the banner shown when a configuration cannot be read back. Duplicating a
+ * lifecycle guarantees one of the two copies forgets to close the tap, and it is
+ * always the copy the tests do not visit.
  */
 (function (global) {
   "use strict";
 
-  const { Platform, PolicyRepository, DestinationJournal, RuleInstaller, MutationResult } = global;
+  const { Platform, PolicyRepository, DestinationJournal, RuleInstaller, MutationResult, Dom } = global;
 
   const DEBOUNCE_MS = 500;
 
@@ -79,6 +80,36 @@
        * asking the platform on each character would make it asynchronous and
        * collide head-on with the ReDoS budget.
        */
+      /**
+       * The section whose subtree the user is physically holding, or null.
+       *
+       * Same family as isEditing, and a re-render there does not merely look
+       * wrong -- it DESTROYS the gesture: removing the source node can suppress
+       * dragend entirely. Held here and derived from the DOM, so no section owns a
+       * flag and this host still knows nothing about what any section contains.
+       */
+      let heldSection = null;
+
+      const sectionAt = (node) =>
+        sections.find((section) => section.root && section.root.contains(node)) ?? null;
+
+      const isHeldByUser = (section) =>
+        Boolean(section.root) && (section === heldSection || isEditing(section.root));
+
+      /**
+       * Releases the latch and replays whatever was deferred.
+       *
+       * onBlur used to do the second half alone. It cannot any more: pointerdown
+       * PRECEDES the focus change it causes, so a replay there would redraw the
+       * subtree between the press and dragstart, detach the node under the
+       * pointer, and -- because sectionAt tests contains() -- leave the latch
+       * unarmed for the whole gesture.
+       */
+      function resume() {
+        heldSection = null;
+        if (sections.some((s) => s.dirty)) render();
+      }
+
       let lastReport = null;
       async function report() {
         if (!lastReport) {
@@ -178,7 +209,12 @@
           // control keeps showing the old state until the user happens to click
           // elsewhere — which reads as "the button does nothing". A button has no
           // typed-in value to protect.
-          if (section.root && isEditing(section.root)) {
+          // The write state reconciles even when the read view is frozen. This is
+          // the CQRS line of this file: a section's pending command leaves by a
+          // timer, not by the render, so a deferred render must not be able to
+          // strand it. reconcile never redraws; it may speak.
+          section.reconcile(stored, ctx);
+          if (isHeldByUser(section)) {
             section.dirty = true;
             continue;
           }
@@ -220,10 +256,50 @@
       const onChanged = () => reload();
       PolicyRepository.onPolicyChanged(onChanged);
 
-      const onBlur = () => {
-        if (sections.some((s) => s.dirty)) render();
-      };
-      root.addEventListener("focusout", onBlur);
+      /**
+       * Three states that cannot overlap: FREE, HELD BY THE POINTER (a few
+       * milliseconds, from pointerdown to pointerup), HELD BY A DRAG (from
+       * dragstart to dragend).
+       *
+       * pointerdown ACQUIRES rather than releases, and that ordering is the whole
+       * fix: it lands before the focus change that mousedown causes, so the
+       * focusout below finds the latch already set and leaves the node under the
+       * pointer alone.
+       *
+       * And during an HTML5 drag no pointerup is delivered at all -- the browser
+       * emits pointercancel -- so the second state cannot release from under the
+       * third, and dragend is its only releaser.
+       *
+       * Reassigning beats accumulating: a pointerup released outside the window,
+       * or a press on another section, leaves or moves the latch, and the next
+       * press heals it. Strictly shorter than the isEditing freeze already in
+       * production, which lasts as long as a caret sleeps in a field.
+       */
+      const onPointerDown = (event) => { heldSection = sectionAt(event.target); };
+      const onPointerUp = () => resume();
+      const onDragStart = (event) => { heldSection = sectionAt(event.target); };
+      const onDragEnd = () => resume();
+      // focusin covers the keyboard user, who emits no pointer event and would
+      // otherwise have no floor at all if a dragend went missing. It also fires
+      // when a field is clicked, in which case renderOnce simply skips that
+      // section again through isEditing and leaves it dirty -- harmless.
+      const onFocusIn = () => resume();
+      // Replaces the former onBlur, and must respect the latch: a debounced write
+      // very often leaves the section dirty, so an unconditional replay here is
+      // what used to destroy the row under the pointer.
+      const onFocusOut = () => { if (!heldSection) resume(); };
+
+      document.addEventListener("pointerdown", onPointerDown);
+      document.addEventListener("pointerup", onPointerUp);
+      document.addEventListener("dragstart", onDragStart);
+      document.addEventListener("dragend", onDragEnd);
+      root.addEventListener("focusin", onFocusIn);
+      root.addEventListener("focusout", onFocusOut);
+
+      // The one refusal of a navigating drop, per surface. Not in the HTML: an
+      // inline script there is killed by script-src 'self', in silence, so the
+      // guard would exist in the repository and not in the browser.
+      const allowFileDrops = Dom.refuseFileDrops(document);
 
       const onHide = () => {
         if (document.visibilityState === "hidden") flush();
@@ -236,7 +312,13 @@
           if (disposed) return;
           disposed = true;
           flush();
-          root.removeEventListener("focusout", onBlur);
+          document.removeEventListener("pointerdown", onPointerDown);
+          document.removeEventListener("pointerup", onPointerUp);
+          document.removeEventListener("dragstart", onDragStart);
+          document.removeEventListener("dragend", onDragEnd);
+          root.removeEventListener("focusin", onFocusIn);
+          root.removeEventListener("focusout", onFocusOut);
+          allowFileDrops();
           document.removeEventListener("visibilitychange", onHide);
           window.removeEventListener("pagehide", flush);
         },

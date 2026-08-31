@@ -1,5 +1,6 @@
 /**
- * Loads core/ and interception/ once and hands back the globals.
+ * Loads core/, interception/ and the UI helpers that hold testable arithmetic,
+ * once, and hands back the globals.
  *
  * They are classic scripts (an IIFE populating globalThis) because the same
  * files must run in a Chrome service worker, a Firefox event page and a <script
@@ -36,6 +37,10 @@ const ORDER = [
   "key-acknowledgements.js",
   "destination-journal.js",
   "rule-installer.js",
+  // Pointer arithmetic that is three numbers and no DOM, so it belongs in
+  // the regression net like anything else. The file touches neither
+  // document nor window at load time, which is what makes this safe.
+  "ui/row-reorder.js",
 ];
 
 let loaded = false;

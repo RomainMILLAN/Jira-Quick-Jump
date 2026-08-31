@@ -56,7 +56,14 @@ trade rather than leave stale rules firing under a badge that says `off`.
   tag and learn which hosts answer.
 - **The destination path is fixed.** A shortcut always resolves to
   `<base>/browse/<KEY-N>`, so an attacker who controls a destination cannot choose
-  a more convincing or more dangerous path. A catch-all copies the key you typed
+  a more convincing or more dangerous path.
+- **Reordering goes through one door, whatever the affordance.** The arrows and the
+  drag handle share a single write path: an absolute intention carrying the whole
+  ordered list, settled by a compare-and-set that refuses any mismatch of the id
+  set. **A drop carries no authority** — the gesture is local to the document that
+  started it, and the payload it puts on the clipboard is a constant, not an
+  identifier. A drop from another page, another window or a file finds no local
+  gesture and is refused before its payload is even read. A catch-all copies the key you typed
   into that path, so the key's character set is asserted at emission and the
   captured text can contain no `/`, `.`, `%`, `?`, `#` or backslash.
 - **A key-scoped acknowledgement never travels.** Accepting a catch-all's warning

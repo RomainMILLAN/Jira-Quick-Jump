@@ -12,7 +12,7 @@
   "use strict";
 
   const { Dom, Platform, MutationResult, ProjectKey, JiraInstance, SearchEngineCatalog,
-          OriginRequirements, JumpPreview, ShortcutWarning } = global;
+          OriginRequirements, JumpPreview, ShortcutWarning, RowReorder } = global;
   const t = (k, f) => Platform.t(k, f);
   const el = Dom.el;
 
@@ -25,6 +25,19 @@
 
   const TRASH = "M4 6h16M9 6V4h6v2M18 6l-1 14H7L6 6";
   const CHEVRON_UP = "M6 15l6-6 6 6";
+  /**
+   * Six dots without widening the attribute whitelist: a zero-length subpath with
+   * a round cap renders as a disc, so cx/cy/r never have to be allowed. icon() is
+   * not reused -- it hardcodes stroke-width 2 on a 24-unit box, which would draw
+   * 1.2px dots.
+   */
+  const GRIP_DOTS = ["M6 4h.01", "M6 8h.01", "M6 12h.01", "M10 4h.01", "M10 8h.01", "M10 12h.01"];
+  const gripIcon = () =>
+    el("svg", {
+      width: 16, height: 16, viewBox: "0 0 16 16", fill: "none",
+      stroke: "currentColor", "stroke-width": 2.5, "stroke-linecap": "round",
+      "stroke-linejoin": "round", "aria-hidden": "true",
+    }, GRIP_DOTS.map((d) => el("path", { d })));
   const CHEVRON_DOWN = "M6 9l6 6 6-6";
 
   /** Host in weight, path dimmed -- but the path is ALWAYS rendered. */
@@ -48,6 +61,11 @@
   // ---------------------------------------------------------------- Status
 
   const Status = {
+    reconcile() {
+      /* No optimistic state to give up: this section writes through ctx.apply and
+         never holds a pending order of its own. */
+    },
+
     mount(root, ctx) {
       this.node = el("div", { class: "status" });
       this.banner = el("div", { class: "alert", hidden: true });
@@ -233,6 +251,54 @@
     INSTALL_FAILED: "warn",
   };
 
+  /**
+   * What a move did to the row that moved, as a CATALOGUE keyed by a TRIPLET --
+   * not a chain of ifs, and not a pair.
+   *
+   * The key is (was shadowed, the resulting status, the direction), because a move
+   * with NO change of shadowing is the majority case and must keep saying which way
+   * it went. A pair would have left that case with no entry, and the next reader
+   * would either drop the direction or bolt an `if` in front of the table.
+   *
+   * ONE JUDGE, ONE CALL. `SHADOWED` is the FIRST test in statusOf's chain, so
+   * asking the aggregate for the status IS asking the registry whether the row is
+   * shadowed -- identically, not approximately. The transition therefore needs no
+   * separate reading, and this file never has to reach past the aggregate to its
+   * collection (a structure test holds that line, comments included). What
+   * guarantees the equivalence is the order at jump-policy.js:172-175, and that is
+   * why that order does not get rearranged.
+   *
+   * AND THE ASYMMETRY, which is the whole reason this is a catalogue:
+   *
+   *   shadowed  =>  never fires   (unconditional, safe to promise)
+   *   not shadowed  =/=>  fires   (three other doors can be shut)
+   *
+   * An unlocked door is not an open door. So only the "now shadowed" direction may
+   * promise anything about firing; coming back out, the sentence stops at "no
+   * longer shadowed" unless the status is actually ACTIVE. Saying "it fires again"
+   * to a screen-reader user about a row that is merely awaiting an
+   * acknowledgement would be a lie in the only channel that speaks to them.
+   *
+   * It is also a THIRD comparator of two states, and deliberately so. PolicyDiff
+   * answers "what changed, for the journal" -- in a batch, only newlyShadowed,
+   * inside the commit closure. This answers "what does THIS gesture do to THIS
+   * row, before writing it" -- for one id, in both directions. Same material, two
+   * questions, neither can answer for the other.
+   */
+  const sentenceFor = (before, after, id, movedUp) => {
+    const wasShadowed = before.statusOf(id) === "SHADOWED";
+    const status = after.statusOf(id);
+    if (!wasShadowed && status === "SHADOWED") {
+      return t("nowShadowed", "Now shadowed: this shortcut no longer fires.");
+    }
+    if (wasShadowed && status !== "SHADOWED") {
+      return status === "ACTIVE"
+        ? t("noLongerShadowedActive", "No longer shadowed: this shortcut fires again.")
+        : t("noLongerShadowed", "No longer shadowed.");
+    }
+    return movedUp ? t("movedUp", "Moved up.") : t("movedDown", "Moved down.");
+  };
+
   // ------------------------------------------------------------- Shortcuts
 
   const Shortcuts = {
@@ -251,6 +317,17 @@
       // reader's own language, with zero strings to translate. Which is why the
       // placeholder ban in the locale test is not weakened for an aria-label.
       this.rows = el("ol", { class: "rows rows-spaced" });
+      // NOT assigned to an attribute: sections have no teardown, SectionHost.stop
+      // never calls them, and the listeners live as long as this.rows -- which
+      // render only ever empties of its children. Storing a handle would promise a
+      // lifecycle nobody implements, and this section already carries five
+      // attributes where the project's rule allows four.
+      RowReorder.on(this.rows, {
+        // NOT counted off the DOM: drafts are appended after the saved rows, so an
+        // index read from the list's children would be wrong.
+        orderedIds: () => this.orderToShow(ctx.stored()),
+        moveTo: (id, toIndex) => this.moveTo(id, toIndex, ctx),
+      });
       this.announcer = el("div", {
         class: "sr-only", role: "status", "aria-live": "polite", "aria-atomic": true,
       });
@@ -258,56 +335,128 @@
       root.appendChild(this.announcer);
       this.actions = el("div", { class: "btn-row" });
       root.appendChild(this.actions);
+      this.hint = el("p", { class: "hint", id: "catch-all-exists", hidden: true });
+      root.appendChild(this.hint);
     },
 
     announce(sentence) {
       if (this.announcer) this.announcer.textContent = sentence;
     },
 
-    /** The order to draw, reconciled with what storage actually holds. */
-    displayedOrder(stored) {
-      const ids = stored.policy().registry().orderedIds();
-      if (!this.order) return ids;
-      const sameSet = this.order.length === ids.length && this.order.every((id) => ids.includes(id));
-      // A foreign change to the SET makes the optimistic order meaningless, and
-      // the queued write would only collect ORDER_STALE.
+    /**
+     * A PURE READ of the optimistic order. It used to reconcile as well -- a
+     * getter with a side effect on the very state it reported, called from render
+     * AND from move. Reconciling belongs to reconcile, and it has a name.
+     */
+    orderToShow(stored) {
+      return this.order || stored.policy().orderedIds();
+    },
+
+    /**
+     * ABANDONS A COMMAND THAT BECAME UNSATISFIABLE, AND SAYS SO.
+     *
+     * That is what this is -- a compensating action -- and the name explains its
+     * three constraints at once: it runs BEFORE the host's latch (the command
+     * leaves by a timer, not by the render, so a frozen view must not be able to
+     * strand it), it must SPEAK (a silent compensation is data loss for the user,
+     * in a product whose README says reordering IS a change of destination), and
+     * it must NOT redraw (it is not a view).
+     *
+     * Not "no DOM": it may write the live region, which sits outside the subtree
+     * render clears. And it announces CONSTANTS only -- routing storage text
+     * through a path the freeze hides from the tests would be the best place for a
+     * future injection.
+     *
+     * Idempotent: a second pass finds this.order already null and returns.
+     *
+     * The project has another `reconcile`, in background.js, which reconciles the
+     * INSTALLED RULES against the policy and produces facts. Different subject,
+     * same verb; the host calls this one generically on every section, so the name
+     * has to stay generic.
+     */
+    reconcile(stored, ctx) {
+      if (!this.order) return;
+      const ids = stored.policy().orderedIds();
+      const sameSet =
+        this.order.length === ids.length && this.order.every((id) => ids.includes(id));
       if (!sameSet) {
         this.order = null;
-        return ids;
+        ctx.cancel("shortcuts:order");
+        this.announce(t("orderDropped", "The list changed, so your move was dropped."));
+        return;
       }
-      if (this.order.every((id, i) => id === ids[i])) {
-        this.order = null; // storage caught up
-        return ids;
+      if (this.order.every((id, i) => id === ids[i])) this.order = null; // storage caught up
+    },
+
+    /**
+     * THE ONLY place the order is written, shared by the arrows and the drop.
+     *
+     * `toIndex` is an index in the list as displayed. The intention that crosses
+     * the boundary is ABSOLUTE (`withOrder(ids)` carries the whole list), because
+     * VersionedEntry replays it on a value that may already contain its own
+     * effect: the UI gesture is relative, the intention never is.
+     */
+    moveTo(id, toIndex, ctx, focus) {
+      const policy = ctx.stored().policy();
+      const shown = [...this.orderToShow(ctx.stored())];
+      const from = shown.indexOf(id);
+      if (from < 0) return false;
+      if (toIndex < 0 || toIndex >= shown.length) {
+        this.announce(toIndex < 0
+          ? t("alreadyFirst", "Already first.")
+          : t("alreadyLast", "Already last."));
+        return false;
       }
-      return this.order;
+      if (toIndex === from) return false; // a no-op deserves silence
+
+      // The DOMAIN judges the outcome, on the future. withOrder is a
+      // side-effect-free function: it returns a new policy and writes nothing.
+      // Both predictions are guarded TOGETHER -- the splice preserves the id set,
+      // so they are refused together, and guarding one alone would make one fail
+      // closed and the other throw. Unreachable by construction (reconcile
+      // guarantees the set is equal), kept fail-closed. The message comes from the
+      // domain: withOrder carries ORDER_STALE, _guarded carries BINDING_LIMIT and
+      // SHORTCUT_LIMIT -- so raising a row above the catch-all can be refused for
+      // rule budget, and the prediction refuses BEFORE writing where move() used
+      // to write first and find out after.
+      const before = policy.withOrder(shown);
+      shown.splice(toIndex, 0, ...shown.splice(from, 1));
+      const after = policy.withOrder(shown);
+      if (!before.ok || !after.ok) {
+        this.announce((before.ok ? after : before).message);
+        return false;
+      }
+
+      this.order = shown;
+      ctx.applyToPolicy((p) => p.withOrder(shown), "shortcuts:order");
+      this.render(ctx.stored(), ctx, focus ? { focus } : {});
+      this.announce(sentenceFor(before.value, after.value, id, toIndex < from));
+      // The boolean says "something moved", for the arrows (which decide the
+      // focus) and for the tests. It carries no interpretation: the user has
+      // already been told, through the live region.
+      //
+      // AND THE PREDICTION NEVER LEAVES THIS METHOD. section-host.js: "Sections
+      // hand over an INTENTION, never a snapshot." Committing `after.value`
+      // instead would be one line shorter and would reduce the compare-and-set to
+      // a set. A prediction is a quote, not an invoice.
+      return true;
     },
 
     move(id, delta, stored, ctx) {
-      const shown = [...this.displayedOrder(stored)];
-      const from = shown.indexOf(id);
-      const to = from + delta;
-      if (to < 0 || to >= shown.length) {
-        this.announce(delta < 0
-          ? t("alreadyFirst", "Already first.")
-          : t("alreadyLast", "Already last."));
-        return;
-      }
-      shown.splice(to, 0, ...shown.splice(from, 1));
-      this.order = shown;
-      // ABSOLUTE, never a step: the compare-and-set replays this intention on a
-      // value that may already contain its own effect.
-      ctx.applyToPolicy((policy) => policy.withOrder(shown), "shortcuts:order");
-      this.render(ctx.stored(), ctx, { focus: { id, delta } });
-      this.announce(delta < 0 ? t("movedUp", "Moved up.") : t("movedDown", "Moved down."));
+      const shown = this.orderToShow(stored);
+      // "Is this row at the edge of what is displayed" is a question about the
+      // VIEW -- it is literally the predicate that paints aria-disabled on the
+      // arrows -- so it stays here, and moveTo answers it too for the drop path.
+      this.moveTo(id, shown.indexOf(id) + delta, ctx, { id, delta });
     },
 
     render(stored, ctx, options = {}) {
       const policy = stored.policy();
-      const ordered = this.displayedOrder(stored);
+      const ordered = this.orderToShow(stored);
       Dom.clear(this.rows);
       let toFocus = null;
       ordered.forEach((id, index) => {
-        const shortcut = policy.registry().find(id);
+        const shortcut = policy.shortcutFor(id);
         if (!shortcut) return;
         const row = this.savedRow(shortcut, ctx, {
           policy,
@@ -320,14 +469,14 @@
           // The reference of the node we just built, never a querySelector with
           // an interpolated data-id: that would be a selector injection in a page
           // running with the extension's own privileges.
-          toFocus = options.focus.delta < 0 ? row.moveUp : row.moveDown;
+          toFocus = () => row.focusArrow(options.focus.delta);
         }
       });
       for (const draft of this.drafts) {
         this.rows.appendChild(this.draftRow(draft, ctx));
       }
       this.renderActions(policy, ctx);
-      if (toFocus) toFocus.focus();
+      if (toFocus) toFocus();
     },
 
     renderActions(policy, ctx) {
@@ -356,10 +505,16 @@
         },
       }));
       if (existing) {
-        this.actions.appendChild(el("span", {
-          class: "note", id: "catch-all-exists",
-          text: t("catchAllExists", "There can only be one catch-all."),
-        }));
+        // A <p class="hint">, not a span.note: the CSS only defines `.lbl .note` as
+        // a descendant, so a note outside a label rendered as unstyled body text.
+        // AFTER the button row, not inside it -- and it KEEPS its id, which is the
+        // target of the button's aria-describedby: losing that would turn a visual
+        // fix into an accessibility regression.
+        this.hint.textContent = t("catchAllExists", "There can only be one catch-all.");
+        this.hint.hidden = false;
+      } else {
+        this.hint.textContent = "";
+        this.hint.hidden = true;
       }
     },
 
@@ -379,7 +534,7 @@
       const status = policy.statusOf(id);
       const isCatchAll = shortcut.key().isCatchAll();
 
-      const arrow = (path, delta, ariaLabel, atEdge) =>
+      const orderArrow = (path, delta, ariaLabel, atEdge) =>
         el("button", {
           class: "btn icon move", "aria-label": ariaLabel,
           // aria-disabled, never disabled: a disabled button is not focusable, so
@@ -389,29 +544,49 @@
           onClick: () => onMove(delta),
         }, [icon(path, 12)]);
 
-      const moveUp = arrow(CHEVRON_UP, -1, t("moveUp", "Move up"), index === 0);
-      const moveDown = arrow(CHEVRON_DOWN, 1, t("moveDown", "Move down"), index === total - 1);
+      const moveUp = isCatchAll ? null : orderArrow(CHEVRON_UP, -1, t("moveUp", "Move up"), index === 0);
+      const moveDown = isCatchAll ? null : orderArrow(CHEVRON_DOWN, 1, t("moveDown", "Move down"), index === total - 1);
 
-      // Static text rather than a read-only input: readonly is not in the DOM
-      // whitelist, and a read-only field is focusable and useless.
-      const keyCell = isCatchAll
-        ? el("div", { class: "f key is-static" }, [
-            el("span", { text: t("catchAllKey", "Any key") }),
-            el("code", { text: shortcut.key().toString() }),
-          ])
-        : el("input", {
-            class: "f key", value: shortcut.key().toString(),
-            "aria-label": t("key", "Key"),
-            onInput: (event) => this.editKey(event.target, id, ctx),
-          });
+      // NO HANDLE AND NO ARROWS ON THE CATCH-ALL, and the two halves of that are
+      // different in kind. Pinning it as a DRAGGABLE OBJECT is an affordance
+      // restriction: the model keeps withOrder entirely free, an import can still
+      // put it first, and PolicyDiff still emits ShadowingChanged. It is the same
+      // pattern as registerAboveCatchAll (which puts "born above the catch-all"
+      // behind a named door inside the membrane while the registry always appends)
+      // and as the Add-a-catch-all button's aria-disabled.
+      //
+      // Free ordering survives from the other end: a NAMED key crosses it, and
+      // moveTo splices the whole list, so every relative arrangement stays
+      // reachable from the keyboard -- by adjacent swaps in which the catch-all is
+      // moved, pushed by the others, never picked up.
+      //
+      // And the mechanism is the ABSENCE of a handle, not a rule: no .f-grip means
+      // dragstart never begins here, while the data-id keeps it a valid drop
+      // target. That is why RowReorder has no notion of an undraggable row.
+      //
+      // The cell itself is not rendered at all: .f-ord and .f-grip have FIXED
+      // widths precisely so that an empty track still holds its column.
+      const grip = isCatchAll ? null : Dom.dragHandle([gripIcon()]);
 
       const reasonId = `why-${id}`;
       const row = el("li", {
         class: `row${pending.length > 0 ? " is-pending" : ""}${status === "SHADOWED" ? " is-shadowed" : ""}`,
         "data-id": id,
       }, [
-        el("div", { class: "f-ord" }, [moveUp, moveDown]),
-        el("div", { class: "f-key" }, [el("div", { class: "field-label", text: t("key", "Key") }), keyCell]),
+        el("div", { class: "f-grip-cell" }, grip ? [grip] : []),
+        el("div", { class: "f-ord" }, moveUp ? [moveUp, moveDown] : []),
+        el("div", { class: "f-key" }, [el("div", { class: "field-label", text: t("key", "Key") }),
+          isCatchAll
+            ? el("div", { class: "f key is-static" }, [
+                el("span", { text: t("catchAllKey", "Any key") }),
+                el("code", { text: shortcut.key().toString() }),
+              ])
+            : el("input", {
+                class: "f key", value: shortcut.key().toString(),
+                "aria-label": t("key", "Key"),
+                onInput: (event) => this.editKey(event.target, id, ctx),
+              }),
+        ]),
         el("div", { class: "f-url" }, [
           el("div", { class: "field-label", text: t("destination", "Destination") }),
           el("input", {
@@ -424,8 +599,6 @@
         el("div", { class: "f-arm" }, [toggle(
           shortcut.armed(),
           // ABSOLUTE, never a flip: the user saw an off switch and asked for on.
-          // A relative toggle re-derived inside the intention would come back
-          // armed when the compare-and-set replays it after a conflict.
           () => this.setArmed(id, !shortcut.armed(), ctx),
           t("armThis", "Arm this shortcut"),
           pending.length > 0,
@@ -437,10 +610,10 @@
       ]);
 
       if (status === "SHADOWED") {
-        // A text chip, because state colour must never be the only signal -- and
-        // a WRITTEN reason, referenced by aria-describedby so a screen-reader
-        // user hears WHY rather than meeting a grey box. Every control stays
-        // operable: the row has to be movable back up, or deleted.
+        // A text chip, because state colour must never be the only signal -- and a
+        // WRITTEN reason, referenced by aria-describedby so a screen-reader user
+        // hears WHY rather than meeting a grey box. Every control stays operable:
+        // the row has to be movable back up, or deleted.
         row.appendChild(el("span", { class: "tag off", text: t("shadowed", "Shadowed") }));
         row.appendChild(el("div", {
           class: "row-msg pending", id: reasonId,
@@ -458,8 +631,8 @@
             WARNING_MESSAGE()[warning.kind] || warning.message,
           ])),
           // Two independent high-severity warnings whose COMPOSITION means
-          // something neither says alone. A UI sentence, assembled from DOM
-          // nodes -- not a catalogue entry, which would belong to no scope and be
+          // something neither says alone. A UI sentence, assembled from DOM nodes
+          // -- not a catalogue entry, which would belong to no scope and be
           // forgotten on every keystroke in the destination field.
           pending.some((w) => w.kind === "CATCH_ALL") && pending.some((w) => w.kind === "INSECURE_SCHEME")
             ? el("span", { class: "row-msg pending", text: t("catchAllInsecure", "Together: every key-shaped search will leave in clear text.") })
@@ -467,7 +640,16 @@
           el("span", { class: "row-msg pending", text: t("ackBlocks", "Arming stays unavailable until these are accepted.") }),
         ]));
       }
-      return { node: row, moveUp, moveDown };
+      // ONE member, not an inventory of parts: the only use was row.moveUp.focus(),
+      // i.e. two getters for one call. When the handle or a future button arrive,
+      // this interface does not move.
+      return {
+        node: row,
+        focusArrow: (delta) => {
+          const button = delta < 0 ? moveUp : moveDown;
+          if (button) button.focus();
+        },
+      };
     },
 
     draftRow(draft, ctx) {
@@ -485,6 +667,13 @@
             onInput: (event) => { draft.key = event.target.value; this.tryRegister(draft, row, message, ctx); },
           });
       const row = el("li", { class: "row" }, [
+        // Two EMPTY command cells, and no decorative controls in them. A draft has
+        // no position in the configuration yet, so it has no position to command --
+        // exactly like the catch-all above. It is the FIXED WIDTH of .f-grip-cell
+        // and .f-ord that aligns the card with the saved rows, not a control; and
+        // disabled arrows here would have had to break one of the two house rules
+        // (never `disabled` on the arrows, `disabled` on the draft's inert switch).
+        el("div", { class: "f-grip-cell" }),
         el("div", { class: "f-ord" }),
         el("div", { class: "f-key" }, [
           el("div", { class: "field-label", text: t("key", "Key") }),
@@ -560,6 +749,11 @@
   // --------------------------------------------------------------- Engines
 
   const Engines = {
+    reconcile() {
+      /* No optimistic state to give up: this section writes through ctx.apply and
+         never holds a pending order of its own. */
+    },
+
     adding: false,
 
     mount(root, ctx) {
@@ -665,6 +859,11 @@
   // ---------------------------------------------------------------- Access
 
   const Access = {
+    reconcile() {
+      /* No optimistic state to give up: this section writes through ctx.apply and
+         never holds a pending order of its own. */
+    },
+
     mount(root, ctx) {
       root.appendChild(label(t("access", "Access"), t("accessNote", "A redirect needs permission for its destination.")));
       this.summary = el("div", { class: "access" });
@@ -717,6 +916,11 @@
   // --------------------------------------------------------- Test & transfer
 
   const Preview = {
+    reconcile() {
+      /* No optimistic state to give up: this section writes through ctx.apply and
+         never holds a pending order of its own. */
+    },
+
     mount(root, ctx) {
       root.appendChild(label(
         t("tryIt", "Try a URL"),
@@ -802,6 +1006,11 @@
   // -------------------------------------------------------------- Transfer
 
   const Transfer = {
+    reconcile() {
+      /* No optimistic state to give up: this section writes through ctx.apply and
+         never holds a pending order of its own. */
+    },
+
     proposal: null,
 
     mount(root, ctx) {
@@ -943,6 +1152,11 @@
   // ------------------------------------------------------------- Quarantine
 
   const Quarantine = {
+    reconcile() {
+      /* No optimistic state to give up: this section writes through ctx.apply and
+         never holds a pending order of its own. */
+    },
+
     mount(root, ctx) {
       this.root = root;
       this.body = el("div");
@@ -1004,6 +1218,11 @@
   // ---------------------------------------------------------------- Storage
 
   const Storage = {
+    reconcile() {
+      /* No optimistic state to give up: this section writes through ctx.apply and
+         never holds a pending order of its own. */
+    },
+
     mount(root, ctx) {
       root.appendChild(label(t("storage", "Storage"),
         t("storageNote", "Syncing sends your Jira host names to your browser account.")));

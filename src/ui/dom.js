@@ -22,10 +22,14 @@
     // aria-disabled, never disabled, at the ends of a reorderable list: a
     // disabled button is not focusable, so a keyboard user who moves a row to
     // position one loses focus to <body>. aria-atomic goes with the live region
-    // that announces the move. Deliberately NOT added: readonly (a read-only
-    // field is focusable and useless -- static text is more honest) and
-    // draggable (drag and drop needs a keyboard alternative anyway, which is
-    // exactly these buttons).
+    // that announces the move.
+    //
+    // Still deliberately absent, and for two different kinds of reason:
+    //   readonly -- unconditionally. A read-only field is focusable and useless;
+    //     static text is more honest, and no condition can change that.
+    //   draggable -- its one legitimate use has its own reviewed exit, see
+    //     Dom.dragHandle below. Keeping it out of the list is what stops a
+    //     <li draggable> from hijacking text selection inside a field.
     "aria-disabled", "aria-atomic",
     "width", "height", "viewBox", "fill", "stroke", "stroke-width",
     "stroke-linecap", "stroke-linejoin", "d", "rel", "target",
@@ -99,6 +103,86 @@
       anchor.click();
       anchor.remove();
       URL.revokeObjectURL(url);
+    },
+
+    /**
+     * The one place that builds a drag handle. The THIRD reviewed exit of this
+     * file, after downloadFile and link -- `draggable` stays OUT of the whitelist
+     * above for the same reason `href` does: a single reviewed exit rather than a
+     * widened rule.
+     *
+     * Three things this buys that a whitelist entry cannot:
+     *
+     * 1. `draggable` is an ENUMERATED attribute, not a boolean. Dom.el turns
+     *    `true` into setAttribute(name, ""), and draggable="" means `auto`, which
+     *    for a <span> means NOT draggable. A whitelist entry would therefore let
+     *    someone write a silently inert handle, and the obvious repair is to move
+     *    the attribute onto the <li> -- which hijacks text selection inside the
+     *    Destination field and starts a row drag from inside an input. Here the
+     *    string is written literally, once.
+     * 2. It is a <span> and not a <button>: a focusable control that does nothing
+     *    on Enter is a worse outcome than an aria-hidden affordance whose
+     *    accessible twin -- the two move buttons, two cells away -- sits next to
+     *    it. Which is also why the handle is aria-hidden: assistive technology
+     *    sees the buttons, never this.
+     * 3. Remove those buttons and this becomes a WCAG 2.2 failure (2.1.1
+     *    Keyboard, 2.5.7 Dragging Movements), not a style question. A structure
+     *    test holds that line.
+     *
+     * The signature takes CHILDREN ONLY, never a props bag. The day it forwards
+     * props, the whitelist becomes bypassable by parameter, in the very file that
+     * owns it. Everything that is not `draggable` goes through Dom.el -- which is
+     * why the class name and the tooltip live here rather than at the call site.
+     */
+    dragHandle(children) {
+      const node = Dom.el("span", {
+        class: "f-grip",
+        "aria-hidden": "true",
+        title: global.Platform.t("dragToReorder", "Drag to reorder"),
+      }, children);
+      node.setAttribute("draggable", "true");
+      return node;
+    },
+
+    /**
+     * Refuses a file or a link dropped anywhere on this document.
+     *
+     * The default action of an un-prevented drop is TO NAVIGATE THE DOCUMENT. A
+     * dropped file sends the tab to a local file; a dropped link sends it
+     * off-origin. Neither executes anything -- browsers refuse navigation-by-drop
+     * towards a scripting scheme, and this file's own grep refuses to spell that
+     * scheme even in a comment -- so the impact is a loss of context, not code.
+     *
+     * But in this project that loss is not harmless: `pagehide` triggers
+     * flush(), which calls commit() WITHOUT awaiting it. A navigation therefore
+     * kills the document mid-write, and the last intention is lost in silence --
+     * a reordering included.
+     *
+     * Narrow on purpose: a drag of selected TEXT into the Destination field must
+     * keep working, and a row drag carries its own private type. Only the two
+     * formats that navigate are refused.
+     *
+     * Note the asymmetry in casing, because the two rules look contradictory
+     * three lines apart: DataTransfer.setData LOWERCASES the format it is given,
+     * which is why the row type is written in lower case -- but `types` reports
+     * the file entry as "Files", with the capital the specification mandates, and
+     * that one is NOT normalised. Harmonise them and this guard silently stops
+     * matching.
+     */
+    refuseFileDrops(target) {
+      const navigates = (event) => {
+        const types = event.dataTransfer ? event.dataTransfer.types : [];
+        return types.includes("Files") || types.includes("text/uri-list");
+      };
+      const refuse = (event) => {
+        if (navigates(event)) event.preventDefault();
+      };
+      target.addEventListener("dragover", refuse);
+      target.addEventListener("drop", refuse);
+      return () => {
+        target.removeEventListener("dragover", refuse);
+        target.removeEventListener("drop", refuse);
+      };
     },
 
     clear(node) {

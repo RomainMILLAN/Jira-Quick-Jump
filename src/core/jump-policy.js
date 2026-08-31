@@ -109,9 +109,35 @@
       return bindings;
     }
 
+    /**
+     * The evaluation order, and one shortcut by identity.
+     *
+     * Two delegations that CLOSE A PAIR rather than serve a view. This aggregate
+     * accepts withOrder(ids) -- an absolute intention about the order, so it claims
+     * the order as its own datum -- but could not tell you the current one: reading
+     * it meant leaving through registry(). And it was doing exactly that itself,
+     * through the back door, in registerAboveCatchAll below and in admission.js.
+     *
+     * shortcutFor is the twin of statusOf: answering "what is the state of row id"
+     * on the root and "what IS row id" on the registry offers two counters for two
+     * halves of one question, which is what invites the traversal.
+     *
+     * It hands an internal entity to an outer layer, and that is licit for one
+     * reason only: ProjectShortcut is IMMUTABLE (withConsent/withKey/withInstance
+     * each return a new object) and the caller keeps it for the length of a render.
+     * The day a setter appears, this stops being safe.
+     */
+    orderedIds() {
+      return this._registry.orderedIds();
+    }
+
+    shortcutFor(id) {
+      return this._registry.find(id);
+    }
+
     /** The shortcuts a catch-all placed before them makes unreachable. */
     shadowedShortcuts() {
-      return this._registry.shadowedIds().map((id) => this._registry.find(id));
+      return this._registry.shadowedIds().map((id) => this.shortcutFor(id));
     }
 
     catchAllShortcut() {
@@ -260,7 +286,7 @@
       const policy = registered.value;
       const catchAll = policy.catchAllShortcut();
       if (!catchAll || catchAll.id() === id) return registered;
-      const ids = policy.registry().orderedIds().filter((other) => other !== id);
+      const ids = policy.orderedIds().filter((other) => other !== id);
       const at = ids.indexOf(catchAll.id());
       ids.splice(at, 0, id);
       return policy.withOrder(ids);

@@ -122,6 +122,9 @@
   "domain": {
     "message": "Domain"
   },
+  "dragToReorder": {
+    "message": "Drag to reorder"
+  },
   "engines": {
     "message": "Search engines"
   },
@@ -194,11 +197,23 @@
   "movedUp": {
     "message": "Moved up."
   },
+  "noLongerShadowed": {
+    "message": "No longer shadowed."
+  },
+  "noLongerShadowedActive": {
+    "message": "No longer shadowed: this shortcut fires again."
+  },
+  "nowShadowed": {
+    "message": "Now shadowed: this shortcut no longer fires."
+  },
   "openSettings": {
     "message": "Open settings"
   },
   "optionsSub": {
     "message": "Type an issue key in the address bar, land on the issue."
+  },
+  "orderDropped": {
+    "message": "The list changed, so your move was dropped."
   },
   "orderNote": {
     "message": "Evaluated from top to bottom. The first match wins."
