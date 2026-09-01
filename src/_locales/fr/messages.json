@@ -364,5 +364,8 @@
   },
   "warnPunycode": {
     "message": "Ce nom d’hôte utilise des caractères non ASCII et peut en imiter un autre."
+  },
+  "previewUnavailable": {
+    "message": "Impossible de lire les règles installées."
   }
 }

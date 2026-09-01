@@ -944,6 +944,25 @@
     },
 
     async preview(ctx) {
+      // A THROW HERE MUST NOT BE SILENT. This handler is called from onInput, so its
+      // promise is floating: without this catch, anything that throws downstream --
+      // a rule read back from the store in a shape we cannot parse, most of all --
+      // leaves the PREVIOUS verdict on screen. A stale "Matched a named shortcut" is
+      // worse than no answer, and it is indistinguishable from the initial state.
+      //
+      // rule-ranking.js accepts a canary throw precisely because this exists: the
+      // fail-fast door now opens onto someone who is listening.
+      try {
+        await this.evaluate(ctx);
+      } catch (error) {
+        Dom.clear(this.out);
+        Dom.clear(this.why);
+        this.out.className = "preview empty";
+        this.out.textContent = t("previewUnavailable", "Could not read the installed rules.");
+      }
+    },
+
+    async evaluate(ctx) {
       const typed = this.input.value;
       // The rules AS INSTALLED, memoised per render by section-host -- never
       // fetched per keystroke.

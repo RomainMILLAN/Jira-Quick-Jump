@@ -364,5 +364,8 @@
   },
   "warnPunycode": {
     "message": "This host name uses non-ASCII characters and may imitate another one."
+  },
+  "previewUnavailable": {
+    "message": "Could not read the installed rules."
   }
 }

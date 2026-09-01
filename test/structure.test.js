@@ -231,6 +231,19 @@ test("the store listing justifies exactly the permissions the manifest asks for"
   assert.ok(listing.includes(resolveMessage(manifest.name)), "STORE_LISTING.md does not carry the manifest name");
 });
 
+test("the preview never fails silently", () => {
+  // The one path in this project where a throw reaches nobody: preview() is called
+  // from onInput, so its promise floats. Without a catch, a rule read back in a shape
+  // we cannot parse leaves the PREVIOUS verdict on screen -- a stale "Matched a named
+  // shortcut" is worse than no answer, and is indistinguishable from the empty state.
+  // This is the ear that lets rule-ranking.js keep its canary throw.
+  const ui = read("src/options-sections.js");
+  assert.match(ui, /async preview\(ctx\) \{\s*(?:\/\/[^\n]*\n\s*)*try \{/,
+    "preview() no longer wraps its work: a throw would leave a stale verdict on screen");
+  assert.ok(ui.includes("previewUnavailable"),
+    "the preview has no sentence for a store it cannot read");
+});
+
 test("the rules reach the platform through the one counter, and only through it", () => {
   // The three teeth in interception.test.js guard the SHAPE of what platformRules()
   // returns; NONE of them guards the fact that production goes THROUGH it. A future
