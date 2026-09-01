@@ -117,6 +117,48 @@ test("the script lists share a common prefix in the same order", () => {
   }
 });
 
+test("the manifest and importScripts are the SAME list, in the same order", () => {
+  // THE FIFTH LOADING LIST, and the only one no test read. A new file forgotten
+  // here breaks CHROME ALONE -- the global is undefined at the first call -- while
+  // every test stays green and web-ext lint stays clean. That is exactly the class
+  // of incident this batch exists to repair, so the batch must not reopen it.
+  //
+  // A STRICT EQUALITY, with its filter: the manifest carries one entry more, and it
+  // is background.js itself, last. Written as two numbers it would go red the first
+  // day and then be relaxed until it checks nothing -- the failure mode the test
+  // above documents. The filter is what states it, never a count.
+  const shared = manifest.background.scripts.filter((s) => !s.endsWith("background.js"));
+  // Extracted by regex, because the test cannot execute the file: importScripts is
+  // guarded by `typeof importScripts === "function"`, false under Node.
+  const source = read("src/background.js");
+  const block = /importScripts\(([^)]*)\)/s.exec(source);
+  assert.ok(block, "background.js no longer calls importScripts");
+  const imported = [...block[1].matchAll(/"([^"]+)"/g)].map((m) => m[1]);
+  assert.deepEqual(imported, shared, "the manifest and importScripts have drifted");
+});
+
+test("the load order the changelocks depend on is pinned in every list", () => {
+  // Two assertions at load time read across modules -- ProjectKey from the airlock,
+  // CatchAllKey from Re2Budget's client -- so the relative order is load-bearing,
+  // not incidental. And installed-projection.js already shows what a wrong rank
+  // costs: it destructures VersionedEntry AT LOAD.
+  const before = (list, a, b) => {
+    const ia = list.findIndex((s) => s.endsWith(a));
+    const ib = list.findIndex((s) => s.endsWith(b));
+    assert.ok(ia >= 0 && ib >= 0, `${a} or ${b} is missing`);
+    assert.ok(ia < ib, `${a} must load before ${b}`);
+  };
+  const lists = [manifest.background.scripts];
+  for (const page of ["src/options.html", "src/popup.html"]) {
+    if (existsSync(join(ROOT, page))) lists.push(scriptsOf(read(page)));
+  }
+  for (const list of lists) {
+    before(list, "core/project-shortcut.js", "core/catch-all-key.js");
+    before(list, "core/catch-all-key.js", "interception/reference-pattern.js");
+    before(list, "interception/re2-budget.js", "interception/reference-pattern.js");
+  }
+});
+
 test("both HTML surfaces share the same UI tail", () => {
   if (!existsSync(join(ROOT, "src/options.html")) || !existsSync(join(ROOT, "src/popup.html"))) return;
   const shared = manifest.background.scripts.filter((s) => !s.endsWith("background.js"));

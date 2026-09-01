@@ -94,10 +94,22 @@
     /**
      * Which shortcuts a catch-all placed before them makes unreachable.
      *
-     * Derived from the DOMAIN rule -- "the catch-all claims every reference, the
-     * order is first-wins, so nothing after it can be claimed" -- and NOT from
-     * the priority of any DNR rule. That rule is true with zero reserved
-     * prefixes, and it is what the arithmetic implements rather than founds.
+     * CHOSEN FOR PREDICTABILITY, not derived. It used to rest on "the catch-all
+     * claims every reference", which stopped being true the day the claim was
+     * bounded to six characters -- so this is now a DELIBERATE OVERAPPROXIMATION:
+     * everything below the catch-all is switched off, including what the catch-all
+     * no longer claims.
+     *
+     * That was already the case with zero reserved prefixes -- ISO sits below and
+     * is switched off although captures("ISO") is false -- so the bound widens the
+     * overapproximation rather than creating it. The alternative, shadowing that
+     * depends on key length, makes two neighbouring rows behave differently with
+     * no way for the interface to explain it. One predictable rule beats a correct
+     * one nobody can read, and the way out stays the same: move the line above.
+     * A test in domain.test.js pins the three facts together.
+     *
+     * And NOT from the priority of any DNR rule: the arithmetic implements this,
+     * it does not found it.
      */
     shadowedIds() {
       const ids = this.orderedIds();

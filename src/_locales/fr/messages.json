@@ -45,13 +45,13 @@
     "message": "Il ne peut y avoir qu’un seul attrape-tout."
   },
   "catchAllInsecure": {
-    "message": "Ensemble : toute recherche en forme de clé partira en clair."
+    "message": "Ensemble : toute recherche en forme de clé courte partira en clair."
   },
   "catchAllKey": {
-    "message": "N’importe quelle clé"
+    "message": "N’importe quelle clé courte"
   },
   "catchAllNote": {
-    "message": "Tout texte en forme de clé part vers cette destination."
+    "message": "Toute clé de 2 à 6 caractères suivie d’un trait d’union et d’un nombre part vers cette destination, sur les moteurs que vous avez cochés. Une courte liste réservée est retenue."
   },
   "changedAck": {
     "message": "Je l’ai vérifié"
@@ -264,7 +264,7 @@
     "message": "Masqué"
   },
   "shadowedWhy": {
-    "message": "L’attrape-tout au-dessus correspond d’abord : ce raccourci ne se déclenche jamais. Placez-le au-dessus de l’attrape-tout."
+    "message": "Une ligne placée sous l’attrape-tout ne se déclenche jamais, quelle que soit sa clé. Placez-la au-dessus de l’attrape-tout."
   },
   "shortcuts": {
     "message": "Raccourcis"
@@ -351,7 +351,7 @@
     "message": "Rien pour l’instant."
   },
   "warnCatchAll": {
-    "message": "Toute recherche en forme de clé sur vos moteurs partira vers cette destination."
+    "message": "Toute recherche en forme de clé de 2 à 6 caractères, trait d’union et nombre partira vers cette destination, sur chaque moteur que vous avez coché. Seule une courte liste réservée est retenue."
   },
   "warnInsecureScheme": {
     "message": "Le trafic et votre cookie de session Jira circulent en clair."

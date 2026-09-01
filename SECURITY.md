@@ -66,6 +66,28 @@ trade rather than leave stale rules firing under a badge that says `off`.
   gesture and is refused before its payload is even read. A catch-all copies the key you typed
   into that path, so the key's character set is asserted at emission and the
   captured text can contain no `/`, `.`, `%`, `?`, `#` or backslash.
+- **A catch-all claims only SHORT keys, and the bound is a domain decision.** Two to
+  six characters, hyphen only. A key of seven to twenty stays perfectly usable —
+  declared by name, where its rule is a literal. The narrowing is deliberate: fewer
+  ordinary searches leave the engines for the Jira instance. What it does NOT cover
+  is stated too: two-character keys are claimed, although the model elsewhere calls
+  them collision-prone, and only a short reserved list holds that end. Adding a word
+  to that list is the answer to one too many, not a floor.
+- **The reserved-prefix guard ships as several rules, and they are indivisible.**
+  Chrome refuses a single rule carrying all 49 alternatives (`memoryLimitExceeded`),
+  so the guard is cut into runs. Each run belongs to the SAME unit as the catch-all
+  of its engine: none can be installed without the others, and a refused run takes
+  that engine's catch-all with it. The final set is checked prefix by prefix, per
+  engine — never merely "an allow is present", which stopped being equivalent the
+  day there was more than one.
+- **A DATED BET, and it is the only debt no test can see.** The cut is budgeted at 60
+  units of alternation cost (sum of lengths plus count) against a real RE2 limit
+  measured on Chrome, 2026-09-01, to lie somewhere in (70, 107] — unknown. The last
+  measured-good point costs exactly 70, so the eleven units of margin pay for an
+  engine envelope the measurement never covered; a custom domain of sixty characters
+  is the real worst case, not Google. **If Google ever refuses at 60, drop to 50 —
+  never raise the key bound, which is a domain decision.** Re-measure before touching
+  either number: no test in this repository executes RE2.
 - **A key-scoped acknowledgement never travels.** Accepting a catch-all's warning
   is recorded in local storage, outside the configuration, so a compromised sync
   account cannot accept a universal redirect on your behalf. The limit, stated:

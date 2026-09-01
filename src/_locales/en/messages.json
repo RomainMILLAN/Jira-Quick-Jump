@@ -45,13 +45,13 @@
     "message": "There can only be one catch-all."
   },
   "catchAllInsecure": {
-    "message": "Together: every key-shaped search will leave in clear text."
+    "message": "Together: every search shaped like a short key will leave in clear text."
   },
   "catchAllKey": {
-    "message": "Any key"
+    "message": "Any short key"
   },
   "catchAllNote": {
-    "message": "Any key-shaped text goes to this destination."
+    "message": "Any 2-to-6-character key followed by a hyphen and a number goes to this destination, on the engines you ticked. A short reserved list is held back."
   },
   "changedAck": {
     "message": "I have checked it"
@@ -264,7 +264,7 @@
     "message": "Shadowed"
   },
   "shadowedWhy": {
-    "message": "The catch-all above it matches first, so this shortcut never fires. Move it above the catch-all."
+    "message": "A line placed below the catch-all never fires, whatever its key. Move it above the catch-all."
   },
   "shortcuts": {
     "message": "Shortcuts"
@@ -351,7 +351,7 @@
     "message": "Nothing yet."
   },
   "warnCatchAll": {
-    "message": "Every key-shaped search on your engines will leave for this destination."
+    "message": "Every search shaped like a 2-to-6-character key, a hyphen and a number will leave for this destination, on each engine you ticked. Only a short reserved list is held back."
   },
   "warnInsecureScheme": {
     "message": "Traffic and your Jira session cookie travel in clear text."

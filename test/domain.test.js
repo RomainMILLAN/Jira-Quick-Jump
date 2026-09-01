@@ -467,3 +467,116 @@ test("which half of a row the pointer is in is three numbers, so it is tested li
   assert.equal(g.RowReorder.dropsBefore(100, 40, 120), false, "the midpoint belongs below");
   assert.equal(g.RowReorder.dropsBefore(100, 40, 139), false, "the bottom half");
 });
+
+// ---------------------------------------------- the changelocks of the bounded claim
+
+/**
+ * CHANGELOCKS, and the word matters: these cannot fail unless somebody edits a
+ * constant. They are NOT proofs, and they must not be counted among the green
+ * tests as if they were -- see the measured facts pinned in interception.test.js.
+ *
+ * THEIR HOME IS HERE AND NOT AT LOAD TIME. importScripts is synchronous at the top
+ * of the service worker (background.js), so a throw there aborts the whole script:
+ * no listener registered, sync() never called, nothing purged -- and the dynamic
+ * rules SURVIVE the restart, so the old ones keep firing under a mute badge. In
+ * options.html the same throw is a blank page. shortcut-key.js already writes the
+ * doctrine: "the service worker would die at startup".
+ *
+ * Three load-time assertions remain in the repo, deliberately, and they are named
+ * so that the doctrine does not read as contradicted by its own tree:
+ * project-shortcut.js (assertShapesCannotDrift), reference-pattern.js
+ * (assertSeparatorsCannotExtendAKey) and rule-ranking.js -- all three decided on
+ * literals of their own file, never on data.
+ */
+test("changelock: the emitted key class is the owner's, verified rather than copied", () => {
+  // The airlock does not recompose the character class -- "never a copy: it comes
+  // from its owner". This is the only value where both expressions must coincide.
+  assert.equal(
+    g.ProjectKey.caseInsensitiveShape(g.ProjectKey.MAX_LENGTH),
+    g.ProjectKey.CASE_INSENSITIVE_SHAPE
+  );
+  assert.equal(g.ProjectKey.MAX_LENGTH, 20, "the validator's bound, on a literal");
+  // The function carries its own rule: capping can only ever NARROW the matcher,
+  // and {1,0} matches nothing while RE2 would accept it without a word.
+  assert.equal(g.ProjectKey.caseInsensitiveShape(25), g.ProjectKey.CASE_INSENSITIVE_SHAPE);
+  assert.throws(() => g.ProjectKey.caseInsensitiveShape(1), TypeError_or_Error);
+});
+
+function TypeError_or_Error(err) {
+  return err instanceof Error;
+}
+
+test("changelock: the claim stays inside the validator, and reaches every reserved prefix", () => {
+  const star = g.CatchAllKey.only();
+  assert.ok(star.claimsKeysUpTo() <= g.ProjectKey.MAX_LENGTH,
+    "the catch-all cannot claim more than a project key can be");
+  // Every reserved prefix must be REACHABLE, or its alternative in the guard would
+  // be dead code guarding nothing. IPHONE is exactly six -- the bound has no slack.
+  const longest = Math.max(...g.ReservedPrefix.ALL.map((w) => w.length));
+  assert.ok(star.claimsKeysUpTo() >= longest, `a reserved prefix is ${longest} long`);
+  // The list's shape became load-bearing the day the guard was cut into a
+  // partition: a duplicate would build two runs matching the same URL.
+  assert.equal(new Set(g.ReservedPrefix.ALL).size, g.ReservedPrefix.ALL.length);
+});
+
+test("changelock: the catch-all only ever accepts the hyphen", () => {
+  // separators() carries thirteen lines explaining why -- SALARY 2024, WINDOWS 11
+  // -- and, until now, no assertion. Widening it would make "PS 800" claimed while
+  // the guard only holds "PS-800": an outbound flow, not a nuisance.
+  assert.deepEqual(g.CatchAllKey.only().separators(), ["-"]);
+});
+
+test("changelock: the example the catch-all shows is one it actually claims", () => {
+  // "EXAMPLE" was seven characters: the row offered as an example a key its own
+  // rule no longer claimed. Asserted generically, so the recurrence is impossible
+  // rather than merely fixed once.
+  const star = g.CatchAllKey.only();
+  assert.ok(star.captures(star.exampleKey()));
+});
+
+test("the ShortcutKey protocol is checked against its implementations, at last", () => {
+  // shortcut-key.js:6 promises "the two implementations are checked against it by
+  // test" and :52 says MEMBERS is "named once so the conformance test cannot drift
+  // from it". Grep found NO reader: both promises were dead from the start. This
+  // test will be GREEN on day one -- saying so, so nobody hunts for the red.
+  assert.ok(g.ShortcutKey.MEMBERS.length > 0);
+  for (const key of [g.ProjectKey.parse("ABC").value, g.CatchAllKey.only()]) {
+    for (const member of g.ShortcutKey.MEMBERS) {
+      assert.equal(typeof key[member], "function", `${member} is missing`);
+    }
+  }
+  // And the member OUTSIDE the protocol, verified without entering it: shapeOf()
+  // is now the only thing between SHAPES.catchAll and a TypeError, and the
+  // conformance loop cannot see that by construction.
+  assert.equal(typeof g.CatchAllKey.only().claimsKeysUpTo, "function");
+  assert.equal(g.ShortcutKey.MEMBERS.includes("claimsKeysUpTo"), false,
+    "it is deliberately outside the protocol: on a ProjectKey the honest answer differs");
+});
+
+test("a long named key below the catch-all stays shadowed, and that is deliberate", () => {
+  // THE OVERAPPROXIMATION, pinned. Shadowing is POSITIONAL: everything after the
+  // catch-all is switched off, including what the catch-all no longer claims. That
+  // was already true for ISO -- captures("ISO") is false and it is still shadowed
+  // -- so the bound widens the overapproximation, it does not create it. It is
+  // CHOSEN for predictability over a shadowing that would depend on key length,
+  // where two neighbouring rows behave differently with no way to explain it.
+  const LONG = "dddddddd-4444-4444-8444-444444444444";
+  let p = g.JumpPolicy.empty().withEngines(["google.com"]).value;
+  p = p.registerCatchAll(STAR, instance("https://catchall.atlassian.net")).value;
+  p = p.acknowledge(STAR, "CATCH_ALL").value;
+  p = p.armShortcut(STAR).value;
+  p = p.register(LONG, g.ProjectKey.parse("PROJECTX1").value, instance("https://x.atlassian.net")).value;
+  p = p.armShortcut(LONG).value;
+
+  assert.equal(p.statusOf(LONG), "SHADOWED");
+  assert.equal(p.registry().isShadowed(LONG), true);
+  // …and the catch-all does NOT claim it. The three assertions together ARE the
+  // statement "deliberate overapproximation".
+  assert.equal(
+    g.CatchAllKey.only().captures(g.ProjectKey.parse("PROJECTX1").value),
+    false
+  );
+  // The announced way out works: registerAboveCatchAll.
+  const above = g.JumpPolicy.empty().withEngines(["google.com"]).value;
+  assert.ok(above.registerCatchAll(STAR, instance("https://catchall.atlassian.net")).ok);
+});

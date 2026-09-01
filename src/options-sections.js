@@ -151,7 +151,7 @@
       case "ShortcutAppeared":
       case "CatchAllAppeared":
         return [
-          plain(fact.key || t("catchAllKey", "Any key")),
+          plain(fact.key || t("catchAllKey", "Any short key")),
           " ",
           t("factAppeared", "was added, pointing to"),
           " ",
@@ -161,7 +161,7 @@
       case "ShortcutRemoved":
       case "CatchAllRemoved":
         return [
-          plain(fact.key || t("catchAllKey", "Any key")),
+          plain(fact.key || t("catchAllKey", "Any short key")),
           " ",
           t("factRemoved", "was removed. It pointed to"),
           " ",
@@ -211,7 +211,7 @@
     INTERNAL_HOST: t("warnInternalHost", "This destination is on a private or non-public network."),
     LITERAL_IP: t("warnLiteralIp", "This destination is an IP address rather than a host name."),
     PUNYCODE: t("warnPunycode", "This host name uses non-ASCII characters and may imitate another one."),
-    CATCH_ALL: t("warnCatchAll", "Every key-shaped search on your engines will leave for this destination."),
+    CATCH_ALL: t("warnCatchAll", "Every search shaped like a 2-to-6-character key, a hyphen and a number will leave for this destination, on each engine you ticked. Only a short reserved list is held back."),
   });
 
   const DIAGNOSIS = () => ({
@@ -578,7 +578,7 @@
         el("div", { class: "f-key" }, [el("div", { class: "field-label", text: t("key", "Key") }),
           isCatchAll
             ? el("div", { class: "f key is-static" }, [
-                el("span", { text: t("catchAllKey", "Any key") }),
+                el("span", { text: t("catchAllKey", "Any short key") }),
                 el("code", { text: shortcut.key().toString() }),
               ])
             : el("input", {
@@ -617,7 +617,7 @@
         row.appendChild(el("span", { class: "tag off", text: t("shadowed", "Shadowed") }));
         row.appendChild(el("div", {
           class: "row-msg pending", id: reasonId,
-          text: t("shadowedWhy", "The catch-all above it matches first, so this shortcut never fires. Move it above the catch-all."),
+          text: t("shadowedWhy", "A line placed below the catch-all never fires, whatever its key. Move it above the catch-all."),
         }));
       }
 
@@ -635,7 +635,7 @@
           // -- not a catalogue entry, which would belong to no scope and be
           // forgotten on every keystroke in the destination field.
           pending.some((w) => w.kind === "CATCH_ALL") && pending.some((w) => w.kind === "INSECURE_SCHEME")
-            ? el("span", { class: "row-msg pending", text: t("catchAllInsecure", "Together: every key-shaped search will leave in clear text.") })
+            ? el("span", { class: "row-msg pending", text: t("catchAllInsecure", "Together: every search shaped like a short key will leave in clear text.") })
             : null,
           el("span", { class: "row-msg pending", text: t("ackBlocks", "Arming stays unavailable until these are accepted.") }),
         ]));
@@ -660,7 +660,7 @@
       // The saved row shows it, from shortcut.key().toString().
       const keyCell = draft.catchAll
         ? el("div", { class: "f key is-static" }, [
-            el("span", { text: t("catchAllKey", "Any key") }),
+            el("span", { text: t("catchAllKey", "Any short key") }),
           ])
         : el("input", {
             class: "f key", placeholder: "ABC", value: draft.key, "aria-label": t("key", "Key"),
@@ -699,7 +699,7 @@
         draft.catchAll
           ? el("div", {
               class: "row-msg pending", id: "catch-all-note",
-              text: t("catchAllNote", "Any key-shaped text goes to this destination."),
+              text: t("catchAllNote", "Any 2-to-6-character key followed by a hyphen and a number goes to this destination, on the engines you ticked. A short reserved list is held back."),
             })
           : null,
         message,

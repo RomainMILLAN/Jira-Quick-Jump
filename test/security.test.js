@@ -111,17 +111,42 @@ test("a full-width asterisk is refused rather than folded into a catch-all", () 
   assert.equal(refused.code, "KEY_NOT_NORMALISED");
 });
 
-test("the catch-all's character set is literally the one ProjectKey enforces, flag included", () => {
+test("the catch-all's EMITTED shape holds the hostile corpus, and is bounded to six", () => {
+  // THE TITLE USED TO SAY "literally the one ProjectKey enforces". That became
+  // false the day the catch-all was bounded -- ProjectKey still allows twenty --
+  // and the test STAYED GREEN, because it replayed the validator's shape instead
+  // of the one shipped. A test that asserts a false property about the very
+  // control the batch changed is worse than no test.
+  //
+  // So it is aimed at what the RULE carries, and ANCHORED: patternFor is
+  // documented UNANCHORED (the engine places the anchors), so an unanchored replay
+  // would match "PAYROLL-1" through its sub-word "AYROLL-1" and the bound would
+  // have no teeth at all.
+  //
   // The rule ships with isUrlFilterCaseSensitive false, so the corpus is replayed
   // WITH the real flag. Testing the case-sensitive form would validate a
   // different regex from the one delivered.
-  const shape = new RegExp("^" + g.ProjectKey.CASE_INSENSITIVE_SHAPE + "$", "i");
+  const emitted = new RegExp("^" + g.ReferencePattern.patternFor(g.CatchAllKey.only()) + "$", "i");
+
+  // The 49 hostile strings stay: this is the ONLY place in the repo that replays
+  // them against a MATCHER rather than a parse door. The bounded corpus below is
+  // additive, never a replacement.
   for (const key of HOSTILE_KEYS) {
     if (typeof key !== "string") continue;
-    assert.equal(shape.test(key), false, `${JSON.stringify(key)} is matched by the catch-all shape`);
+    assert.equal(emitted.test(key + "-1"), false, `${JSON.stringify(key)} is matched by the emitted shape`);
   }
-  for (const [input] of VALID_KEYS) {
-    assert.equal(shape.test(input.trim()), true, `${JSON.stringify(input)} is not matched`);
+
+  // The bound, on the emitted form: six characters in, seven out.
+  const bound = g.CatchAllKey.only().claimsKeysUpTo();
+  assert.equal(emitted.test("A".repeat(bound) + "-1"), true, "the bound itself must match");
+  assert.equal(emitted.test("A".repeat(bound + 1) + "-1"), false, "one past the bound must not");
+  assert.equal(emitted.test("BESSON-42"), true);
+  assert.equal(emitted.test("PAYROLL-3"), false);
+
+  // VALID_KEYS keeps testing ProjectKey.parse, which must still accept seven
+  // characters and more: the validator did not move, only the claim did.
+  for (const [input, expected] of VALID_KEYS) {
+    assert.equal(g.ProjectKey.parse(input).value.toString(), expected);
   }
 });
 

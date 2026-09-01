@@ -464,3 +464,72 @@ test("an adversarial input still completes well inside a quarter of a second at 
   const elapsed = Date.now() - started;
   assert.ok(elapsed < 250, `took ${elapsed}ms`);
 });
+
+// ------------------------------------------------- the measured facts, and the cut
+
+/**
+ * MEASURED IN CHROME ON 2026-09-01 via chrome.declarativeNetRequest.isRegexSupported,
+ * on the COMPLETE RULE. Re-measure before touching any number here; the command is
+ * a paste into the service worker console, and the facts are:
+ *
+ *   key {1,19} REFUSED (memoryLimitExceeded) even as [A-Z] | {1,9} accepted
+ *   guard 49 words (cost 211) REFUSED | 24 (107) REFUSED | 16 (70) accepted
+ *   guard 49 words WITHOUT (?:.*&)? still REFUSED -- the cost is the alternation
+ *
+ * This is a CHANGELOCK, not a proof: it can only fail if somebody edits a constant,
+ * and it will not explain why. Hence the date in the name.
+ */
+test("changelock 2026-09-01: the claimed bound fits the measured RE2 budget", () => {
+  const budget = g.Re2Budget.conservative();
+  assert.ok(budget.affordsKeyOfLength(g.CatchAllKey.only().claimsKeysUpTo()),
+    "the domain claims more than the measurement carries");
+  // The measured ceiling itself, so raising LONGEST_MEASURED_KEY without
+  // re-measuring goes red.
+  assert.equal(g.Re2Budget.LONGEST_MEASURED_KEY, 10);
+  assert.equal(g.Re2Budget.MAX_ALTERNATION_COST, 60);
+  // 60 rather than 70: the last measured-good point costs exactly 70 and the real
+  // limit lies in (70, 107] -- unknown. Sitting on 70 would ship a run of
+  // SEVENTEEN words, more alternatives than anything ever measured good.
+  assert.ok(g.Re2Budget.MAX_ALTERNATION_COST < 70, "the margin pays for the unmeasured envelope");
+});
+
+test("the guard runs are affordable on the SHIPPED catalogue, and partition it exactly", () => {
+  // The six refusals are DETERMINISTIC: they depend only on ReservedPrefix.ALL,
+  // claimsKeysUpTo() and the budget, all shipped in the release. So a release that
+  // refuses refuses for EVERY user -- but only at the moment they ARM a catch-all.
+  // Without this test, a release can be green everywhere and brick that one sync.
+  const budget = g.Re2Budget.conservative();
+  const guards = g.ReferencePattern.reservedPrefixGuards(g.CatchAllKey.only(), budget);
+
+  // Ordered partition: "the same words, two runs permuted" cannot pass. And no
+  // pinning of WHICH word lands in WHICH run -- ALL is grouped thematically, and a
+  // legitimate reordering must not go red.
+  assert.deepEqual(guards.flatMap((guard) => guard.prefixes), g.ReservedPrefix.ALL);
+  for (const guard of guards) {
+    assert.ok(budget.affordsAlternation(guard.prefixes), "a run exceeds the measured budget");
+    assert.ok(Object.isFrozen(guard.prefixes), "a shared run is frozen, not watched");
+  }
+  assert.ok(guards.length > 1, "49 words in one rule is what Chrome refused");
+});
+
+test("the guard holds HTTP and HTTPS, the pair a substring check confounded", () => {
+  // includes() is wrong on seven pairs of this catalogue -- HTTP in HTTPS, NIS in
+  // NIST, PS in FIPS and HTTPS, CI in ASCII and PCI, PR in GDPR -- and HTTP/HTTPS
+  // fall in the SAME run, so the inspector had to match rather than read.
+  const rules = delivered(withCatchAll());
+  const allows = rules.filter((r) => r.action.type === "allow");
+  const engine = g.SearchEngineCatalog.find("google.com");
+  for (const word of ["HTTP", "HTTPS", "CVE", "ISO", "IPHONE", "PR", "CI"]) {
+    const held = allows.some((allow) =>
+      new RegExp(allow.condition.regexFilter, "i").test(engine.searchUrlFor(word + "-1")));
+    assert.ok(held, `${word}-1 is not held back by any guard`);
+  }
+  // And a legitimate six-character key CONTAINING a reserved prefix is not killed:
+  // the engine anchors ^…q= and (?:&|$) around the fragment.
+  const url = engine.searchUrlFor("MYHTTP-1");
+  assert.equal(
+    allows.some((a) => new RegExp(a.condition.regexFilter, "i").test(url)),
+    false,
+    "MYHTTP-1 must not be caught by the HTTP alternative"
+  );
+});

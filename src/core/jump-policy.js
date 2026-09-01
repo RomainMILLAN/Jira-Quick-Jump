@@ -173,7 +173,11 @@
           catchAll &&
           eligible(catchAll) &&
           catchAll.key().separators().includes(reference.separator()) &&
-          global.ReservedPrefix.has(reference.key().toString())
+          // ONE hop, and the verdict is the key's own. Recombining two facts in
+          // the right order from here was a convention between two files: the
+          // length has to be tested BEFORE the list, or a reserved prefix beyond
+          // the bound would read RESERVED_PREFIX while no rule can fire on it.
+          catchAll.key().verdictFor(reference.key()) === global.CatchAllKey.VERDICTS.RESERVED_PREFIX
         ) {
           return { code: "RESERVED_PREFIX" };
         }

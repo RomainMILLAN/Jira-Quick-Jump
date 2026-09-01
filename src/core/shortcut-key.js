@@ -14,6 +14,14 @@
  *   exampleKey()            -> ProjectKey, for display only
  *   separators()            -> the separators this key accepts
  *
+ * claimsKeysUpTo() is deliberately NOT in the protocol either, and unlike
+ * collidesWithOrdinarySearches() it is carried by CatchAllKey ALONE: on a
+ * ProjectKey the honest answer to "your key length ceiling" is its own length, not
+ * the validator's twenty -- two contracts under one name, a substitution violation
+ * a typeof check would never see. Its only caller is SHAPES.catchAll in
+ * reference-pattern.js, which branches on shapeOf(key) BEFORE asking, so no caller
+ * is polymorphic. A test asserts it exists on the catch-all without adding it here.
+ *
  * collidesWithOrdinarySearches() is deliberately NOT in the protocol: it is the
  * only candidate that does not speak about BEING a key, and it forced
  * CatchAllKey to answer a question that has no meaning for it.
