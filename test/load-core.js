@@ -23,6 +23,7 @@ const ORDER = [
   "core/policy-diff.js",
   "core/admission.js",
   "interception/search-engine-catalog.js",
+  "interception/re2-budget.js",
   "interception/reference-pattern.js",
   "interception/rule-ranking.js",
   "interception/rule-set.js",

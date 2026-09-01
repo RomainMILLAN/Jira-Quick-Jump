@@ -19,8 +19,13 @@
 
   // Rule ids in bands, so a collision is impossible by construction and the
   // debugging stays readable. Rules are replaced wholesale on every sync, so the
-  // ids are free and `engineIndex` indexing policy.engineIds() has no
-  // consequence beyond being stable within one build.
+  // ids are free.
+  //
+  // THE BAND MATTERS FOUR TIMES MORE SINCE THE GUARD WAS CUT. Bindings run
+  // 1..MAX_BINDINGS (300), because binding.ruleId() is _ruleIndex + 1; guards now
+  // number engines x runs -- at most 24 x 4 = 96 -- so they occupy [1001, 1096].
+  // No overlap, and RuleSet asserts that all ids are distinct, which covers the
+  // monotonic counter that nothing else keeps inside its band.
   const RESERVED_RULE_ID_BASE = 1001;
 
   const condition = (regexFilter) => ({
@@ -42,11 +47,21 @@
   });
 
   const RuleFactory = {
-    buildRules(policy, catalog) {
+    buildRules(policy, catalog, budget) {
       const units = [];
       const skipped = [];
-      const engineIndex = new Map(policy.engineIds().map((id, i) => [id, i]));
-      const catchAllEngines = new Set();
+      // ONE source of truth for "is there an active catch-all". policy
+      // .catchAllShortcut() is true as soon as the LINE EXISTS, while this is
+      // filled from activeBindings() -- armed, acknowledged, unshadowed. A
+      // disarmed catch-all is the state every catch-all passes through, since
+      // warnCatchAll is the text one acknowledges IN ORDER to arm; letting the
+      // refusals run there would purge the user's named shortcuts because of a
+      // line they never armed.
+      //
+      // { key, engineIds } rather than a Map<engineId, key>: catchAll() is
+      // SINGULAR, so a map would carry the same value once per engine with a
+      // uniformity invariant asserted nowhere.
+      let catchAll = null;
 
       for (const binding of policy.activeBindings()) {
         const engine = catalog.find(binding.engineId());
@@ -73,37 +88,55 @@
           isCatchAll: key.isCatchAll(),
         };
         if (key.isCatchAll()) {
-          catchAllEngines.add(binding.engineId());
-          units.push([rule]);
-        } else {
-          units.push([rule]);
+          if (catchAll === null) catchAll = { key, engineIds: [] };
+          catchAll.engineIds.push(binding.engineId());
         }
+        units.push([rule]);
       }
 
       // Only where a catch-all is actually active: without one, these would kill
-      // a shortcut legitimately named API for nothing.
-      for (const engineId of catchAllEngines) {
+      // a shortcut legitimately named API for nothing. The guards are cut ONCE --
+      // the runs do not depend on the engine, only the envelope does.
+      const guards = catchAll
+        ? ReferencePattern.reservedPrefixGuards(catchAll.key, budget)
+        : [];
+      let nextGuardId = RESERVED_RULE_ID_BASE;
+      for (const engineId of catchAll ? catchAll.engineIds : []) {
         const engine = catalog.find(engineId);
         if (!engine) continue;
-        const guard = {
-          id: RESERVED_RULE_ID_BASE + (engineIndex.get(engineId) ?? 0),
+        // engineIds is only filled after the binding loop's own `if (!engine)
+        // continue`, so the unit exists. Written down because it is one edit away
+        // from being an undefined.push.
+        const unit = units.find((u) => u[0].isCatchAll && u[0].engineId === engineId);
+        // The catch-all of THIS engine and its guards form one unit: none can be
+        // installed without the others. THE UNIT IS NOW FIVE RULES INSTEAD OF TWO,
+        // so a single over-budget run kills the catch-all OF THAT ENGINE -- still
+        // graceful per engine, but the per-engine chance of falling quadruples.
+        unit.push(...guards.map((guard) => ({
+          id: nextGuardId++,
           priority: RuleRanking.forReservedPrefixes(),
           action: { type: "allow" },
-          condition: condition(engine.searchUrlPattern(ReferencePattern.reservedPrefixPattern())),
+          condition: condition(engine.searchUrlPattern(guard.pattern)),
           engineId,
           isCatchAll: false,
-        };
-        // The catch-all of THIS engine and its guard form one unit: neither can
-        // be installed without the other.
-        const unit = units.find((u) => u.length === 1 && u[0].isCatchAll && u[0].engineId === engineId);
-        if (unit) unit.push(guard);
-        else units.push([guard]);
+          // WHY THIS LABEL ESCAPES THE OBJECTION MADE TO CARRYING A KEY HERE: it
+          // is not a domain ENTITY, it is an array of shipped strings, and the
+          // final set's post-condition NEEDS it -- a sealed blister is checked
+          // sealed. Without this sentence someone applies the objection uniformly,
+          // removes the field, and the coverage check goes quietly green.
+          guardedPrefixes: guard.prefixes,
+        })));
       }
 
-      return new RuleSet(units, skipped).assertReservedPrefixesCoverEveryCatchAll();
+      // THE CONTRACT COMES FROM THE DOMAIN, and the empty truck still gets a
+      // docket: without empty(), a null catch-all would throw a TypeError on the
+      // MAJORITY path -- every profile without a catch-all, on every sync.
+      const contract = catchAll
+        ? new global.CoverageContract(catchAll.key.prefixesWithinReach(), catchAll.engineIds)
+        : global.CoverageContract.empty();
+      return RuleSet.sealed({ units, skipped, contract });
     },
 
-    RESERVED_RULE_ID_BASE,
   };
 
   global.RuleFactory = RuleFactory;

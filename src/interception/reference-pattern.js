@@ -109,9 +109,22 @@
     catchAll: {
       arity: 2,
       backreferences: ["\\1", "\\2"],
-      // The SAME character set ProjectKey enforces, written for a
-      // case-insensitive rule. Never a copy: it comes from its owner.
-      fragmentFor: () => "(" + global.ProjectKey.CASE_INSENSITIVE_SHAPE + ")",
+      // THE change of this batch: the regex RE2 refuses. The character set still
+      // comes from its owner -- never a copy -- but AT THE LENGTH THE KEY CLAIMS,
+      // which is less than a named key may be.
+      //
+      // We ASK the key rather than reaching for a global singleton: forKey already
+      // hands the key to fragmentFor, so the traveller shows his own passport. The
+      // other alternative would have undone the whole point of putting the bound
+      // in the domain.
+      //
+      // This makes the table polymorphic on a member OUTSIDE the protocol --
+      // SHAPES.named receives a ProjectKey, SHAPES.catchAll a CatchAllKey, and
+      // only the second carries claimsKeysUpTo(). That is what the ISP decision
+      // wants: each shape calls only what ITS nature of key carries, which is why
+      // this is a table and not an `if`.
+      fragmentFor: (key) =>
+        "(" + global.ProjectKey.caseInsensitiveShape(key.claimsKeysUpTo()) + ")",
       referenceFor: () => IssueReference.render({ toString: () => "\\1" }, "\\2"),
     },
   };
@@ -165,16 +178,71 @@
      * Only the hyphen, because it only ever has to hold back the catch-all, and a
      * catch-all accepts nothing else.
      */
-    reservedPrefixPattern() {
-      const words = global.ReservedPrefix.ALL;
+    reservedPrefixGuards(catchAllKey, budget) {
+      const { refusal } = global.Re2Budget;
+      // The prefixes come from the KEY, not from a bound handed over: an integer
+      // that leaves core/, travels through the airlock and is injected back into
+      // core/ makes the airlock a courier. And `guardableBy(undefined)` returning
+      // [] -- zero guards with every assertion green -- is a fail-open opened by a
+      // signature, which is unreachable when there is no parameter at all.
+      const words = catchAllKey.prefixesWithinReach();
+      if (words.length === 0) throw refusal("EMPTY_REACH");
+
+      // Two shapes in one function, and the roles are DIFFERENT: this one is a
+      // metacharacter check on SHIPPED words, at the validator's full length; the
+      // emitted key fragment is a CLAIM, at the key's length. Two neighbouring
+      // bounds in a file that forbids bound drift, so the roles are named.
       const shaped = new RegExp("^" + global.ProjectKey.CASE_INSENSITIVE_SHAPE + "$");
       for (const word of words) {
-        // An alternative that cannot be a key is dead code guarding nothing.
-        if (!shaped.test(word)) throw new Error("a reserved prefix is not key-shaped: " + word);
+        // THIS throw is not the one that was removed, and it guards TWO things:
+        // metacharacter injection -- "NODE.JS" would make the dot a WILDCARD in a
+        // priority 2 allow, silently killing legitimate jumps -- AND the
+        // termination of the cut, since a key-shaped word costs at most 21 < 60,
+        // so no single word can ever exceed the budget.
+        if (!shaped.test(word)) throw refusal("PREFIX_NOT_KEY_SHAPED", { word });
       }
-      const pattern = "(?:" + words.join("|") + ")" + IN_URL["-"] + "\\d+";
-      assertGroups(pattern, 0);
-      return pattern;
+
+      const guards = budget.cutIntoAffordableRuns(words).map((run) => {
+        const pattern = "(?:" + run.join("|") + ")" + IN_URL["-"] + "\\d+";
+        // assertGroups throws a BARE Error and is SHARED with emit(), so it is
+        // wrapped here rather than having its contract changed -- and { cause } is
+        // forwarded, because a catch that swallows destroys what debugging needs.
+        try {
+          assertGroups(pattern, 0);
+        } catch (err) {
+          throw refusal("GUARD_HAS_CAPTURE_GROUP", { cause: err });
+        }
+        // THE INSPECTOR MATCHES; IT NO LONGER READS THE LABEL. `includes(word)`
+        // is wrong on SEVEN pairs of this catalogue -- HTTP in HTTPS, NIS in NIST,
+        // PS in FIPS and HTTPS, CI in ASCII and PCI, PR in GDPR -- and HTTP/HTTPS
+        // fall in the SAME run. The day something deduplicates, HTTP leaves the
+        // pattern, the label stays, the inspector smiles, and HTTP-1 leaves for
+        // the Jira instance.
+        //
+        // BOTH CASES, because the flag that makes the guard insensitive lives in
+        // another file (rule-factory.js) and lowercase is the form actually typed,
+        // hence the leak scenario. And it checks THE FRAGMENT: this file does not
+        // know the engines, so the real-URL assertion lives in the golden test.
+        const live = new RegExp("^" + pattern + "$", "i");
+        for (const word of run) {
+          if (!live.test(word + "-1")) throw refusal("GUARD_DOES_NOT_HOLD", { word });
+          if (!live.test(word.toLowerCase() + "-1")) throw refusal("GUARD_DOES_NOT_HOLD", { word });
+        }
+        return Object.freeze({ prefixes: run, pattern });
+      });
+
+      // THE CONTROL IS THIS PARTITION -- order-sensitive, so "the same words, two
+      // runs permuted" cannot pass. The inspector above is QUASI-TAUTOLOGICAL
+      // today: `pattern` is built two lines up from run.join("|") and `run` is
+      // also what becomes `prefixes`, so a word dropped by a deduplication leaves
+      // BOTH and the inspector stays green. It is kept -- three lines, and it
+      // covers the day the pattern and the label stop sharing a source -- but the
+      // partition is what catches, and saying so stops someone from removing the
+      // partition on the grounds that the inspector suffices.
+      if (guards.flatMap((guard) => guard.prefixes).join("|") !== words.join("|")) {
+        throw refusal("GUARDS_NOT_A_PARTITION");
+      }
+      return guards;
     },
   };
 

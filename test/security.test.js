@@ -78,7 +78,7 @@ test("a forged storage entry produces no rule at all", () => {
   assert.equal(restored.policy.activeBindings().length, 0);
   assert.equal(restored.quarantine.length, 2, "both entries must be quarantined, not dropped");
   assert.deepEqual(restored.dropped.map((d) => d.code), ["KEY_SHAPE", "BASE_SCHEME"]);
-  const { rules } = g.RuleFactory.buildRules(restored.policy, g.SearchEngineCatalog);
+  const { rules } = g.RuleFactory.buildRules(restored.policy, g.SearchEngineCatalog, g.Re2Budget.conservative());
   assert.equal(rules.length, 0);
 });
 
@@ -137,13 +137,37 @@ test("the case-insensitive shape cannot be rewritten by another file", () => {
   assert.equal(g.ProjectKey.CASE_INSENSITIVE_SHAPE, before);
 });
 
-test("a catch-all claims any well-formed key, T1 included, and never a reserved prefix", () => {
+test("a catch-all claims a SHORT well-formed key, T1 included, and says why it refuses", () => {
+  // THE CONTRACT CHANGED, and this is the new one -- not a relaxation. The title
+  // used to say "any well-formed key" and listed PAYROLL among the claimed; seven
+  // characters is now beyond reach, because RE2 refuses the unbounded form
+  // (measured, memoryLimitExceeded).
+  //
+  // AND THE TEST NAMES WHICH OF THE TWO REFUSALS APPLIES. Collapsing them under one
+  // `false` is what made the obvious "fix" for this test, back when it went red,
+  // be to take IPHONE out of the deny-list -- the most dangerous direction
+  // available. verdictFor buys exactly that distinction.
   const star = g.ShortcutKey.parse("*").value;
-  for (const key of ["PAYROLL", "BAN", "T1", "BESSON", "AB"]) {
-    assert.equal(star.captures(g.ProjectKey.parse(key).value), true, `${key} is not claimed`);
+  const V = g.CatchAllKey.VERDICTS;
+  const verdict = (key) => star.verdictFor(g.ProjectKey.parse(key).value);
+
+  // T1 stays claimed: reserved-prefix.js records that product decision, and it is
+  // why PS/MP/WD/F1 are on the list while T1 is not.
+  for (const key of ["BAN", "T1", "BESSON", "AB"]) {
+    assert.equal(verdict(key), V.CLAIMED, `${key} is not claimed`);
   }
-  for (const key of ["ISO", "CVE", "COVID", "WD", "HTTPS"]) {
-    assert.equal(star.captures(g.ProjectKey.parse(key).value), false, `${key} is claimed`);
+  // Too long -- nothing to do with the deny-list.
+  for (const key of ["PAYROLL", "PROJECTX1"]) {
+    assert.equal(verdict(key), V.OUT_OF_REACH, `${key} should be out of reach`);
+  }
+  // On the list. IPHONE is here for THIS reason and no other: it is six
+  // characters, so it is well within reach.
+  for (const key of ["ISO", "CVE", "COVID", "WD", "HTTPS", "IPHONE"]) {
+    assert.equal(verdict(key), V.RESERVED_PREFIX, `${key} should be held back`);
+  }
+  // The enumeration is read, not decorative: nothing else can come out.
+  for (const key of ["BAN", "PAYROLL", "IPHONE"]) {
+    assert.ok(Object.values(V).includes(verdict(key)));
   }
 });
 
@@ -189,7 +213,7 @@ test("a forged storage entry cannot pre-acknowledge a catch-all, so it produces 
   const shortcut = restored.policy.shortcuts()[0];
   assert.equal(shortcut.consent().acknowledged("CATCH_ALL"), false, "the acknowledgement did not travel");
   assert.equal(restored.policy.activeBindings().length, 0, "an unacknowledged catch-all installs nothing");
-  const { rules } = { rules: g.RuleFactory.buildRules(restored.policy, g.SearchEngineCatalog).rules() };
+  const { rules } = { rules: g.RuleFactory.buildRules(restored.policy, g.SearchEngineCatalog, g.Re2Budget.conservative()).rules() };
   assert.deepEqual(rules, []);
 });
 

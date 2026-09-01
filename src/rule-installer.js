@@ -5,7 +5,7 @@
 (function (global) {
   "use strict";
 
-  const { Platform, RuleFactory, SearchEngineCatalog, OriginRequirements } = global;
+  const { Platform, RuleFactory, SearchEngineCatalog, OriginRequirements, Re2Budget } = global;
   const dnr = () => Platform.api.declarativeNetRequest;
 
   let pending = null;
@@ -33,8 +33,20 @@
     },
 
     async _install(policy, quarantinedCount = 0) {
-      const catalog = SearchEngineCatalog.forPolicy(policy);
-      const set = RuleFactory.buildRules(policy, catalog);
+      // `skipped` is declared BEFORE the try, because on a refusal `installable`
+      // does not exist and the report below reads it. Otherwise the fix for a mute
+      // throw is a mute TypeError at the same place.
+      let skipped = [];
+      let installed = true;
+      let catchAllInstalled = true;
+      try {
+        const catalog = SearchEngineCatalog.forPolicy(policy);
+        // The budget is RECEIVED here and handed down: only this file knows the
+        // platform, and the day the envelope stops being ignorable it is
+        // Re2Budget.forEnvelope() that has to reach the factory. Letting the
+        // factory pick its own measurement would leave that Strategy without a
+        // path.
+        const set = RuleFactory.buildRules(policy, catalog, Re2Budget.conservative());
       // The awaits happen HERE, and the atomicity decision is a synchronous
       // property of the set: a value object must not need a platform fake to be
       // tested.
@@ -69,31 +81,46 @@
         });
         if (!check.isSupported) unsupported.push(rule.id);
       }
-      const installable = set.withoutRules(unsupported).assertReservedPrefixesCoverEveryCatchAll();
+        // withoutRules replays the post-condition through the constructor, so the
+        // explicit call that used to sit here is gone: two notes stuck on a
+        // blister are still notes.
+        const installable = set.withoutRules(unsupported);
+        skipped = installable.skipped();
+        catchAllInstalled = installable.catchAllInstalled();
 
-      // Wholesale replacement: an Idempotent Receiver. Syncing three times gives
-      // the same state, and deleting the last shortcut cleans up for free.
-      //
-      // WRAPPED, because a rejection leaves the call atomic: nothing changes, THE
-      // PREVIOUS RULES STAY ALIVE, and the promise would otherwise surface in a
-      // listener where nobody catches it. After this feature that is the KILL
-      // SWITCH breaking -- disarm-all builds an empty set, and a failed apply
-      // would leave the catch-all claiming every search while the UI says off.
-      let installed = true;
-      try {
+        // Wholesale replacement: an Idempotent Receiver. Syncing three times gives
+        // the same state, and deleting the last shortcut cleans up for free.
+        //
+        // AND THE BUILD IS INSIDE THIS try, which it was not: buildRules now
+        // raises six named refusals, and outside the try they left sync() with no
+        // report, no badge and no journal -- old rules still firing under an
+        // unchanged badge. Safe (the previous set was sealed) but MUTE, and a
+        // refusal has to be readable. INSTALL_FAILED is first in DIAGNOSES.
+        //
+        // A rejection leaves the call atomic: nothing changes, THE PREVIOUS RULES
+        // STAY ALIVE, and the promise would otherwise surface in a listener where
+        // nobody catches it. After this feature that is the KILL SWITCH breaking.
         const existing = await dnr().getDynamicRules();
         await dnr().updateDynamicRules({
           removeRuleIds: existing.map((r) => r.id),
-          // The labels RuleSet needs are stripped before the platform sees them.
-          addRules: installable.rules().map(({ engineId, isCatchAll, ...rule }) => rule),
+          // The labels RuleSet needs are stripped before the platform sees them --
+          // THREE of them now. A nominative deny-list that misses one hands an
+          // unknown property to updateDynamicRules, which rejects THE WHOLE BATCH:
+          // the original bug, reproduced.
+          addRules: installable.rules().map(
+            ({ engineId, isCatchAll, guardedPrefixes, ...rule }) => rule),
         });
-      } catch {
+      } catch (error) {
         installed = false;
+        // A refusal carries its named cause; anything else is UNKNOWN rather than
+        // being blamed on one of the six.
+        const reason = error instanceof Re2Budget.Refusal
+          ? error.reason
+          : Re2Budget.REASONS.UNKNOWN;
+        skipped = [...skipped, { code: "CONSTRUCTION_REFUSED", reason }];
+        catchAllInstalled = false;
       }
-      return this.report(policy, installable.skipped(), quarantinedCount, {
-        installed,
-        catchAllInstalled: installable.catchAllInstalled(policy.catchAllShortcut() !== undefined),
-      });
+      return this.report(policy, skipped, quarantinedCount, { installed, catchAllInstalled });
     },
 
     /**

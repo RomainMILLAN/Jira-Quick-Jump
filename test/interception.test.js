@@ -16,7 +16,19 @@ const policy = (() => {
  * The rules AS DELIVERED, which is what the preview now consumes. A simulator
  * that simulates a different programme from the installed one is a stage set.
  */
-const delivered = (p, catalog = g.SearchEngineCatalog) => g.RuleFactory.buildRules(p, catalog).rules();
+// The budget is passed EXPLICITLY: buildRules RECEIVES it rather than picking its
+// own measurement, so a test declares the measurement it exercises -- and the day
+// a per-engine budget arrives, Re2Budget.forEnvelope() has a path in.
+//
+// NOTE, and it is a real defect this batch does NOT fix: `delivered` hands
+// JumpPreview the LABELLED rules, while production hands it the rules read back
+// from the platform, stripped. This helper therefore simulates a different
+// programme from the installed one -- a stage set, in the words of this file's own
+// header. Splitting it into labelled()/delivered() belongs to the next batch,
+// together with the single-author stripping it depends on.
+const budget = () => g.Re2Budget.conservative();
+const delivered = (p, catalog = g.SearchEngineCatalog) =>
+  g.RuleFactory.buildRules(p, catalog, budget()).rules();
 
 test("real search URLs land on the issue", () => {
   for (const url of POSITIVE.filter((u) => !u.includes("google.fr") && !u.includes("google.co.uk"))) {
@@ -78,7 +90,7 @@ test("every rule is main_frame only, and never uses excludedResourceTypes", () =
 
 test("an unknown engine id is reported rather than crashing or being skipped in silence", () => {
   const withGhost = policy.withEngines(["google.com", "ghost"]).value;
-  const set = g.RuleFactory.buildRules(withGhost, g.SearchEngineCatalog);
+  const set = g.RuleFactory.buildRules(withGhost, g.SearchEngineCatalog, budget());
   assert.equal(set.rules().length, 1);
   assert.deepEqual(set.skipped().map((s) => s.code), ["UNKNOWN_ENGINE"]);
 });
@@ -197,7 +209,12 @@ const withCatchAll = (engines = ["google.com"]) => {
 test("the whole rule set is locked against a literal expectation", () => {
   // The golden test. Everything else in this file explains one line of it.
   const rules = delivered(withCatchAll());
-  assert.deepEqual(rules.map(({ engineId, isCatchAll, ...rule }) => rule), [
+  // THIS TEST IS THE THIRD PARTY THAT KNOWS THE STRIPPING -- production
+  // (rule-installer.js) and journal.test.js are the other two. Its rest-spread
+  // gains `guardedPrefixes`; the literal expectation below does NOT. Written the
+  // other way round -- widening the expectation -- it would have gone green over a
+  // label handed to Chrome, which rejects the whole batch.
+  assert.deepEqual(rules.map(({ engineId, isCatchAll, guardedPrefixes, ...rule }) => rule), [
     {
       id: 1, priority: 3,
       action: { type: "redirect", redirect: { regexSubstitution: "https://example.atlassian.net/browse/ABC-\\1" } },
@@ -218,21 +235,29 @@ test("the whole rule set is locked against a literal expectation", () => {
       id: 3, priority: 1,
       action: { type: "redirect", redirect: { regexSubstitution: "https://catchall.atlassian.net/browse/\\1-\\2" } },
       condition: {
-        regexFilter: "^https://(?:www\\.)?google\\.com/search\\?(?:.*&)?q=([A-Za-z][A-Za-z0-9_]{1,19})-(\\d+)(?:&|$)",
+        // The claimed length, not the validator's: RE2 refuses {1,19} outright.
+        // Built from its owner so the shape cannot be pasted wrong here.
+        regexFilter: "^https://(?:www\\.)?google\\.com/search\\?(?:.*&)?q=(" +
+          g.ProjectKey.caseInsensitiveShape(g.CatchAllKey.only().claimsKeysUpTo()) + ")-(\\d+)(?:&|$)",
         isUrlFilterCaseSensitive: false, resourceTypes: ["main_frame"],
       },
     },
-    {
-      id: 1001, priority: 2,
-      action: { type: "allow" },
-      condition: {
-        // Built from the list rather than pasted, so adding a prefix does not
-        // rewrite a golden string -- but the SHAPE around it is literal.
-        regexFilter: "^https://(?:www\\.)?google\\.com/search\\?(?:.*&)?q=(?:" +
-          g.ReservedPrefix.ALL.join("|") + ")-\\d+(?:&|$)",
-        isUrlFilterCaseSensitive: false, resourceTypes: ["main_frame"],
-      },
-    },
+    // THE GUARD IS NOW SEVERAL RUNS, because Chrome refuses 49 alternatives in one
+    // rule. The runs come from the cut -- pinning which word lands in which run
+    // would go red on a legitimate thematic reordering of ALL -- but the SHAPE
+    // around them, the ids and the count stay literal here. This is the one place
+    // in the repo where the split is visible in full.
+    ...g.Re2Budget.conservative()
+      .cutIntoAffordableRuns(g.CatchAllKey.only().prefixesWithinReach())
+      .map((run, i) => ({
+        id: 1001 + i, priority: 2,
+        action: { type: "allow" },
+        condition: {
+          regexFilter: "^https://(?:www\\.)?google\\.com/search\\?(?:.*&)?q=(?:" +
+            run.join("|") + ")-\\d+(?:&|$)",
+          isUrlFilterCaseSensitive: false, resourceTypes: ["main_frame"],
+        },
+      })),
   ]);
 });
 
@@ -317,11 +342,25 @@ test("a shadowed shortcut produces no rule at all", () => {
   assert.equal(rules.filter((r) => r.isCatchAll).length, 1);
 });
 
-test("the reserved prefixes are one allow rule per engine, never one per prefix", () => {
+test("the reserved prefixes are a few allow rules per engine, never one per prefix", () => {
+  // THE TITLE USED TO SAY "one per engine", and that became false the day the
+  // guard was cut: Chrome refuses 49 alternatives in a single rule
+  // (memoryLimitExceeded, measured 2026-09-01), so it ships as runs. The property
+  // worth keeping is the one that motivated the sentence -- never one rule PER
+  // PREFIX, which would be 49 x engines -- and the count is DERIVED, never a
+  // literal that would lie the first time a prefix is added.
   const rules = delivered(withCatchAll(["google.com", "bing.com"]));
   const allows = rules.filter((r) => r.action.type === "allow");
-  assert.equal(allows.length, 2, "one per engine");
-  assert.deepEqual(allows.map((r) => r.engineId).sort(), ["bing.com", "google.com"]);
+  const perEngine = g.Re2Budget.conservative()
+    .cutIntoAffordableRuns(g.CatchAllKey.only().prefixesWithinReach()).length;
+  assert.equal(allows.length, 2 * perEngine, "the runs, on both engines");
+  assert.ok(perEngine < g.ReservedPrefix.ALL.length, "never one rule per prefix");
+  assert.deepEqual(
+    [...new Set(allows.map((r) => r.engineId))].sort(),
+    ["bing.com", "google.com"]
+  );
+  // Every guard carries the manifest the final set's post-condition reads.
+  for (const allow of allows) assert.ok(Array.isArray(allow.guardedPrefixes));
 });
 
 test("the reserved prefixes are installed only where a catch-all is active", () => {
@@ -334,7 +373,7 @@ test("the reserved prefixes are installed only where a catch-all is active", () 
 test("a catch-all whose reserved prefixes could not be installed is dropped with them", () => {
   // Deny by default: a partial reserved list is exactly the invisible failure the
   // unit exists to close, and its violation is an outbound flow.
-  const set = g.RuleFactory.buildRules(withCatchAll(), g.SearchEngineCatalog);
+  const set = g.RuleFactory.buildRules(withCatchAll(), g.SearchEngineCatalog, budget());
   const guard = set.rules().find((r) => r.action.type === "allow");
   const pruned = set.withoutRules([guard.id]);
   assert.equal(pruned.rules().some((r) => r.isCatchAll), false, "the catch-all fell with its guard");
@@ -343,7 +382,7 @@ test("a catch-all whose reserved prefixes could not be installed is dropped with
 });
 
 test("dropping a shortcut on one engine leaves the catch-all standing on the others", () => {
-  const set = g.RuleFactory.buildRules(withCatchAll(["google.com", "bing.com"]), g.SearchEngineCatalog);
+  const set = g.RuleFactory.buildRules(withCatchAll(["google.com", "bing.com"]), g.SearchEngineCatalog, budget());
   const bing = set.rules().find((r) => r.isCatchAll && r.engineId === "bing.com");
   const pruned = set.withoutRules([bing.id]);
   assert.equal(pruned.rules().some((r) => r.isCatchAll && r.engineId === "google.com"), true);

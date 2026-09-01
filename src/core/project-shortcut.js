@@ -22,6 +22,35 @@
   // going exponential (see the ReDoS section of the plan).
   const KEY = /^[A-Z][A-Z0-9_]{1,19}$/;
 
+  // The longest a project key may be. KEY above keeps its own literal 19 ON
+  // PURPOSE: it is the VALIDATOR, and assertShapesCannotDrift below only has
+  // teeth on the length axis while the two notations are written independently.
+  // Deriving both from this number would make that post-condition vacuous
+  // exactly where it matters.
+  const MAX_LENGTH = 20;
+
+  /**
+   * The same character set, for a case-insensitive rule, AT A CHOSEN LENGTH.
+   *
+   * A function rather than a constant because the catch-all claims LESS than a
+   * named key may be (see CatchAllKey.claimsKeysUpTo) and the airlock must be
+   * able to ask for the shorter form without recomposing the class itself --
+   * "never a copy: it comes from its owner".
+   *
+   * IT CARRIES ITS OWN RULE, and that is the point: a caller asking for 25 would
+   * otherwise get {1,24}, a MATCHER WIDER THAN THE VALIDATOR, emitted from the
+   * file whose header calls itself one of the two security functions of this
+   * project. Capping can only ever NARROW the matcher, so its failure mode is
+   * availability, never widening. And max < 2 would emit {1,0}, which matches
+   * nothing and which RE2 would accept without a word.
+   */
+  const caseInsensitiveShape = (max) => {
+    if (!Number.isInteger(max) || max < 2) {
+      throw new Error("caseInsensitiveShape needs an integer of at least 2");
+    }
+    return "[A-Za-z][A-Za-z0-9_]{1," + (Math.min(max, MAX_LENGTH) - 1) + "}";
+  };
+
   // The SAME character set, written for a case-insensitive rule. Two literals
   // rather than one derived from the other: the catch-all's DNR rule runs with
   // isUrlFilterCaseSensitive false, and letting that flag widen the captured set
@@ -29,7 +58,7 @@
   // forbids. The post-condition below is what makes the pair unable to drift --
   // it THROWS at load time rather than producing a matcher wider than the
   // validator.
-  const CASE_INSENSITIVE_SHAPE = "[A-Za-z][A-Za-z0-9_]{1,19}";
+  const CASE_INSENSITIVE_SHAPE = caseInsensitiveShape(MAX_LENGTH);
 
   // Control and invisible characters, refused BEFORE anything else. A message
   // saying "invalid character" about characters nobody can see is unusable, so
@@ -117,6 +146,16 @@
     configurable: false,
     enumerable: true,
   });
+
+  // Frozen for the SAME reason as its neighbour: every file shares globalThis, so
+  // an assignment before the airlock builds its pattern would turn the extension
+  // into a universal redirector.
+  for (const [name, value] of [["MAX_LENGTH", MAX_LENGTH],
+                               ["caseInsensitiveShape", caseInsensitiveShape]]) {
+    Object.defineProperty(ProjectKey, name, {
+      value, writable: false, configurable: false, enumerable: true,
+    });
+  }
 
   ProjectKey.parse = function (input) {
     if (typeof input !== "string") {

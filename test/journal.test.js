@@ -204,6 +204,11 @@ test("a successful install reports the rules as delivered, for the preview to si
     for (const rule of report.rules) {
       assert.equal("engineId" in rule, false);
       assert.equal("isCatchAll" in rule, false);
+      // THE THIRD LABEL, added in the same batch as the field itself. A nominative
+      // deny-list that misses one hands an unknown property to
+      // updateDynamicRules, which rejects THE WHOLE BATCH -- and this assertion
+      // would have stayed green while it happened.
+      assert.equal("guardedPrefixes" in rule, false);
     }
   });
 });
@@ -224,14 +229,16 @@ test("the regex check asks about the rule as it will be installed, not a laxer o
     assert.equal(options.isCaseSensitive, false, "mirrors isUrlFilterCaseSensitive");
     assert.equal("requireCapturing" in options, true);
   }
-  // Derived from the rule, never restated: the guard is an `allow` with no
+  // Derived from the rule, never restated: a guard is an `allow` with no
   // substitution, so it must NOT be asked for capturing -- otherwise a rule that
   // needs no capture group is refused for lacking one.
-  assert.deepEqual(
-    dnr.asked.map((o) => o.requireCapturing).sort(),
-    [false, true],
-    "capturing required for the redirect, not for the allow"
-  );
+  //
+  // COUNTED, not spelled out: the guard ships as several runs since Chrome refused
+  // 49 alternatives in one rule, so a literal pair would have to be edited every
+  // time the cut changes.
+  const asked = dnr.asked.map((o) => o.requireCapturing);
+  assert.equal(asked.filter((x) => x === true).length, 1, "one redirect, asked WITH capturing");
+  assert.ok(asked.filter((x) => x === false).length >= 1, "every allow asked WITHOUT it");
 });
 
 test("a regex refused only once capturing is required skips its unit, not the batch", async () => {
