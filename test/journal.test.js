@@ -138,10 +138,17 @@ test("an absent or corrupt acknowledgement store means NOT acknowledged", async 
  * The smallest declarativeNetRequest stand-in: the three calls the installer
  * makes, plus a switch to make updateDynamicRules reject.
  */
-const fakeDnr = ({ rejectUpdate = false } = {}) => {
+const fakeDnr = ({ rejectUpdate = false, refuseCapturing = false } = {}) => {
   let installed = [];
+  const asked = [];
   return {
-    async isRegexSupported() {
+    asked,
+    // refuseCapturing models the real RE2 behaviour the bare call hid: capturing
+    // and case-insensitivity both cost memory, so an expression can be supported
+    // as asked about and refused as installed.
+    async isRegexSupported(options) {
+      asked.push(options);
+      if (refuseCapturing && options.requireCapturing) return { isSupported: false };
       return { isSupported: true };
     },
     async getDynamicRules() {
@@ -198,5 +205,47 @@ test("a successful install reports the rules as delivered, for the preview to si
       assert.equal("engineId" in rule, false);
       assert.equal("isCatchAll" in rule, false);
     }
+  });
+});
+
+test("the regex check asks about the rule as it will be installed, not a laxer one", async () => {
+  // Both options default to the OPPOSITE of what every rule here does:
+  // isCaseSensitive to true where the conditions are case-insensitive,
+  // requireCapturing to false where every redirect carries a regexSubstitution.
+  // Left out, the call vouched for an expression we never install -- and it fails
+  // OPEN, so the rule reached updateDynamicRules, which rejects the WHOLE batch
+  // and takes every other shortcut with it.
+  const dnr = fakeDnr();
+  await withPlatform(dnr, async () => {
+    await g.RuleInstaller.install(armedCatchAll(), 0);
+  });
+  assert.ok(dnr.asked.length >= 2, "the catch-all and its reserved-prefix guard");
+  for (const options of dnr.asked) {
+    assert.equal(options.isCaseSensitive, false, "mirrors isUrlFilterCaseSensitive");
+    assert.equal("requireCapturing" in options, true);
+  }
+  // Derived from the rule, never restated: the guard is an `allow` with no
+  // substitution, so it must NOT be asked for capturing -- otherwise a rule that
+  // needs no capture group is refused for lacking one.
+  assert.deepEqual(
+    dnr.asked.map((o) => o.requireCapturing).sort(),
+    [false, true],
+    "capturing required for the redirect, not for the allow"
+  );
+});
+
+test("a regex refused only once capturing is required skips its unit, not the batch", async () => {
+  // The failure mode the bare call could not see. The catch-all and its guard are
+  // one indivisible unit, so both go -- and the named shortcuts must survive.
+  await withPlatform(fakeDnr({ refuseCapturing: true }), async () => {
+    let p = armedCatchAll();
+    p = p.registerAboveCatchAll(
+      "named", g.ProjectKey.parse("JUL").value, g.JiraInstance.parse("https://spiriit.atlassian.net").value
+    ).value;
+    p = p.armShortcut("named").value;
+    const report = await g.RuleInstaller.install(p, 0);
+    assert.notEqual(report.diagnosis, "INSTALL_FAILED", "the batch survives");
+    assert.equal(report.rules.length, 0, "every redirect needs capturing, so all are skipped");
+    assert.ok(report.skipped.length > 0, "and the skip is REPORTED rather than silent");
   });
 });

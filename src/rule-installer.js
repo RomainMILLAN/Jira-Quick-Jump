@@ -40,7 +40,33 @@
       // tested.
       const unsupported = [];
       for (const rule of set.rules()) {
-        const check = await dnr().isRegexSupported({ regex: rule.condition.regexFilter });
+        // THE CHECK MUST ASK THE QUESTION THE RULE ACTUALLY POSES, and both
+        // options were left out -- each defaulting to the OPPOSITE of what every
+        // rule here does (verified against the API reference):
+        //
+        //   isCaseSensitive  defaults to TRUE, while every condition sets
+        //                    isUrlFilterCaseSensitive: false, so that abc-1 lands
+        //                    on /browse/ABC-1;
+        //   requireCapturing defaults to FALSE, while every redirect rule carries
+        //                    a regexSubstitution with backreferences -- two of
+        //                    them for a catch-all.
+        //
+        // Both cost RE2 memory, so a regex can be supported bare and refused as
+        // the rule needs it. Asked bare, the call vouches for an expression we
+        // never install, and it FAILS OPEN: the rule reaches updateDynamicRules,
+        // which rejects THE WHOLE BATCH. Rules are replaced wholesale, so one
+        // over-budget regex would take every other shortcut down with it instead
+        // of being the single skipped entry the design promises.
+        //
+        // Derived from the rule rather than restated, so the two can never drift.
+        const substitutes =
+          rule.action.type === "redirect" &&
+          Boolean(rule.action.redirect && rule.action.redirect.regexSubstitution);
+        const check = await dnr().isRegexSupported({
+          regex: rule.condition.regexFilter,
+          isCaseSensitive: rule.condition.isUrlFilterCaseSensitive,
+          requireCapturing: substitutes,
+        });
         if (!check.isSupported) unsupported.push(rule.id);
       }
       const installable = set.withoutRules(unsupported).assertReservedPrefixesCoverEveryCatchAll();
