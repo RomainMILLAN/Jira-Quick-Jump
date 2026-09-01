@@ -102,7 +102,10 @@ test("the global kill switch is not the per-shortcut one", () => {
 });
 
 test("diagnose says why nothing works, in a fixed order of priority", () => {
-  const granted = { originsGranted: true };
+  // THE TWO FACTS OF INSTALLED REALITY ARE DECLARED, never defaulted: diagnose() no
+  // longer supplies them, because an absent fact is not a true one. This literal
+  // serves FIVE assertions -- correcting it here repairs five sites.
+  const granted = { originsGranted: true, installed: true, coverageSatisfied: true };
   assert.equal(g.JumpPolicy.empty().disarm().diagnose(granted), "DISARMED");
   assert.equal(g.JumpPolicy.empty().diagnose(granted), "NO_SHORTCUTS");
   let policy = g.JumpPolicy.empty().register(ID, key("ABC"), instance("https://example.atlassian.net")).value;
@@ -110,9 +113,46 @@ test("diagnose says why nothing works, in a fixed order of priority", () => {
   policy = policy.withEngines(["google.com"]).value;
   assert.equal(policy.diagnose(granted), "ALL_SHORTCUTS_DISARMED");
   policy = policy.armShortcut(ID).value;
-  assert.equal(policy.diagnose({ originsGranted: true, quarantinedCount: 2 }), "PARTIAL_POLICY");
-  assert.equal(policy.diagnose({ originsGranted: false }), "MISSING_ORIGINS");
+  // The rank-11 PARTIAL_POLICY, on a POPULATED policy. The other entry, conditioned on
+  // an empty registry, is the one admission.test.js interrogates -- two ranks, one code.
+  assert.equal(policy.diagnose({ originsGranted: true, quarantinedCount: 2, installed: true, coverageSatisfied: true }), "PARTIAL_POLICY");
+  // The two reality facts, but originsGranted stays FALSE -- supplying it true here
+  // would test something else entirely.
+  assert.equal(policy.diagnose({ originsGranted: false, installed: true, coverageSatisfied: true }), "MISSING_ORIGINS");
   assert.equal(policy.diagnose(granted), "READY");
+});
+
+test("a fact of installed reality that is ABSENT is not a true one", () => {
+  // TWO LINKS IN SERIES, so TWO witnesses. INSTALL_FAILED ranks FIRST and MASKS
+  // CATCH_ALL_NOT_INSTALLED, which is ninth -- so someone restoring the second
+  // predicate to `=== false` would leave the suite green, every other call now passing
+  // the fact explicitly, for which both forms are indistinguishable.
+  //
+  // THE FIXTURE MATTERS: these witnesses need a policy that CLEARS ranks 2 to 8.
+  // ordered() answers ALL_SHORTCUTS_DISARMED and ordered().disarm() answers DISARMED;
+  // this one is armed, acknowledged and engined, so it reaches READY when told the
+  // truth.
+  let p = g.JumpPolicy.empty().withEngines(["google.com"]).value;
+  p = p.register(ID, key("ABC"), instance("https://example.atlassian.net")).value;
+  p = p.armShortcut(ID).value;
+  assert.equal(p.diagnose({ originsGranted: true, quarantinedCount: 0, installed: true,
+                            coverageSatisfied: true }), "READY", "the fixture must reach READY");
+
+  // Link 1, and "bare facts" names two different things: one answers MISSING_ORIGINS
+  // today, the other answered READY.
+  assert.equal(p.diagnose({}), "INSTALL_FAILED");
+  assert.equal(p.diagnose({ originsGranted: true, quarantinedCount: 0 }), "INSTALL_FAILED");
+  // Link 2: installed present, the coverage fact absent.
+  assert.equal(p.diagnose({ originsGranted: true, quarantinedCount: 0, installed: true }),
+               "CATCH_ALL_NOT_INSTALLED");
+
+  // THE THIRD LINK IS DELIBERATELY NOT HARDENED: `f.quarantinedCount > 0` is mute on
+  // undefined too. PARTIAL_POLICY is under-signalling at a BOUNDED cost -- the user
+  // sees an incomplete configuration without knowing it is -- whereas a masked
+  // INSTALL_FAILED lets them believe a jump departs when it does not. Written here so
+  // the next batch does not read it as a regression of this one.
+  assert.equal(p.diagnose({ originsGranted: true, installed: true, coverageSatisfied: true }),
+               "READY", "quarantinedCount stays undefined-tolerant, on purpose");
 });
 
 test("every mutation returns the same shape, with events always present", () => {
@@ -237,7 +277,7 @@ test("statusOf is the sole judge of a row, and shadowed beats disarmed", () => {
 });
 
 test("diagnose distinguishes nothing armed, nothing acknowledged, and everything shadowed", () => {
-  const facts = { originsGranted: true, quarantinedCount: 0 };
+  const facts = { originsGranted: true, quarantinedCount: 0, installed: true, coverageSatisfied: true };
   let p = ordered();
   assert.equal(p.diagnose(facts), "ALL_SHORTCUTS_DISARMED");
 
@@ -280,7 +320,7 @@ test("a configuration read back with nothing but quarantine says so, instead of 
   assert.equal(restored.policy.shortcuts().length, 0);
   assert.equal(restored.quarantine.length, 1);
   assert.equal(
-    restored.policy.diagnose({ originsGranted: true, quarantinedCount: restored.quarantine.length }),
+    restored.policy.diagnose({ originsGranted: true, quarantinedCount: restored.quarantine.length, installed: true, coverageSatisfied: true }),
     "PARTIAL_POLICY",
     "there are not NO shortcuts, there are unreadable ones"
   );

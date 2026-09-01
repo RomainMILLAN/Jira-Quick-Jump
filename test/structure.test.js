@@ -231,6 +231,33 @@ test("the store listing justifies exactly the permissions the manifest asks for"
   assert.ok(listing.includes(resolveMessage(manifest.name)), "STORE_LISTING.md does not carry the manifest name");
 });
 
+test("the rules reach the platform through the one counter, and only through it", () => {
+  // The three teeth in interception.test.js guard the SHAPE of what platformRules()
+  // returns; NONE of them guards the fact that production goes THROUGH it. A future
+  // _install rewriting a rest-spread by hand would redden nothing.
+  const installer = read("src/rule-installer.js");
+  // The absence half. On its own it is satisfied VACUOUSLY -- `addRules:
+  // installable.rules()` carries no label name either -- hence the presence half below.
+  for (const label of ["isCatchAll", "engineId", "guardedPrefixes"]) {
+    assert.equal(installer.includes(label), false,
+      `rule-installer.js names ${label}: the stripping has moved back out of rule-set.js`);
+  }
+  // The presence half. Known bound: it binds a SUBSTRING, not the argument -- a
+  // `const x = installable.platformRules();` alongside `addRules: installable.rules()`
+  // would satisfy it. It closes the vacuous case, not every case.
+  assert.ok(installer.includes("platformRules()"),
+    "rule-installer.js no longer goes through the sole counter");
+});
+
+test("SECURITY.md still states how the detector is allowed to fail", () => {
+  // This file was pinned by NOTHING, while STORE_LISTING.md, PRIVACY.md and README.md
+  // all are -- so the prose/code agreement was the one thing this batch could lose
+  // silently. The doctrine and the panel that still lies are both load-bearing.
+  const doc = read("SECURITY.md");
+  assert.match(doc, /over-signall?ing/i, "SECURITY.md no longer states the failure direction");
+  assert.match(doc, /status line/i, "SECURITY.md no longer names which panel still lies");
+});
+
 test("the search-suggestion caveat survives", () => {
   // The extension removes the search REQUEST, not the suggestion traffic that the
   // browser sends while you type. Dropping this sentence would make a document

@@ -87,7 +87,7 @@ test("an invalid entry is quarantined and the valid ones still work", () => {
   const restored = g.JumpPolicy.restore(document);
   assert.equal(restored.policy.activeBindings().length, 1, "the healthy shortcut keeps working");
   assert.equal(restored.quarantine.length, 1);
-  assert.equal(restored.policy.diagnose({ originsGranted: true, quarantinedCount: restored.quarantine.length }), "PARTIAL_POLICY");
+  assert.equal(restored.policy.diagnose({ originsGranted: true, quarantinedCount: restored.quarantine.length, installed: true, coverageSatisfied: true }), "PARTIAL_POLICY");
 });
 
 test("a quarantined entry survives a later write instead of being erased", () => {

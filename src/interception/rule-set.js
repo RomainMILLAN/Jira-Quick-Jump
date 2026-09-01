@@ -38,6 +38,16 @@
    * the boundary, and an array received from a caller stays mutable by that
    * caller.
    */
+  /**
+   * THE FOUR MEMBERS OF chrome.declarativeNetRequest.Rule, named here because this file
+   * becomes the one that knows the PAYLOAD SHAPE (rule-installer.js keeping the
+   * ENVELOPE). The spec is closed: four top-level members, not five.
+   *
+   * READ by platformRules(), not merely displayed: a frozen constant nobody reads is the
+   * MEMBERS bug that shortcut-key.js paid a conformance test to learn.
+   */
+  const PLATFORM_FIELDS = Object.freeze(["id", "priority", "action", "condition"]);
+
   class CoverageContract {
     constructor(prefixes, engineIds) {
       this._prefixes = Object.freeze([...prefixes]);
@@ -121,8 +131,9 @@
       }
       // THE CONTRACT IS CARRIED OVER UNCHANGED: pruning rules does not change what
       // the policy wanted. Dropped, this._contract would be undefined and
-      // catchAllInstalled() would throw a TypeError -- and rule-installer calls it
-      // OUTSIDE its try, so sync() would break with no report and no badge.
+      // coverageSatisfied() would throw a TypeError. rule-installer calls it INSIDE its
+      // try, so the throw would surface as INSTALL_FAILED rather than a silent break --
+      // loud, but on a policy that is perfectly fine.
       return new RuleSet(units, skipped, this._contract);
     }
 
@@ -172,13 +183,44 @@
       return this;
     }
 
+    /**
+     * THE SOLE OUTPUT TOWARDS THE PLATFORM.
+     *
+     * DERIVED from PLATFORM_FIELDS rather than rewriting the four names by hand, so the
+     * named constant has a real reader.
+     *
+     * WHAT DERIVING CHANGES, and why the test's tooth is written with notEqual: the
+     * rest-spread this replaces never invented a key, so `"priority" in r` used to catch
+     * a rule that arrived AMPUTATED FROM THE FORGE. Object.fromEntries always creates
+     * all four, `priority: undefined` included, so `k in r` would be true by
+     * construction -- green on the one case the tooth exists to catch.
+     *
+     * AND WE DO NOT KNOW what DNR does with an explicit `priority: undefined`: WebIDL
+     * treats an optional member set to undefined as absent (a SILENT demotion to band 1
+     * -- on a guard that would mean parity with the catch-all, held only by an
+     * action-type precedence this project says it never depends on), but a loud
+     * rejection of the whole batch is just as plausible. SO THE POST-CONDITION IN THE
+     * FORGE IS THE CONTROL, upstream of this counter.
+     */
+    platformRules() {
+      return this.rules().map((rule) =>
+        Object.fromEntries(PLATFORM_FIELDS.map((field) => [field, rule[field]])));
+    }
+
     /** True when every engine that wanted a catch-all actually got one.
      *
-     *  THE BOOLEAN STAYS A BOOLEAN: jump-policy.js compares `=== false`, and a
-     *  list is never === false, so the diagnosis would go out SILENTLY. It is the
-     *  INPUT that stopped being a boolean -- `wanted`, which the caller had to
-     *  guess right, is gone. */
-    catchAllInstalled() {
+     *  NAMED FOR WHEN IT ANSWERS, not for what happened: rule-installer.js evaluates
+     *  this on the PRUNED set, BEFORE updateDynamicRules is ever called. It is a
+     *  synchronous property of a value object, with no platform round trip -- and a
+     *  method cannot honestly be called `...Installed` when it answers BEFORE the
+     *  install. Whether the install then happened is what `installed` answers.
+     *
+     *  THE BOOLEAN STAYS A BOOLEAN, and the failure mode has INVERTED: jump-policy.js
+     *  now compares `!== true`, and a list IS !== true, so a wrong type goes out as
+     *  PERMANENT OVER-signalling rather than silence. Over-signalling is the right
+     *  direction and the wrong dose -- it is still a boolean. It is the INPUT that
+     *  stopped being one: `wanted`, which the caller had to guess right, is gone. */
+    coverageSatisfied() {
       return this._contract.satisfiedBy(this.rules());
     }
   }

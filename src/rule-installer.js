@@ -38,11 +38,12 @@
       // throw is a mute TypeError at the same place.
       let skipped = [];
       let installed = true;
-      let catchAllInstalled = true;
+      let coverageSatisfied = true;
       try {
         const catalog = SearchEngineCatalog.forPolicy(policy);
         // The budget is RECEIVED here and handed down: only this file knows the
-        // platform, and the day the envelope stops being ignorable it is
+        // platform ENVELOPE -- rule-set.js now owns the payload SHAPE -- and the day
+        // the envelope stops being ignorable it is
         // Re2Budget.forEnvelope() that has to reach the factory. Letting the
         // factory pick its own measurement would leave that Strategy without a
         // path.
@@ -86,7 +87,7 @@
         // blister are still notes.
         const installable = set.withoutRules(unsupported);
         skipped = installable.skipped();
-        catchAllInstalled = installable.catchAllInstalled();
+        coverageSatisfied = installable.coverageSatisfied();
 
         // Wholesale replacement: an Idempotent Receiver. Syncing three times gives
         // the same state, and deleting the last shortcut cleans up for free.
@@ -103,12 +104,11 @@
         const existing = await dnr().getDynamicRules();
         await dnr().updateDynamicRules({
           removeRuleIds: existing.map((r) => r.id),
-          // The labels RuleSet needs are stripped before the platform sees them --
-          // THREE of them now. A nominative deny-list that misses one hands an
-          // unknown property to updateDynamicRules, which rejects THE WHOLE BATCH:
-          // the original bug, reproduced.
-          addRules: installable.rules().map(
-            ({ engineId, isCatchAll, guardedPrefixes, ...rule }) => rule),
+          // THE SOLE COUNTER. The nominative deny-list that used to live here is gone
+          // with its risk: an allowlist derived from the DNR spec cannot miss a label
+          // the way a hand-maintained list of three could. This file keeps the
+          // ENVELOPE; rule-set.js owns the payload shape.
+          addRules: installable.platformRules(),
         });
       } catch (error) {
         installed = false;
@@ -118,9 +118,9 @@
           ? error.reason
           : Re2Budget.REASONS.UNKNOWN;
         skipped = [...skipped, { code: "CONSTRUCTION_REFUSED", reason }];
-        catchAllInstalled = false;
+        coverageSatisfied = false;
       }
-      return this.report(policy, skipped, quarantinedCount, { installed, catchAllInstalled });
+      return this.report(policy, skipped, quarantinedCount, { installed, coverageSatisfied });
     },
 
     /**
@@ -149,7 +149,7 @@
           // INSTALLED REALITY rather than the intention. Which is exactly why it
           // outranks everything, DISARMED included.
           installed: reality.installed === undefined ? true : reality.installed,
-          catchAllInstalled: reality.catchAllInstalled === undefined ? true : reality.catchAllInstalled,
+          coverageSatisfied: reality.coverageSatisfied === undefined ? true : reality.coverageSatisfied,
         }),
         skipped,
         missingOrigins: originsGranted ? [] : origins,

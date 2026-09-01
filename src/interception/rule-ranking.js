@@ -58,6 +58,47 @@
     },
 
     /**
+     * The BAND PREDICATE, and it FAILS LOUD.
+     *
+     * Not "the inverse of forKey": forKey only ever produces NAMED and CATCH_ALL, the
+     * RESERVED_PREFIX band coming from forReservedPrefixes(). What founds the predicate
+     * is that there is exactly ONE producer of CATCH_ALL -- IN OUR OWN FORGE. See the
+     * reservation below, which is the argument for the next batch.
+     *
+     * Returning `false` on an absent priority would signal MATCHED_SHORTCUT: the LEAST
+     * alarming label, against the detector doctrine of background.js. And rankOfAction,
+     * in this very file, already throws on an unknown action -- so the gesture is the
+     * house's.
+     *
+     * THE THROW IS A CANARY, AND IT FAILS LOUD WHERE SOMEONE IS LISTENING: inside
+     * _install's try, where it yields INSTALL_FAILED. On the PREVIEW path it is MUTE --
+     * a floating promise, and there is not one try/catch/unhandledrejection in
+     * options-sections.js, options.js or section-host.js: the panel keeps the text of
+     * the previous keystroke, typically "Matched a named shortcut". THAT is why the
+     * boundary normalises BEFORE calling here; the throw is not the net. (rankOfAction
+     * has exactly this defect today, on an unknown action.)
+     *
+     * RESERVATION -- the invariant is true in the forge and READ on a FOREIGN store.
+     * `git grep priority v1.0.0 -- src/` shows the shipped v1.0.0 writing `priority: 1`
+     * explicitly on every rule, and it has no catch-all at all. So on a profile coming
+     * up from v1.0.0 this answers `true` for 100% of the rules, every one of them a
+     * NAMED shortcut -- and the boundary's normalisation is blind to it, 1 being a
+     * perfectly valid band. The window survives a failed install, since a rejection
+     * leaves the previous rules alive.
+     *
+     * NOT BLOCKING, for two opposable reasons: it is OVER-signalling (MATCHED_CATCH_ALL
+     * is the most alarming label, and destination/ruleId stay CORRECT), and the v1.0.0
+     * rule set contains no catch-all, so in that window no ordinary search leaves for
+     * the Jira instance. The sentence lies by accusing the extension of a flow it does
+     * not have. It is the argument for a total-constructor value object on a rule read
+     * back -- not a refactoring bonus.
+     */
+    isCatchAllRule(rule) {
+      if (!Number.isInteger(rule.priority)) throw new Error("a rule has no priority band");
+      return rule.priority === CATCH_ALL;
+    },
+
+    /**
      * The documented same-priority order, restricted to the two action types we
      * emit. An unknown action THROWS rather than sorting as undefined.
      */

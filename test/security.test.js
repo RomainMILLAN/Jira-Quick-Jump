@@ -78,8 +78,12 @@ test("a forged storage entry produces no rule at all", () => {
   assert.equal(restored.policy.activeBindings().length, 0);
   assert.equal(restored.quarantine.length, 2, "both entries must be quarantined, not dropped");
   assert.deepEqual(restored.dropped.map((d) => d.code), ["KEY_SHAPE", "BASE_SCHEME"]);
-  const { rules } = g.RuleFactory.buildRules(restored.policy, g.SearchEngineCatalog, g.Re2Budget.conservative());
-  assert.equal(rules.length, 0);
+  // `.rules()`, NOT a destructured `rules`: `const { rules } = ...` binds the METHOD,
+  // and `rules.length` is then its ARITY -- zero -- so the assertion was green whatever
+  // the forge produced, in the very test claiming a quarantined hostile entry installs
+  // nothing.
+  const set = g.RuleFactory.buildRules(restored.policy, g.SearchEngineCatalog, g.Re2Budget.conservative());
+  assert.equal(set.rules().length, 0);
 });
 
 // ---------------------------------------------------------- the catch-all key

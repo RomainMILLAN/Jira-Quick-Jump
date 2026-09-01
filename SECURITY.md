@@ -100,6 +100,21 @@ trade rather than leave stale rules firing under a badge that says `off`.
 - **Extension pages cannot reach the network** (`connect-src 'none'`), build no
   HTML from strings, and create links only from re-parsed http(s) URLs.
 
+## What the options page can and cannot tell you
+
+- **The detector fails by over-signalling, never by under-signalling.** A fact about
+  the installed reality that is *absent* is not treated as `true`. The preview
+  likewise normalises a rule read back from the store: a rule whose priority band is
+  missing, or is not a band the platform could have written, is read as the
+  **catch-all** — the most alarming label — rather than as an ordinary shortcut. A
+  detector that dies quietly, or that answers "this search goes through untouched"
+  when it cannot read the installed programme, is the failure this rule forbids.
+- **The status line still lies, and the preview no longer does.** The preview panel
+  now reports the programme the browser actually holds. The **status line** above it
+  is not yet wired to the installed reality: it can read `READY` while the catch-all
+  failed to install. The pane and the line are therefore not equally trustworthy
+  today, and the line is the one to distrust. Closing that gap is the next change.
+
 ## Supply chain
 
 The extension ships **no third-party code**: no runtime dependency, no bundler,

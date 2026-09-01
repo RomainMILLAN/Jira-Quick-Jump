@@ -82,8 +82,14 @@
             redirect: { regexSubstitution: shape.substitutionFor(shortcut.instance()) },
           },
           condition: condition(engine.searchUrlPattern(shape.pattern)),
-          // Labels, for RuleSet's invariant and for the preview. Stripped before
-          // the rules reach the platform.
+          // Labels, for RuleSet's invariant and for the journal. Stripped before the
+          // rules reach the platform.
+          //
+          // NOT "for the preview" any more: the preview reads the BAND through
+          // RuleRanking.isCatchAllRule, because it is fed the rules READ BACK from the
+          // store, where no label survives. Leaving that word here would justify a
+          // field by a reader who no longer exists -- the exact exit this file warns
+          // about below.
           engineId: binding.engineId(),
           isCatchAll: key.isCatchAll(),
         };
@@ -134,7 +140,30 @@
       const contract = catchAll
         ? new global.CoverageContract(catchAll.key.prefixesWithinReach(), catchAll.engineIds)
         : global.CoverageContract.empty();
-      return RuleSet.sealed({ units, skipped, contract });
+      const set = RuleSet.sealed({ units, skipped, contract });
+
+      // THE BAND POST-CONDITION, both ways, where the two facts still coexist.
+      //
+      // `isCatchAll => band CATCH_ALL` is the natural direction to write; it is the
+      // OTHER one the simulator infers, so both are asserted. Asked through
+      // RuleRanking.isCatchAllRule and never by reading `priority` here: this file must
+      // not start reading the field whose sole owner is the ranking module.
+      //
+      // TOTAL -- every rule of the set -- because since platformRules() derives from
+      // PLATFORM_FIELDS, the emitted object always carries the four keys and the test's
+      // `k in r` can no longer catch a rule forged without a band. This throw is what
+      // guards the CONTENT, upstream of the counter.
+      //
+      // THIS IS A CHANGELOCK, NOT A PROOF: on redirect rules `priority` and `isCatchAll`
+      // derive from the same expression, so the equivalence is true by construction and
+      // green forever. It has real content on the GUARDS -- two independent literals --
+      // and on the day a fourth band appears.
+      for (const rule of set.rules()) {
+        if (RuleRanking.isCatchAllRule(rule) !== rule.isCatchAll) {
+          throw new Error("a rule's band and its catch-all label disagree: " + rule.id);
+        }
+      }
+      return set;
     },
 
   };

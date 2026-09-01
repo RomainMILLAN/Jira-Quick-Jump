@@ -31,6 +31,20 @@
   // own output.
   const MAX_RULES = 2048;
 
+  // THEIR default, not OUR band. Both are 1 today, but by a COINCIDENCE OF TWO
+  // INDEPENDENT SPECIFICATIONS -- ours, written in rule-ranking.js, and Chrome's. And
+  // that coincidence is exactly what makes a v1.0.0 profile unreadable (see the
+  // reservation on isCatchAllRule): the airlock cannot tell "the foreign system said
+  // nothing" from "it said catch-all". Written under ONE name the collision hides;
+  // under two names that happen to be equal it is EXPOSED.
+  //
+  // The day the bands are renumbered, it is this 1 that must stay. "The most alarming
+  // label" and "the DNR default" are two intentions that DIVERGE under a renumbering,
+  // and it is the second one we encode.
+  const DNR_DEFAULT_PRIORITY = 1;
+  // DNR refuses priority < 1, so a smaller integer did not come from it.
+  const DNR_MINIMUM_PRIORITY = 1;
+
   const has_scheme = /^[a-zA-Z][a-zA-Z0-9+.-]*:/;
 
   const refuse = (code) => ({ ok: false, code });
@@ -42,7 +56,10 @@
    */
   const matched = (match) => ({
     ok: true,
-    code: match.rule.isCatchAll ? "MATCHED_CATCH_ALL" : "MATCHED_SHORTCUT",
+    // THE BAND, never the label: _install strips isCatchAll before the platform and
+    // report() hands back the rules READ BACK from the store, so this used to test a
+    // field that no longer exists -- MATCHED_CATCH_ALL was unreachable in production.
+    code: RuleRanking.isCatchAllRule(match.rule) ? "MATCHED_CATCH_ALL" : "MATCHED_SHORTCUT",
     destination: match.destination,
     ruleId: match.rule.id,
     subject: match.subject,
@@ -51,7 +68,31 @@
   const evaluate = (url, rules) => {
     if (!Array.isArray(rules) || rules.length > MAX_RULES) return refuse("INPUT_TOO_LONG");
     const matches = [];
-    for (const rule of rules) {
+    for (const raw of rules) {
+      // A FOREIGN store: priority absent => DNR default (1) => catch-all band, the MOST
+      // alarming label. Same gesture as the isUrlFilterCaseSensitive line just below:
+      // absent => the platform's default. The airlock does not invent a datum, it
+      // finishes reading a sentence whose neighbour agreed that silence was a word.
+      //
+      // WE REBUILD THE RECORD, we do not compute a band beside it: winner() sorts on
+      // a.rule.priority and matched() reads match.rule, so a local `band` would be DEAD
+      // and both would go on reading the original.
+      //
+      // AND THE `>= 1` IS NOT DECORATION: without it the door validates the TYPE and
+      // not the DOMAIN. 0 and -3 would sail through and answer MATCHED_SHORTCUT -- the
+      // LEAST alarming label. One assumption remains, deliberately: any integer >= 1 is
+      // presumed to be one of our three bands, for want of a band registry.
+      //
+      // EXACTLY THE OPTIONAL FIELD, and that is a rule rather than a case: condition
+      // and action are read bare below because DNR makes them MANDATORY.
+      //
+      // Rebuilding also moves the WINNER, not just the label: on a fully stripped set
+      // everything becomes band 1 and the tie-break falls to action-type precedence,
+      // which this project's ranking file says it is careful never to depend on. It
+      // plays in our favour (the allow wins, the guard holds) but it becomes DECISIVE
+      // instead of occasional.
+      const readable = Number.isInteger(raw.priority) && raw.priority >= DNR_MINIMUM_PRIORITY;
+      const rule = { ...raw, priority: readable ? raw.priority : DNR_DEFAULT_PRIORITY };
       // Flags are DERIVED FROM THE RULE, never hand-written: otherwise the
       // regression net would validate a different regex from the one shipped.
       const flags = rule.condition.isUrlFilterCaseSensitive === false ? "i" : "";

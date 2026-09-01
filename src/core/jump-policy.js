@@ -216,9 +216,12 @@
      * arbitrated twice differently.
      */
     diagnose(facts) {
-      const { installed = true } = facts;
+      // NO DEFAULT. A fact of installed reality that is ABSENT is not `true`:
+      // background.js's detector header says a detector must fail by over-signalling,
+      // never by under-signalling. Defaulting here would put the domain's thumb back on
+      // the scale behind whatever the caller failed to supply.
       for (const { code, applies } of DIAGNOSES) {
-        if (applies(this, { ...facts, installed })) return code;
+        if (applies(this, facts)) return code;
       }
       return "READY";
     }
@@ -411,7 +414,9 @@
    * having stopped is worse than no emergency stop.
    */
   const DIAGNOSES = [
-    { code: "INSTALL_FAILED", applies: (p, f) => f.installed === false },
+    // `!== true`, never `=== false`: an ABSENT fact is indistinguishable from a true one
+    // under `=== false`, which is the fail-open this batch closes.
+    { code: "INSTALL_FAILED", applies: (p, f) => f.installed !== true },
     { code: "DISARMED", applies: (p) => !p.armed() },
     // Before NO_SHORTCUTS: with everything quarantined there are not *no*
     // shortcuts, there are UNREADABLE ones -- and saying "no shortcut yet" is the
@@ -431,7 +436,11 @@
         p.shortcuts().filter((s) => s.armed()).every((s) => s.unacknowledgedWarnings().length > 0),
     },
     { code: "ALL_SHORTCUTS_SHADOWED", applies: (p) => p.activeBindings().length === 0 },
-    { code: "CATCH_ALL_NOT_INSTALLED", applies: (p, f) => f.catchAllInstalled === false },
+    // The FACT is named for what it asserts -- every engine that wanted a catch-all got
+    // one -- while the CODE stays the user's sentence. Renaming the reader without the
+    // writers, or the writers without this reader, makes the fact arrive ABSENT and
+    // this code fire permanently, masking the two below it.
+    { code: "CATCH_ALL_NOT_INSTALLED", applies: (p, f) => f.coverageSatisfied !== true },
     { code: "MISSING_ORIGINS", applies: (p, f) => !f.originsGranted },
     { code: "PARTIAL_POLICY", applies: (p, f) => f.quarantinedCount > 0 },
     { code: "SOME_SHADOWED", applies: (p) => p.shadowedShortcuts().length > 0 },

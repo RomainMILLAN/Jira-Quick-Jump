@@ -20,15 +20,23 @@ const policy = (() => {
 // own measurement, so a test declares the measurement it exercises -- and the day
 // a per-engine budget arrives, Re2Budget.forEnvelope() has a path in.
 //
-// NOTE, and it is a real defect this batch does NOT fix: `delivered` hands
-// JumpPreview the LABELLED rules, while production hands it the rules read back
-// from the platform, stripped. This helper therefore simulates a different
-// programme from the installed one -- a stage set, in the words of this file's own
-// header. Splitting it into labelled()/delivered() belongs to the next batch,
-// together with the single-author stripping it depends on.
+// TWO COUNTERS, TWO TYPES -- the split this file's header used to promise for "the
+// next batch". The criterion is a question, not a line number: DOES THIS ARGUMENT
+// CROSS THE COUNTER? If the value goes into JumpPreview it is delivered(), no
+// exception -- otherwise the preview simulates a different programme from the
+// installed one, which this file's header calls a stage set.
+//
+// labelled() returns the RuleSet, NOT an array, so feeding it to JumpPreview trips
+// its !Array.isArray and reddens at once. (It reddens with INPUT_TOO_LONG, whose
+// message lies -- a pre-existing wart, named rather than fixed here.) The type trap
+// separates a RuleSet from an array; it does NOT separate a labelled array from a
+// stripped one, which is why delivered() is DEFINED BY labelled(): it then has no
+// shape of its own to police, and the PLATFORM tooth below already guards it.
 const budget = () => g.Re2Budget.conservative();
+const labelled = (p, catalog = g.SearchEngineCatalog) =>
+  g.RuleFactory.buildRules(p, catalog, budget());
 const delivered = (p, catalog = g.SearchEngineCatalog) =>
-  g.RuleFactory.buildRules(p, catalog, budget()).rules();
+  labelled(p, catalog).platformRules();
 
 test("real search URLs land on the issue", () => {
   for (const url of POSITIVE.filter((u) => !u.includes("google.fr") && !u.includes("google.co.uk"))) {
@@ -206,11 +214,81 @@ const withCatchAll = (engines = ["google.com"]) => {
   return p.armShortcut(ABC).value.armShortcut(OPS).value.armShortcut(STAR).value;
 };
 
+test("the counter towards the platform is guarded in both directions", () => {
+  // THREE TEETH, and the third is the one an allowlist silently disarms.
+  //
+  // The rest-spread this batch removed made the golden test REDDEN on a new field; an
+  // allowlist would drop it in SILENCE. So: tooth 1 catches a field that APPEARS,
+  // tooth 2 that nothing is AMPUTATED, tooth 3 that no label LEAKS.
+  //
+  // ALLOWED IS THE UNION, never `ALLOWED \ LABELS` nor two independent lists: with two
+  // lists, the shortest way to go green again is `ALLOWED.push("x")`, after which
+  // platformRules() drops the field in production and tooth 3 stays green too. The
+  // union forces you to CLASSIFY it. An allowlist you can leave through the top
+  // without deciding anything is a form, not an allowlist.
+  //
+  // PLATFORM is written BY HAND here, and its reference is the DNR SPEC -- that is what
+  // makes an allowlist legitimate at all. It therefore exists in DUPLICATE on purpose:
+  // this copy is the SPECIFICATION, rule-set.js's PLATFORM_FIELDS is the
+  // IMPLEMENTATION. That duplication IS the tooth; merging them "for DRY" removes it.
+  const PLATFORM = ["id", "priority", "action", "condition"];
+  const LABELS = ["engineId", "isCatchAll", "guardedPrefixes"];
+  const ALLOWED = [...PLATFORM, ...LABELS];
+  // THE FIXTURE IS PRESCRIBED: rule-factory.js carries TWO rule literals, the binding
+  // and the guard. On a policy with no catch-all no guard is produced at all, and
+  // vandalising the guard literal would stay green.
+  const fixture = () => withCatchAll(["google.com", "bing.com"]);
+
+  for (const rule of labelled(fixture()).rules()) {
+    for (const field of Object.keys(rule)) {
+      assert.ok(ALLOWED.includes(field), `an unclassified field reaches the set: ${field}`);
+    }
+  }
+  for (const rule of delivered(fixture())) {
+    // notEqual, NOT `field in rule`: platformRules() derives from PLATFORM_FIELDS, so
+    // the four keys always exist and `in` would be true by construction -- green on a
+    // rule that arrived amputated from the forge, the one case worth catching.
+    for (const field of PLATFORM) assert.notEqual(rule[field], undefined, `amputated: ${field}`);
+    for (const label of LABELS) assert.equal(label in rule, false, `label leaked: ${label}`);
+  }
+  // Known limit, MEASURED rather than assumed: these three teeth only bite at the TOP
+  // level -- action and condition are copied BY REFERENCE, so a field added INSIDE
+  // condition travels through them untouched.
+  //
+  // It is not unguarded, though, and the first draft of this comment was too gloomy: a
+  // bogus field inside condition was injected and the GOLDEN TEST reddened, because its
+  // literal expectation is a full deep-equal. The real bound is narrower and worth
+  // stating exactly: nesting is covered for the rules the golden test pins, and for
+  // those only.
+});
+
+test("the preview names the catch-all, on the rules the platform actually holds", () => {
+  // The code MATCHED_CATCH_ALL was unreachable in production and named in no test:
+  // _install stripped isCatchAll before the platform, and report() hands back what the
+  // store returns. The agreement test compared it only through claimantFor.
+  const onCatchAll = g.JumpPreview.forSearchUrl(
+    "https://www.google.com/search?q=BAN-123", delivered(withCatchAll()));
+  assert.equal(onCatchAll.code, "MATCHED_CATCH_ALL");
+  const onNamed = g.JumpPreview.forSearchUrl(
+    "https://www.google.com/search?q=ABC-7", delivered(withCatchAll()));
+  assert.equal(onNamed.code, "MATCHED_SHORTCUT");
+
+  // AND THE `>= 1` OF THE BOUNDARY, which nothing else exercises: the foreign-store
+  // witness in journal.test.js REMOVES priority, so Number.isInteger bites alone and
+  // the floor is never reached. A band of 0 is an integer, and DNR refuses it -- so it
+  // did not come from DNR, and it must read as the MOST alarming label, not the least.
+  const flattened = delivered(withCatchAll()).map((rule) => ({ ...rule, priority: 0 }));
+  assert.equal(
+    g.JumpPreview.forSearchUrl("https://www.google.com/search?q=BAN-123", flattened).code,
+    "MATCHED_CATCH_ALL");
+});
+
 test("the whole rule set is locked against a literal expectation", () => {
   // The golden test. Everything else in this file explains one line of it.
-  const rules = delivered(withCatchAll());
+  const rules = labelled(withCatchAll()).rules();
   // THIS TEST IS THE THIRD PARTY THAT KNOWS THE STRIPPING -- production
-  // (rule-installer.js) and journal.test.js are the other two. Its rest-spread
+  // (rule-set.js, since platformRules() became the sole counter) and journal.test.js
+  // are the other two. Its rest-spread
   // gains `guardedPrefixes`; the literal expectation below does NOT. Written the
   // other way round -- widening the expectation -- it would have gone green over a
   // label handed to Chrome, which rejects the whole batch.
@@ -339,7 +417,7 @@ test("a shadowed shortcut produces no rule at all", () => {
   const shadowed = withCatchAll().withOrder([STAR, ABC, OPS]).value;
   const rules = delivered(shadowed);
   assert.equal(rules.filter((r) => r.action.type === "redirect").length, 1);
-  assert.equal(rules.filter((r) => r.isCatchAll).length, 1);
+  assert.equal(rules.filter((r) => g.RuleRanking.isCatchAllRule(r)).length, 1);
 });
 
 test("the reserved prefixes are a few allow rules per engine, never one per prefix", () => {
@@ -349,7 +427,7 @@ test("the reserved prefixes are a few allow rules per engine, never one per pref
   // worth keeping is the one that motivated the sentence -- never one rule PER
   // PREFIX, which would be 49 x engines -- and the count is DERIVED, never a
   // literal that would lie the first time a prefix is added.
-  const rules = delivered(withCatchAll(["google.com", "bing.com"]));
+  const rules = labelled(withCatchAll(["google.com", "bing.com"])).rules();
   const allows = rules.filter((r) => r.action.type === "allow");
   const perEngine = g.Re2Budget.conservative()
     .cutIntoAffordableRuns(g.CatchAllKey.only().prefixesWithinReach()).length;
@@ -373,16 +451,16 @@ test("the reserved prefixes are installed only where a catch-all is active", () 
 test("a catch-all whose reserved prefixes could not be installed is dropped with them", () => {
   // Deny by default: a partial reserved list is exactly the invisible failure the
   // unit exists to close, and its violation is an outbound flow.
-  const set = g.RuleFactory.buildRules(withCatchAll(), g.SearchEngineCatalog, budget());
+  const set = labelled(withCatchAll());
   const guard = set.rules().find((r) => r.action.type === "allow");
   const pruned = set.withoutRules([guard.id]);
   assert.equal(pruned.rules().some((r) => r.isCatchAll), false, "the catch-all fell with its guard");
-  assert.equal(pruned.catchAllInstalled(true), false);
+  assert.equal(pruned.coverageSatisfied(), false);
   assert.ok(pruned.skipped().length >= 2, "both halves of the unit are reported");
 });
 
 test("dropping a shortcut on one engine leaves the catch-all standing on the others", () => {
-  const set = g.RuleFactory.buildRules(withCatchAll(["google.com", "bing.com"]), g.SearchEngineCatalog, budget());
+  const set = labelled(withCatchAll(["google.com", "bing.com"]));
   const bing = set.rules().find((r) => r.isCatchAll && r.engineId === "bing.com");
   const pruned = set.withoutRules([bing.id]);
   assert.equal(pruned.rules().some((r) => r.isCatchAll && r.engineId === "google.com"), true);
