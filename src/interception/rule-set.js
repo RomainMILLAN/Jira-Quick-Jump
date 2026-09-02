@@ -215,11 +215,16 @@
      *  method cannot honestly be called `...Installed` when it answers BEFORE the
      *  install. Whether the install then happened is what `installed` answers.
      *
-     *  THE BOOLEAN STAYS A BOOLEAN, and the failure mode has INVERTED: jump-policy.js
-     *  now compares `!== true`, and a list IS !== true, so a wrong type goes out as
-     *  PERMANENT OVER-signalling rather than silence. Over-signalling is the right
-     *  direction and the wrong dose -- it is still a boolean. It is the INPUT that
-     *  stopped being one: `wanted`, which the caller had to guess right, is gone. */
+     *  THE BOOLEAN STAYS A BOOLEAN, and the reasoning below has been RETURNED by the
+     *  batch that split the two codes. It used to read: jump-policy.js compares
+     *  `!== true`, and a list IS `!== true`, so a wrong type goes out as PERMANENT
+     *  OVER-signalling rather than silence. Under the `=== false` that now governs
+     *  CATCH_ALL_NOT_INSTALLED, a list is no longer `=== false`: it leaves as
+     *  COVERAGE_STATE_UNKNOWN **if** the policy wants a catch-all, and as SILENCE
+     *  otherwise. The direction is still safe -- ignorance about a coverage nobody
+     *  asked for is not a fact worth shouting -- but it is no longer the same
+     *  argument, and it is the INPUT that matters here: `wanted`, which the caller
+     *  had to guess right, is gone. */
     coverageSatisfied() {
       return this._contract.satisfiedBy(this.rules());
     }

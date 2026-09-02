@@ -8,28 +8,125 @@
   const { Platform, RuleFactory, SearchEngineCatalog, OriginRequirements, Re2Budget } = global;
   const dnr = () => Platform.api.declarativeNetRequest;
 
+  /**
+   * THE SINGLE-SLOT QUEUE, and the three bugs it used to carry.
+   *
+   * (a) `quarantinedCount` WAS LOST ON REPLAY: the slot held the policy alone and
+   *     the replay called install(next) with one argument, so a re-run silently
+   *     re-defaulted the count to 0 and PARTIAL_POLICY could not fire. The slot
+   *     therefore holds the PAIR.
+   *
+   * (b) THE COALESCED CALLER RECEIVED THE PREVIOUS REPORT: `return pending` hands
+   *     back the run ALREADY IN FLIGHT, which does not include the request just
+   *     made. A naive `return pending.then(...)` still returns the old one. So a
+   *     SHARED DEFERRED, RE-ARMED AT EVERY REPLAY: everyone who coalesced onto the
+   *     same slot gets the result of the run that actually reflects it.
+   *
+   * (c) THE REPLAY PROMISE WAS ABANDONED: `if (next) this.install(next)` dropped
+   *     its promise on the floor, so a rejection there surfaced nowhere. With a
+   *     single driver draining the slot, every outcome reaches a waiter -- which is
+   *     also what makes a throw from report()'s own getDynamicRules OBSERVABLE
+   *     instead of mute.
+   *
+   * The slot is a TAGGED UNION -- a pair for the install, a replacement for the
+   * purge -- because THE PURGE PRIMES: it does not coalesce, it replaces and
+   * empties the slot. Otherwise the fail-closed gesture would be cancelled by the
+   * very queue meant to protect it.
+   */
   let pending = null;
   let queued = null;
+  let deferred = null;
+
+  const defer = () => {
+    let resolve;
+    let reject;
+    const promise = new Promise((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
+    return { promise, resolve, reject };
+  };
 
   const RuleInstaller = {
     /**
-     * Single-slot queue, last request wins. storage.onChanged and
-     * permissions.onAdded can fire almost simultaneously, and two interleaved
-     * wholesale replacements would transiently empty the rules -- precisely when
-     * the user has just granted access and is testing.
+     * storage.onChanged and permissions.onAdded can fire almost simultaneously,
+     * and two interleaved wholesale replacements would transiently empty the
+     * rules -- precisely when the user has just granted access and is testing.
      */
     async install(policy, quarantinedCount = 0) {
-      if (pending) {
-        queued = policy;
-        return pending;
+      return this._enqueue({ kind: "INSTALL", policy, quarantinedCount });
+    },
+
+    /**
+     * FAIL CLOSED, through the SAME queue, and it returns NOTHING.
+     *
+     * It used to live in background.js, which is why the single-writer pin was
+     * green while the violation shipped: that pin only ever read this file.
+     *
+     * No report, no policy, no permission probe. An earlier design had it produce
+     * one so that "lastReport keeps a single shape" -- but lastReport is gone, and
+     * following the fibres afterwards showed the purge's report had NO READER LEFT:
+     * not sync() (the early return precedes the guard), not the badge (which ASKS
+     * for the count), not the UI. So nothing here builds a JumpPolicy.empty(), and
+     * "nothing leaks" becomes STRUCTURAL rather than measured.
+     */
+    async purge() {
+      await this._enqueue({ kind: "PURGE" });
+    },
+
+    /**
+     * What is REALLY installed, asked at the moment the answer is needed.
+     *
+     * Not `appliedCount()`: `applied` is the past tense of the last installation,
+     * and a name must say WHEN it answers. This one answers about the present, and
+     * it is what lets a failed purge stop saying `off`.
+     *
+     * It THROWS when the platform refuses, and the badge's guard turns that into
+     * "never off" rather than into a reassuring zero.
+     */
+    async installedRuleCount() {
+      const rules = await dnr().getDynamicRules();
+      return rules.length;
+    },
+
+    _enqueue(slot) {
+      // LAST REQUEST WINS, the purge included -- and the purge arriving last is
+      // exactly the case that must not be coalesced away.
+      queued = slot;
+      if (!deferred) deferred = defer();
+      const waiting = deferred.promise;
+      if (!pending) {
+        pending = this._drain().finally(() => {
+          pending = null;
+        });
       }
-      pending = this._install(policy, quarantinedCount).finally(() => {
-        pending = null;
-        const next = queued;
+      return waiting;
+    },
+
+    /**
+     * The single driver. One slot in flight at a time, and every slot's outcome --
+     * value or throw -- handed to the callers who coalesced onto it.
+     */
+    async _drain() {
+      while (queued) {
+        const slot = queued;
+        const waiters = deferred;
         queued = null;
-        if (next) this.install(next);
-      });
-      return pending;
+        deferred = null;
+        try {
+          const outcome = slot.kind === "PURGE"
+            ? await this._purge()
+            : await this._install(slot.policy, slot.quarantinedCount);
+          waiters.resolve(outcome);
+        } catch (error) {
+          waiters.reject(error);
+        }
+      }
+    },
+
+    async _purge() {
+      const existing = await dnr().getDynamicRules();
+      await dnr().updateDynamicRules({ removeRuleIds: existing.map((r) => r.id), addRules: [] });
     },
 
     async _install(policy, quarantinedCount = 0) {
@@ -120,7 +217,7 @@
         skipped = [...skipped, { code: "CONSTRUCTION_REFUSED", reason }];
         coverageSatisfied = false;
       }
-      return this.report(policy, skipped, quarantinedCount, { installed, coverageSatisfied });
+      return this.report(policy, skipped, quarantinedCount, { installed, coverageSatisfied }, "INSTALL");
     },
 
     /**
@@ -128,7 +225,34 @@
      * rule without host access simply never fires, and becomes active on its own
      * the moment permission is granted, with no further sync.
      */
-    async report(policy, skipped = [], quarantinedCount = 0, reality = {}) {
+    /**
+     * `source` is a FIFTH NAMED PARAMETER WITH NO DEFAULT.
+     *
+     * With a default, the two call sites that forget it leave `undefined` -- the
+     * MEANINGFUL ABSENCE the discriminant exists to abolish -- and a default of
+     * "INSTALL" would have the options page declare an installation it never
+     * performed. Today the two sites are _install and section-host.js; "PURGE" is
+     * UNREACHABLE, since purge() produces no report at all. What the field buys is
+     * therefore a CHANGELOCK, not the closing of a fail-open: no caller can reach
+     * the projection guard with another source, and the factorisation that would
+     * make it possible goes RED.
+     *
+     * NO SPREAD, AT EITHER END. An earlier version closed the spread on the way
+     * OUT and reprinted it on the way IN, two lines above -- with `...reality`
+     * AFTER rulesInstalled, therefore overwriting THE ONLY NON-FORGEABLE FACT of
+     * the four, the one the INSTALL_STATE_UNKNOWN guard rests on. Measured:
+     *
+     *   { installedRuleCount: 3, ...{ installedRuleCount: 99 } }  ->  99
+     *   { applied, rules, ...reality }  ->  {"applied":99,"rules":["FORGED RULE"]}
+     *
+     * And report.rules HAS A CONSUMER THAT PAINTS: the preview section hands it to
+     * JumpPreview and displays url.origin. So { installed: true, rules: [forged] }
+     * would paint an arbitrary destination in the preview -- the organ built to be
+     * faithful, and the only place the user can check where ABC-1 goes. The
+     * verifiable control would become the channel of the lie, with the preview's
+     * authority behind it.
+     */
+    async report(policy, skipped = [], quarantinedCount = 0, reality = {}, source) {
       const origins = OriginRequirements.requiredOrigins(policy, SearchEngineCatalog.forPolicy(policy));
       const originsGranted = await Platform.grantedOrigins(origins);
       const rules = await dnr().getDynamicRules();
@@ -136,21 +260,44 @@
       // The quarantine count has to travel all the way here, or PARTIAL_POLICY
       // can never fire and the parameter is decoration: a configuration missing
       // entries would report itself as merely lacking permissions.
+      const diagnosis = policy.diagnose({
+        originsGranted,
+        quarantinedCount,
+        // The facts of installed reality enter AS THEY ARE. Naming introduces no
+        // default -- reality.installed is undefined when the fact is missing, and
+        // `typeof f.installed !== "boolean"` reads exactly that.
+        installed: reality.installed,
+        coverageSatisfied: reality.coverageSatisfied,
+        // A FOURTH FACT comes through the door, the only NON-FORGEABLE one of the
+        // four -- computed three lines above, under the name `applied`. It serves
+        // the INSTALL_STATE_UNKNOWN guard.
+        //
+        // AND IT ENTERS AS A BOOLEAN, NOT A NUMBER. quarantinedCount counts things
+        // OF THE DOMAIN, which the catalogue does COMMENSURABLE arithmetic with. A
+        // count of DNR rules is commensurable with NOTHING the domain owns:
+        // activeBindings().length is not the number of installed rules, since the
+        // reserved-prefix allows add one per engine and pruned regexes remove
+        // some. The only honest test is `> 0`, forever -- so the counting
+        // convention stays IN THE AIRLOCK and the domain receives a yes/no.
+        //
+        // LAST, and therefore not overwritable by anything above it.
+        rulesInstalled: applied > 0,
+      });
       return {
+        // The DISCRIMINANT, always present.
+        source,
+        // The aggregate root travels, licit because immutable -- but the derogation
+        // is named: the day a setter appears, this field becomes a handle on live
+        // state.
+        policy,
         applied,
         // The rules AS INSTALLED, so the preview simulates the delivered
         // programme rather than the intended one -- and so the badge and the
         // preview share one owner of "what is really installed".
         rules,
-        diagnosis: policy.diagnose({
-          originsGranted,
-          quarantinedCount,
-          // The third fact through the door, and the only one that speaks of the
-          // INSTALLED REALITY rather than the intention. Which is exactly why it
-          // outranks everything, DISARMED included.
-          installed: reality.installed === undefined ? true : reality.installed,
-          coverageSatisfied: reality.coverageSatisfied === undefined ? true : reality.coverageSatisfied,
-        }),
+        installed: reality.installed,
+        coverageSatisfied: reality.coverageSatisfied,
+        diagnosis,
         skipped,
         missingOrigins: originsGranted ? [] : origins,
       };

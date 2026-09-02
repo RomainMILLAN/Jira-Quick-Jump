@@ -120,15 +120,19 @@
      */
     winner(matches) {
       if (matches.length === 0) return { code: "NO_MATCH" };
+      // band() and actionType(), not the raw DNR fields: the signature is
+      // UNCHANGED -- it still receives { rule, destination, subject } and arbitrates
+      // on m.destination, a datum that is not on the rule -- and InstalledRule
+      // replaces the primitive INSIDE each match.
       const ranked = [...matches].sort((a, b) => {
-        if (b.rule.priority !== a.rule.priority) return b.rule.priority - a.rule.priority;
-        return RuleRanking.rankOfAction(b.rule.action.type) - RuleRanking.rankOfAction(a.rule.action.type);
+        if (b.rule.band() !== a.rule.band()) return b.rule.band() - a.rule.band();
+        return RuleRanking.rankOfAction(b.rule.actionType()) - RuleRanking.rankOfAction(a.rule.actionType());
       });
       const best = ranked[0];
       const tied = ranked.filter(
         (m) =>
-          m.rule.priority === best.rule.priority &&
-          m.rule.action.type === best.rule.action.type &&
+          m.rule.band() === best.rule.band() &&
+          m.rule.actionType() === best.rule.actionType() &&
           m.destination !== best.destination
       );
       if (tied.length > 0) return { code: "NON_DETERMINISTIC" };

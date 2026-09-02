@@ -281,6 +281,50 @@ test("the preview names the catch-all, on the rules the platform actually holds"
   assert.equal(
     g.JumpPreview.forSearchUrl("https://www.google.com/search?q=BAN-123", flattened).code,
     "MATCHED_CATCH_ALL");
+
+  // THE THIRD FORM, which nothing exercised: a band that is READABLE and is not one
+  // of ours. 7 is an integer >= 1, so it is presumed to be a band and kept as it is --
+  // the deliberate assumption InstalledRule states, for want of a band registry. It
+  // must NOT read as the catch-all.
+  const bandSeven = delivered(withCatchAll()).map((rule) => ({ ...rule, priority: 7 }));
+  assert.equal(
+    g.JumpPreview.forSearchUrl("https://www.google.com/search?q=BAN-123", bandSeven).code,
+    "MATCHED_SHORTCUT",
+    "a foreign band is not the catch-all band");
+});
+
+test("InstalledRule normalises ONCE, and the forge keeps its own canary", () => {
+  // The value object of the airlock: one place of normalisation, and a band() that
+  // cannot be forgotten.
+  const raw = {
+    id: 4,
+    action: { type: "redirect", redirect: { regexSubstitution: "https://x.example.org/browse/\\1" } },
+    condition: { regexFilter: "ABC-(\\d+)", isUrlFilterCaseSensitive: false },
+  };
+  const absent = new g.InstalledRule(raw);
+  assert.equal(absent.band(), g.InstalledRule.DNR_DEFAULT_PRIORITY, "absent means the DNR default");
+  assert.equal(absent.isCatchAll(), true, "the default band IS the catch-all band");
+  assert.equal(new g.InstalledRule({ ...raw, priority: 0 }).isCatchAll(), true, "0 is below the floor");
+  assert.equal(new g.InstalledRule({ ...raw, priority: 7 }).isCatchAll(), false, "7 is kept as it is");
+  assert.equal(new g.InstalledRule({ ...raw, priority: g.RuleRanking.NAMED }).isCatchAll(), false);
+
+  // The three NAMED accessors, which is what makes a membrane rather than a wrapper:
+  // no caller reads .condition. or .action. any more.
+  assert.equal(absent.regexFilter(), "ABC-(\\d+)");
+  assert.equal(absent.actionType(), "redirect");
+  assert.equal(absent.substitution(), "https://x.example.org/browse/\\1");
+  // DNR's own default for isCaseSensitive is TRUE, so ABSENT means case-SENSITIVE.
+  assert.equal(absent.caseSensitive(), false, "explicit false");
+  assert.equal(
+    new g.InstalledRule({ ...raw, condition: { regexFilter: "X" } }).caseSensitive(),
+    true,
+    "absent means the platform default, which is sensitive");
+
+  // AND THE FORGE'S CANARY IS STILL ALIVE on a raw rule: isCatchAllRule stays TOTAL,
+  // which rule-set.js designates as THE content check. The delegation passes a
+  // SYNTHESISED band precisely so this stays true.
+  assert.throws(() => g.RuleRanking.isCatchAllRule({ id: 1 }), /priority band/);
+  assert.throws(() => g.RuleRanking.isCatchAllRule({ id: 1, priority: "3" }), /priority band/);
 });
 
 test("the whole rule set is locked against a literal expectation", () => {

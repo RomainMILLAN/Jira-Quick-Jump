@@ -156,7 +156,36 @@ test("the load order the changelocks depend on is pinned in every list", () => {
     before(list, "core/project-shortcut.js", "core/catch-all-key.js");
     before(list, "core/catch-all-key.js", "interception/reference-pattern.js");
     before(list, "interception/re2-budget.js", "interception/reference-pattern.js");
+    // install-outcome.js destructures VersionedEntry AT LOAD, like
+    // installed-projection.js -- the file this test's own comment cites.
+    before(list, "versioned-entry.js", "install-outcome.js");
+    // installed-rule.js destructures RuleRanking at load and DELEGATES to it.
+    before(list, "interception/rule-ranking.js", "interception/installed-rule.js");
+    before(list, "interception/installed-rule.js", "interception/jump-preview.js");
   }
+
+  // A SECOND LOOP, over the PAGE lists only. The naive addition inside the loop
+  // above would go RED on background.scripts, where ui/diagnosis-presentation.js is
+  // rightly forbidden -- and the interdicted repair must be named: DO NOT put the
+  // file in the manifest.
+  //
+  // This is the ONLY belt the third new file has: it is not in the manifest
+  // (correct), no other pair names it, ORDER is pinned by nothing, and the UI-tail
+  // equality only catches an ASYMMETRY -- forgotten in BOTH pages, the likeliest
+  // case since they are edited in one gesture, it would go red on nothing.
+  const pageLists = lists.slice(1);
+  assert.ok(pageLists.length > 0, "the page lists must be readable, or this pin is vacuous");
+  for (const list of pageLists) {
+    before(list, "ui/diagnosis-presentation.js", "options-sections.js");
+    // It reads JumpPolicy.DIAGNOSES AT LOAD to refuse an incomplete table: true by
+    // accident today, and by contract from here on.
+    before(list, "core/jump-policy.js", "ui/diagnosis-presentation.js");
+  }
+  // And it must NOT be in the service worker: background.scripts carries no ui/*.
+  assert.equal(
+    manifest.background.scripts.some((f) => f.startsWith("ui/")),
+    false,
+    "the service worker has no DOM, so no ui/* file belongs in its list");
 });
 
 test("both HTML surfaces share the same UI tail", () => {
@@ -262,6 +291,80 @@ test("the rules reach the platform through the one counter, and only through it"
     "rule-installer.js no longer goes through the sole counter");
 });
 
+test("the single writer of the rules is STRUCTURAL, and the receipt is one-way", () => {
+  const bg = read("src/background.js");
+  const ui = read("src/options-sections.js") + read("src/ui/section-host.js");
+
+  // The lot-2 pin only ever read rule-installer.js, which is why the violation was
+  // GREEN FOREVER: background.js held its own purge, copied from _install.
+  for (const call of ["updateDynamicRules", "getDynamicRules"]) {
+    assert.equal(bg.includes(call), false, `background.js still calls ${call} itself`);
+  }
+  // This also makes the old behavioural witness "a purge never writes the
+  // projection" structural: purge() has no access to it at all.
+  assert.equal(/purge\(\)[\s\S]{0,400}InstalledProjection/.test(read("src/rule-installer.js")), false);
+
+  // TWO assertions, not one -- and it is the SECOND that bounds the risk. The first
+  // pins the ENTRY NAME, which must stay private to the IIFE anyway. MIND THE CASE:
+  // "InstallOutcome.read()" does NOT contain the substring "installOutcome", so the
+  // first assertion does not catch it -- and the worker must name InstallOutcome
+  // anyway, for record and forget.
+  assert.equal(bg.includes("installOutcome"), false, "the entry name is private to its IIFE");
+  assert.equal(/InstallOutcome\s*\.\s*read/.test(bg), false,
+    "the worker WRITES the receipt; reading it would let a forgeable fact govern the projection");
+
+  // AND THE OTHER DIRECTION, which the pin did not cover: nothing forbade the UI
+  // from WRITING the receipt. Not an escalation -- the page is already on the
+  // user's side -- but it is the architecture drift that "one write site" claims to
+  // close, and the pin only pinched one way.
+  for (const forbidden of [/InstallOutcome\s*\.\s*record/, /InstallOutcome\s*\.\s*forget/]) {
+    assert.equal(forbidden.test(ui), false, "the UI READS the receipt, it never writes it");
+  }
+});
+
+test("the airlock's value object is a membrane, not a wrapper", () => {
+  // rule-ranking.js is the SOLE owner of the word priority, and jump-preview.js
+  // declares that the rules come from a foreign system. Both then read the raw
+  // fields in the clear. The ban is SYMMETRIC -- .rule.priority AND .condition. /
+  // .action. -- because the §C argument against exposing condition()/action() is
+  // won by promising exactly this.
+  //
+  // IT READS THE SOURCE, COMMENTS INCLUDED, which is deliberate: a stale comment is
+  // how the next reader learns the wrong idiom.
+  for (const file of ["src/interception/rule-ranking.js", "src/interception/jump-preview.js"]) {
+    const source = read(file);
+    assert.equal(source.includes(".rule.priority"), false, `${file} still reads .rule.priority`);
+    assert.equal(source.includes(".condition."), false, `${file} still reads .condition. in the clear`);
+    assert.equal(source.includes(".action."), false, `${file} still reads .action. in the clear`);
+  }
+  // And the bare `rule.priority` -- isCatchAllRule's raw parameter -- is SPARED,
+  // which is exactly wanted: it stays TOTAL ON A RAW RULE, the forge's canary.
+  assert.ok(read("src/interception/rule-ranking.js").includes("rule.priority"),
+    "isCatchAllRule must stay total on a RAW rule");
+});
+
+test("every direct this.render( in the sections is counted, not merely discouraged", () => {
+  // Each direct call bypasses BOTH the per-section try/catch AND the coalescing,
+  // which section-host.js declares load-bearing against a second render trigger.
+  //
+  // A COUNT, not a ban on an absent token: limiting /section\.render\(/ to the host
+  // would be BLIND BY CONSTRUCTION -- measured, there are ZERO of those in
+  // options-sections.js and both of the repository's are already in the host.
+  //
+  // AND THE PAIR, because a count alone is blind to SUBSTITUTION: converting a
+  // legitimate site and adding a bad one leaves the total at 10.
+  const ui = read("src/options-sections.js");
+  const direct = (ui.match(/this\.render\(/g) || []).length;
+  const refreshed = (ui.match(/await ctx\.refresh\(\)/g) || []).length;
+  const why =
+    "each direct this.render( bypasses the per-section try/catch AND the coalescing, " +
+    "declared load-bearing. New site: convert it to `await ctx.refresh()`, or bump N " +
+    "with a NAMED derogation saying which local state prevents it ({focus}, " +
+    "this.adding, this.proposal).";
+  assert.equal(direct, 10, why);
+  assert.equal(refreshed, 2, why);
+});
+
 test("SECURITY.md still states how the detector is allowed to fail", () => {
   // This file was pinned by NOTHING, while STORE_LISTING.md, PRIVACY.md and README.md
   // all are -- so the prose/code agreement was the one thing this batch could lose
@@ -269,6 +372,11 @@ test("SECURITY.md still states how the detector is allowed to fail", () => {
   const doc = read("SECURITY.md");
   assert.match(doc, /over-signall?ing/i, "SECURITY.md no longer states the failure direction");
   assert.match(doc, /status line/i, "SECURITY.md no longer names which panel still lies");
+  // The new entry that carries evidence and is FORGEABLE by a local attacker. The
+  // old pin required /status line/i, present twice, so rewriting the prose would
+  // have left it GREEN WITHOUT PINNING ANYTHING.
+  assert.match(doc, /forgeable/i, "SECURITY.md no longer names the receipt as forgeable");
+  assert.match(doc, /installOutcome/i, "SECURITY.md no longer names the entry");
 });
 
 test("the search-suggestion caveat survives", () => {
@@ -567,6 +675,14 @@ test("every section declares its own reconcile, none is grafted by the host", ()
   const declared = (ui.match(/^\s{4}reconcile\(/gm) || []).length;
   assert.equal(declared, listed, "as many reconcile() as there are sections");
   assert.equal(/section\.reconcile\s*=/.test(read("src/ui/section-host.js")), false);
+
+  // THE SAME ARGUMENT FOR blank(), which the host loops over on a condemned page.
+  // Written `section.blank?.()` it would be an optional member, i.e. a presence
+  // test -- and this very pin is what settles the question for reconcile.
+  assert.equal((ui.match(/^\s{4}blank\(/gm) || []).length, listed,
+    "as many blank() as there are sections");
+  assert.equal(/section\.blank\?\./.test(read("src/ui/section-host.js")), false,
+    "the host calls blank() unconditionally: the member is TOTAL, not optional");
 });
 
 test("reconcile never redraws, and only ever speaks constants", () => {

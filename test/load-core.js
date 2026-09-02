@@ -26,6 +26,7 @@ const ORDER = [
   "interception/re2-budget.js",
   "interception/reference-pattern.js",
   "interception/rule-ranking.js",
+  "interception/installed-rule.js",
   "interception/rule-set.js",
   "interception/rule-factory.js",
   "interception/origin-requirements.js",
@@ -35,9 +36,20 @@ const ORDER = [
   // which the tests stand in for, so they load last.
   "platform.js",
   "versioned-entry.js",
+  // It destructures VersionedEntry at load time, like installed-projection.js.
+  "install-outcome.js",
   "key-acknowledgements.js",
+  // The two storage-facing modules background.js cannot run without. They were
+  // missing while nothing loaded background.js; the order mirrors its own
+  // importScripts, because that list is the one that ships.
+  "installed-projection.js",
+  "policy-repository.js",
   "destination-journal.js",
   "rule-installer.js",
+  // AFTER platform.js, because it calls t() -- and after core/jump-policy.js,
+  // whose DIAGNOSES it reads AT LOAD TIME to refuse an incomplete table. It
+  // touches neither document nor window, like row-reorder.js below.
+  "ui/diagnosis-presentation.js",
   // Pointer arithmetic that is three numbers and no DOM, so it belongs in
   // the regression net like anything else. The file touches neither
   // document nor window at load time, which is what makes this safe.

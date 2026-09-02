@@ -182,6 +182,9 @@
   "journalOverflowed": {
     "message": "Certains changements n’ont pas pu être enregistrés."
   },
+  "journalUnreadable": {
+    "message": "L'enregistrement des changements n'a pas pu être lu."
+  },
   "key": {
     "message": "Clé"
   },
@@ -316,6 +319,18 @@
   },
   "tagInstallFailed": {
     "message": "Non installé"
+  },
+  "statusInstallUnknown": {
+    "message": "L'installation des règles n'a pas pu être vérifiée."
+  },
+  "tagInstallUnknown": {
+    "message": "Inconnu"
+  },
+  "statusCoverageUnknown": {
+    "message": "L'installation de l'attrape-tout n'a pas pu être vérifiée."
+  },
+  "tagCoverageUnknown": {
+    "message": "Attrape-tout inconnu"
   },
   "tagNoAccess": {
     "message": "Aucun accès"

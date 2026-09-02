@@ -109,11 +109,25 @@ trade rather than leave stale rules firing under a badge that says `off`.
   **catch-all** — the most alarming label — rather than as an ordinary shortcut. A
   detector that dies quietly, or that answers "this search goes through untouched"
   when it cannot read the installed programme, is the failure this rule forbids.
-- **The status line still lies, and the preview no longer does.** The preview panel
-  now reports the programme the browser actually holds. The **status line** above it
-  is not yet wired to the installed reality: it can read `READY` while the catch-all
-  failed to install. The pane and the line are therefore not equally trustworthy
-  today, and the line is the one to distrust. Closing that gap is the next change.
+- **The status line now tells the truth, and so does the preview.** Both are wired
+  to the installed reality. The **status line** used to read `READY` while the
+  catch-all had failed to install: the service worker records the result of each
+  installation in local storage (`installOutcome`) and the page reads it, so a
+  failed install and an *unknown* install are now two distinct sentences with two
+  distinct tones, rather than one reassuring silence.
+- **That receipt is FORGEABLE by a local attacker, and here is exactly what it
+  buys.** `installOutcome` lives in `storage.local`, **never** in sync — so the
+  compromised sync account the detector watches for cannot write it. A local
+  attacker can, and already holds the journal and the installed-policy projection,
+  so this adds no new capability. What forging `{ installed: true }` does is
+  **silence the status line**, the only channel able to report a failed
+  installation. It does **not** touch the **badge**, which counts the rules really
+  installed and asks the browser for that count, nor the **banner**, which reads the
+  change journal. The detector is not turned off; one of its three voices is.
+- **Whether the catch-all was installed can also be *unknown*.** On a device where
+  the configuration arrived through sync but the local receipt has not yet been
+  written, the page says so rather than guessing — an over-signal that lasts until
+  the first installation lands.
 
 ## Supply chain
 

@@ -182,6 +182,9 @@
   "journalOverflowed": {
     "message": "Some changes could not be recorded."
   },
+  "journalUnreadable": {
+    "message": "The change record could not be read."
+  },
   "key": {
     "message": "Key"
   },
@@ -316,6 +319,18 @@
   },
   "tagInstallFailed": {
     "message": "Not installed"
+  },
+  "statusInstallUnknown": {
+    "message": "Whether the rules were installed is unknown."
+  },
+  "tagInstallUnknown": {
+    "message": "Unknown"
+  },
+  "statusCoverageUnknown": {
+    "message": "Whether the catch-all was installed is unknown."
+  },
+  "tagCoverageUnknown": {
+    "message": "Catch-all unknown"
   },
   "tagNoAccess": {
     "message": "No access"

@@ -18,7 +18,7 @@
 (function (global) {
   "use strict";
 
-  const { RuleRanking } = global;
+  const { RuleRanking, InstalledRule } = global;
 
   // Real search URLs are under 500 characters. The cap runs BEFORE any
   // compilation: the JS RegExp behind (?:.*&)? is quadratic on a non-matching
@@ -38,13 +38,9 @@
   // nothing" from "it said catch-all". Written under ONE name the collision hides;
   // under two names that happen to be equal it is EXPOSED.
   //
-  // The day the bands are renumbered, it is this 1 that must stay. "The most alarming
-  // label" and "the DNR default" are two intentions that DIVERGE under a renumbering,
-  // and it is the second one we encode.
-  const DNR_DEFAULT_PRIORITY = 1;
-  // DNR refuses priority < 1, so a smaller integer did not come from it.
-  const DNR_MINIMUM_PRIORITY = 1;
-
+  // THE NORMALISATION HAS MOVED to interception/installed-rule.js, which owns the
+  // two DNR constants and applies them ONCE, in a total constructor -- instead of a
+  // default applied at every read site.
   const has_scheme = /^[a-zA-Z][a-zA-Z0-9+.-]*:/;
 
   const refuse = (code) => ({ ok: false, code });
@@ -59,9 +55,9 @@
     // THE BAND, never the label: _install strips isCatchAll before the platform and
     // report() hands back the rules READ BACK from the store, so this used to test a
     // field that no longer exists -- MATCHED_CATCH_ALL was unreachable in production.
-    code: RuleRanking.isCatchAllRule(match.rule) ? "MATCHED_CATCH_ALL" : "MATCHED_SHORTCUT",
+    code: match.rule.isCatchAll() ? "MATCHED_CATCH_ALL" : "MATCHED_SHORTCUT",
     destination: match.destination,
-    ruleId: match.rule.id,
+    ruleId: match.rule.id(),
     subject: match.subject,
   });
 
@@ -69,40 +65,28 @@
     if (!Array.isArray(rules) || rules.length > MAX_RULES) return refuse("INPUT_TOO_LONG");
     const matches = [];
     for (const raw of rules) {
-      // A FOREIGN store: priority absent => DNR default (1) => catch-all band, the MOST
-      // alarming label. Same gesture as the isUrlFilterCaseSensitive line just below:
-      // absent => the platform's default. The airlock does not invent a datum, it
-      // finishes reading a sentence whose neighbour agreed that silence was a word.
-      //
-      // WE REBUILD THE RECORD, we do not compute a band beside it: winner() sorts on
-      // a.rule.priority and matched() reads match.rule, so a local `band` would be DEAD
-      // and both would go on reading the original.
-      //
-      // AND THE `>= 1` IS NOT DECORATION: without it the door validates the TYPE and
-      // not the DOMAIN. 0 and -3 would sail through and answer MATCHED_SHORTCUT -- the
-      // LEAST alarming label. One assumption remains, deliberately: any integer >= 1 is
-      // presumed to be one of our three bands, for want of a band registry.
-      //
-      // EXACTLY THE OPTIONAL FIELD, and that is a rule rather than a case: condition
-      // and action are read bare below because DNR makes them MANDATORY.
+      // The airlock does not invent a datum, it finishes reading a sentence whose
+      // neighbour agreed that silence was a word. WE REBUILD THE RECORD rather than
+      // computing a band beside it: winner() sorts on the rule and matched() reads
+      // match.rule, so a local `band` would be DEAD and both would go on reading the
+      // original.
       //
       // Rebuilding also moves the WINNER, not just the label: on a fully stripped set
       // everything becomes band 1 and the tie-break falls to action-type precedence,
-      // which this project's ranking file says it is careful never to depend on. It
-      // plays in our favour (the allow wins, the guard holds) but it becomes DECISIVE
-      // instead of occasional.
-      const readable = Number.isInteger(raw.priority) && raw.priority >= DNR_MINIMUM_PRIORITY;
-      const rule = { ...raw, priority: readable ? raw.priority : DNR_DEFAULT_PRIORITY };
+      // which rule-ranking.js says it is careful never to depend on. It plays in our
+      // favour (the allow wins, the guard holds) but it becomes DECISIVE instead of
+      // occasional.
+      const rule = new InstalledRule(raw);
       // Flags are DERIVED FROM THE RULE, never hand-written: otherwise the
       // regression net would validate a different regex from the one shipped.
-      const flags = rule.condition.isUrlFilterCaseSensitive === false ? "i" : "";
-      const found = new RegExp(rule.condition.regexFilter, flags).exec(url);
+      const flags = rule.caseSensitive() ? "" : "i";
+      const found = new RegExp(rule.regexFilter(), flags).exec(url);
       if (!found) continue;
-      if (rule.action.type === "allow") {
+      if (rule.actionType() === "allow") {
         matches.push({ rule, destination: undefined, subject: found[1] });
         continue;
       }
-      const destination = rule.action.redirect.regexSubstitution.replace(
+      const destination = rule.substitution().replace(
         /\\([1-9])/g,
         (_, group) => found[Number(group)] ?? ""
       );
@@ -112,7 +96,7 @@
     const outcome = RuleRanking.winner(matches);
     if (outcome.code === "NO_MATCH") return refuse("NO_MATCH");
     if (outcome.code === "NON_DETERMINISTIC") return refuse("NON_DETERMINISTIC");
-    if (outcome.match.rule.action.type === "allow") return refuse("RESERVED_PREFIX");
+    if (outcome.match.rule.actionType() === "allow") return refuse("RESERVED_PREFIX");
     return matched(outcome.match);
   };
 

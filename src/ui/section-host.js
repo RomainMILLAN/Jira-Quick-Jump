@@ -13,7 +13,8 @@
 (function (global) {
   "use strict";
 
-  const { Platform, PolicyRepository, DestinationJournal, RuleInstaller, MutationResult, Dom } = global;
+  const { Platform, PolicyRepository, DestinationJournal, RuleInstaller, InstallOutcome,
+          MutationResult, Dom } = global;
 
   const DEBOUNCE_MS = 500;
 
@@ -42,6 +43,17 @@
         // For the rare write that lands OUTSIDE the policy — a journal entry, an
         // acknowledgement of it — since only a policy write triggers a redraw.
         refresh: () => render(),
+        /**
+         * "Stop painting." A section asks this ONE LINE AFTER EVERY await THAT
+         * REPAINTS, because a render suspended mid-flight resumes and finishes its
+         * gesture over what blank() has just painted.
+         *
+         * It keeps this host ignorant of content: it does not say WHAT to paint, it
+         * says DO NOT PAINT ANY MORE. The rendering/again latch protects render
+         * against render; it protects nothing against blank(), which is called from
+         * reload(), OUTSIDE the latch.
+         */
+        condemned: () => condemned,
       };
 
       /**
@@ -66,8 +78,12 @@
           // ORDER_STALE is the exception: the section is holding an optimistic
           // order the storage does not have, and showFailure alone would leave
           // that wrong order on screen indefinitely.
-          showFailure(result);
+          // ORDER_STALE: the reload comes FIRST. Announcing then reloading erased
+          // the message in the SAME turn, deterministically -- the user's order
+          // write thrown away without being told. And the doorbell this batch adds
+          // DOUBLES how often those reloads happen.
           if (result.code === "ORDER_STALE") await reload();
+          showFailure(result, "mutation");
           return result;
         }
         await reload();
@@ -113,7 +129,11 @@
       let lastReport = null;
       async function report() {
         if (!lastReport) {
-          lastReport = await RuleInstaller.report(stored.policy(), [], stored.quarantinedCount());
+          // THE RECEIPT, and the FIFTH parameter. Called with three arguments,
+          // `reality` was {} and report() re-fabricated `installed: true` -- so the
+          // page owned two labels it could STRUCTURALLY never display.
+          lastReport = await RuleInstaller.report(
+            stored.policy(), [], stored.quarantinedCount(), await InstallOutcome.read(), "PAGE");
         }
         return lastReport;
       }
@@ -159,15 +179,46 @@
         }
       }
 
+      /**
+       * The flag is CLEARED AT THE HEAD, before load().
+       *
+       * Set once and never reset, it would be DEFINITIVE -- and this file promises
+       * that a repaired wake-up renders for good. Repaired policy => reload() =>
+       * load() ok => render() => the first await falls back on `condemned` =>
+       * return: THE PAGE WOULD NEVER HEAL. The direction stayed safe (a persistent
+       * alarming over-signal, never the green), but the promise was false.
+       */
       async function reload() {
+        condemned = false;
         const loaded = await PolicyRepository.load();
         if (!loaded.ok) {
-          showFailure(loaded);
+          showFailure(loaded, "load");
+          condemn();
           return;
         }
         stored = loaded.stored;
         lastReport = null;
-        render();
+        // A SUCCESSFUL reload hides the banner -- but ONLY the one whose cause is a
+        // READ. Nothing ever set banner.hidden back to true, so a stale failure
+        // banner survived above freshly repainted green sections, for the life of
+        // the page.
+        hideFailure("load");
+        await render();
+      }
+
+      /**
+       * CONDEMNS the page: every section paints an alarming state, and none of them
+       * paints again.
+       *
+       * The `.tag` node belongs to Status, and this host claims in its own header to
+       * know nothing about what a section contains -- so this is a member of the
+       * SECTION PROTOCOL, declared by all eight, not a document.querySelector(".tag")
+       * from here, which would break that claim AND erase an arbitrary tag.
+       */
+      let condemned = false;
+      function condemn() {
+        condemned = true;
+        for (const section of sections) section.blank();
       }
 
       /**
@@ -191,15 +242,30 @@
           return;
         }
         rendering = true;
-        do {
+        try {
+          do {
+            again = false;
+            await renderOnce();
+          } while (again);
+        } finally {
+          // `again` INSIDE the finally: a throw escaping the loop would otherwise
+          // leave it true forever, and the next render would loop once for nothing.
           again = false;
-          await renderOnce();
-        } while (again);
-        rendering = false;
+          rendering = false;
+        }
       }
 
       async function renderOnce() {
         for (const section of sections) {
+          // A SECTION THAT THROWS MUST NOT ABANDON THE ONES THAT FOLLOW. Status is
+          // the FIRST of eight, so a throw there left the seven others unpainted --
+          // and since the latch hands control back without redrawing anything more,
+          // EVERY pass would die at the same place.
+          //
+          // It covers reconcile AND render: the natural implementation wraps only
+          // the await, and a throw inside reconcile would then abandon the rest,
+          // which is what this nail exists to prevent.
+          try {
           // Never re-render the subtree holding the field being TYPED IN: doing so
           // replaces the value and sends the caret back to the start. Replayed on
           // blur instead.
@@ -220,6 +286,13 @@
           }
           section.dirty = false;
           await section.render(stored, ctx);
+          } catch (error) {
+            // The section paints its own alarming state (see Status.render). Here we
+            // only make sure the loop continues and the section is not left dirty,
+            // which would make the next pass replay the same throw.
+            section.dirty = false;
+            if (typeof section.fail === "function") section.fail(error);
+          }
         }
       }
 
@@ -230,31 +303,78 @@
         return tag === "INPUT" || tag === "TEXTAREA" || active.isContentEditable;
       }
 
-      function showFailure(result) {
+      /**
+       * The banner carries a CAUSE, and only its own cause closes it.
+       *
+       * showFailure is called from two NATURES of place: a failed READ and a refused
+       * MUTATION. Hiding it indiscriminately on a successful reload would erase
+       * "The order changed elsewhere. Try again." in the same turn, every time.
+       *
+       * Not to be confused with Status.banner, the JOURNAL's banner, which already
+       * re-hides itself: there are THREE banners on this page.
+       */
+      let bannerCause = null;
+
+      function showFailure(result, cause) {
         const banner = document.getElementById("host-banner");
         if (!banner) return;
+        bannerCause = cause;
         banner.hidden = false;
         banner.textContent = result.message || String(result.code || "");
       }
 
-      const loaded = await PolicyRepository.load();
-      if (!loaded.ok) {
-        showFailure(loaded);
-        return { stop() {} };
+      function hideFailure(cause) {
+        const banner = document.getElementById("host-banner");
+        if (!banner || bannerCause !== cause) return;
+        banner.hidden = true;
+        bannerCause = null;
       }
-      stored = loaded.stored;
 
+      /**
+       * THE MOUNT LOOP COMES BEFORE THE FAIL-CLOSED TEST, and the gesture is FREE:
+       * measured, the EIGHT mount(root, ctx) never take `stored`, so mounting does
+       * not depend on the policy.
+       *
+       * Subscribing was NOT enough. The fail-closed exit used to sit BEFORE this
+       * loop, so a repaired-policy wake-up found a page where section.root,
+       * this.node and this.banner were all undefined, and BOTH branches THREW:
+       * Dom.clear(undefined) on the repaired path, blank() on an unmounted section
+       * on the still-broken one. A guard rail whose message lies -- promising a
+       * wake-up and delivering a TypeError.
+       *
+       * It also makes "mount() only" a CONSEQUENCE of the reordering rather than an
+       * isolated instruction: the first paint goes through render(), where the
+       * serialisation lives.
+       */
       for (const section of sections) {
         const node = document.createElement("div");
         node.className = "section";
         root.appendChild(node);
         section.root = node;
         section.mount(node, ctx);
-        section.render(stored, ctx);
       }
 
+      /**
+       * AND THE TWO SUBSCRIPTIONS RISE WITH IT. They lived AFTER the fail-closed
+       * return, so a page opened WHILE the policy was unreadable had NO LISTENER AT
+       * ALL: dead for good, never waking when the user repaired it from the popup.
+       */
       const onChanged = () => reload();
       PolicyRepository.onPolicyChanged(onChanged);
+      /**
+       * The doorbell. Without it, reload() is only triggered by onPolicyChanged and
+       * by commit() -- that is, by a gesture of the user ON THIS PAGE, never by a
+       * fact coming from the worker. So permissions.onAdded (the very screen where
+       * the permission is granted) and the race where the page reads before the
+       * worker has installed would refresh nothing.
+       *
+       * Subscribed ONCE, here, and its listener CALLS reload(): placed inside
+       * reload() it would stack one listener per reload. It fires at every worker
+       * wake-up, which hands a local attacker a second render trigger -- and the
+       * only rampart is the rendering/again coalescing, which is what makes that
+       * try/finally LOAD-BEARING rather than cosmetic.
+       */
+      InstallOutcome.onRecorded(() => reload());
 
       /**
        * Three states that cannot overlap: FREE, HELD BY THE POINTER (a few
@@ -306,6 +426,24 @@
       };
       document.addEventListener("visibilitychange", onHide);
       window.addEventListener("pagehide", flush);
+
+      /**
+       * THE READ AND THE FIRST PAINT COME LAST, after the host's listeners.
+       *
+       * mount() attaches its onClick handlers before any paint, so a click during
+       * this await would launch a CONCURRENT pass -- and pointerdown/dragstart must
+       * be armed before it too, or the window in which heldSection is structurally
+       * null grows from zero to the length of a full render, and a dragstart inside
+       * it would not arm the drag latch.
+       */
+      const loaded = await PolicyRepository.load();
+      if (loaded.ok) {
+        stored = loaded.stored;
+        await render();
+      } else {
+        showFailure(loaded, "load");
+        condemn();
+      }
 
       return {
         stop() {

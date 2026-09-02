@@ -122,29 +122,57 @@ test("diagnose says why nothing works, in a fixed order of priority", () => {
   assert.equal(policy.diagnose(granted), "READY");
 });
 
-test("a fact of installed reality that is ABSENT is not a true one", () => {
-  // TWO LINKS IN SERIES, so TWO witnesses. INSTALL_FAILED ranks FIRST and MASKS
-  // CATCH_ALL_NOT_INSTALLED, which is ninth -- so someone restoring the second
-  // predicate to `=== false` would leave the suite green, every other call now passing
-  // the fact explicitly, for which both forms are indistinguishable.
+test("an ABSENT fact of installed reality is neither true nor a failure", () => {
+  // TWO LINKS IN SERIES, so TWO PAIRS of witnesses -- and each pair must pin the
+  // PARTITION, not just the alarm. `!== true` folded "it failed" and "I do not
+  // know" into one sentence: it named the wrong cause on a healthy profile whose
+  // receipt was merely absent. `=== false` ALONE would be the fail-open. So each
+  // fact now has two ranks, and a witness for each.
   //
-  // THE FIXTURE MATTERS: these witnesses need a policy that CLEARS ranks 2 to 8.
-  // ordered() answers ALL_SHORTCUTS_DISARMED and ordered().disarm() answers DISARMED;
-  // this one is armed, acknowledged and engined, so it reaches READY when told the
-  // truth.
+  // THE FIXTURE MATTERS: these witnesses need a policy that CLEARS ranks 3 to 9.
+  // ordered() answers ALL_SHORTCUTS_DISARMED and ordered().disarm() answers
+  // DISARMED; this one is armed, acknowledged and engined, so it reaches READY when
+  // told the truth.
   let p = g.JumpPolicy.empty().withEngines(["google.com"]).value;
   p = p.register(ID, key("ABC"), instance("https://example.atlassian.net")).value;
   p = p.armShortcut(ID).value;
   assert.equal(p.diagnose({ originsGranted: true, quarantinedCount: 0, installed: true,
                             coverageSatisfied: true }), "READY", "the fixture must reach READY");
 
-  // Link 1, and "bare facts" names two different things: one answers MISSING_ORIGINS
-  // today, the other answered READY.
-  assert.equal(p.diagnose({}), "INSTALL_FAILED");
-  assert.equal(p.diagnose({ originsGranted: true, quarantinedCount: 0 }), "INSTALL_FAILED");
-  // Link 2: installed present, the coverage fact absent.
+  // Link 1, both sides. "Bare facts" names two different things: one answers
+  // MISSING_ORIGINS today, the other answered READY.
+  assert.equal(p.diagnose({}), "INSTALL_STATE_UNKNOWN", "absent is IGNORANCE, not failure");
+  assert.equal(p.diagnose({ originsGranted: true, quarantinedCount: 0 }), "INSTALL_STATE_UNKNOWN");
+  assert.equal(p.diagnose({ originsGranted: true, installed: false }), "INSTALL_FAILED",
+               "and a LEARNED no still outranks everything");
+  // typeof, not === undefined: null, "false" and 0 would fall through to READY, and
+  // diagnose() is PUBLIC.
+  for (const forged of [null, "false", 0]) {
+    assert.equal(p.diagnose({ originsGranted: true, installed: forged }), "INSTALL_STATE_UNKNOWN",
+                 `a non-boolean is ignorance too: ${JSON.stringify(forged)}`);
+  }
+
+  // Link 2 needs a policy that WANTS a catch-all, and wanting it takes BOTH gestures:
+  // a freshly registered catch-all carries unacknowledgedWarnings ["CATCH_ALL"], which
+  // takes it out of activeBindings() -- and the waiting state is the one every
+  // catch-all passes through.
+  let star = g.JumpPolicy.empty().withEngines(["google.com"]).value;
+  star = star.registerCatchAll(STAR, instance("https://c.atlassian.net")).value;
+  star = star.acknowledge(STAR, "CATCH_ALL").value;
+  star = star.armShortcut(STAR).value;
+  assert.equal(star.wantsCatchAll(), true, "armed AND acknowledged, or the guard is mute");
+
+  assert.equal(star.diagnose({ originsGranted: true, quarantinedCount: 0, installed: true }),
+               "COVERAGE_STATE_UNKNOWN");
+  assert.equal(star.diagnose({ originsGranted: true, quarantinedCount: 0, installed: true,
+                               coverageSatisfied: false }), "CATCH_ALL_NOT_INSTALLED");
+
+  // AND THE SILENCE THE GUARD BUYS, which is the assertion that pins the DECISION
+  // rather than the accident: the named-only fixture never wanted a catch-all, so an
+  // absent coverage fact says NOTHING. Correct in substance -- rule-factory excludes
+  // the same binding, the contract comes out empty(), satisfiedBy is true by vacuity.
   assert.equal(p.diagnose({ originsGranted: true, quarantinedCount: 0, installed: true }),
-               "CATCH_ALL_NOT_INSTALLED");
+               "READY", "no catch-all wanted means no coverage question to answer");
 
   // THE THIRD LINK IS DELIBERATELY NOT HARDENED: `f.quarantinedCount > 0` is mute on
   // undefined too. PARTIAL_POLICY is under-signalling at a BOUNDED cost -- the user
@@ -153,6 +181,49 @@ test("a fact of installed reality that is ABSENT is not a true one", () => {
   // the next batch does not read it as a regression of this one.
   assert.equal(p.diagnose({ originsGranted: true, installed: true, coverageSatisfied: true }),
                "READY", "quarantinedCount stays undefined-tolerant, on purpose");
+});
+
+test("both UNKNOWN ranks are pinned, or the guards become ornaments", () => {
+  // Without these two, the fixtures that reach READY would pass with either entry
+  // placed ANYWHERE above READY -- and the natural gesture of whoever finds them too
+  // talkative is to slide them down, which empties both guards of their object
+  // WITHOUT MAKING ANYTHING RED.
+
+  // Rank 2: ABOVE DISARMED. Measured: armed()=false | activeBindings=0 | registry=1.
+  // Falling to DISARMED means saying "no jump will fire" without knowing whether the
+  // purge happened -- which is the kill switch's question.
+  let p = g.JumpPolicy.empty().withEngines(["google.com"]).value;
+  p = p.register(ID, key("ABC"), instance("https://example.atlassian.net")).value;
+  p = p.armShortcut(ID).value;
+  assert.equal(p.disarm().diagnose({ originsGranted: true, rulesInstalled: true }),
+               "INSTALL_STATE_UNKNOWN", "never DISARMED");
+
+  // The registry is INTENTION and quarantinedCount a FAILED READ: three ways of
+  // installing the void, all three covered. `registry > 0` alone was measured
+  // SUB-signalling: registry=0, quarantinedCount=2 gave PARTIAL_POLICY.
+  assert.equal(g.JumpPolicy.empty().diagnose({ originsGranted: true, quarantinedCount: 2 }),
+               "INSTALL_STATE_UNKNOWN", "never PARTIAL_POLICY");
+  assert.equal(g.JumpPolicy.empty().diagnose({ originsGranted: true, rulesInstalled: true }),
+               "INSTALL_STATE_UNKNOWN", "reality outranks an empty intention");
+
+  // AND THE SYMMETRIC ONE, which pins the DECISION: a blank profile stays SILENT.
+  // 0/0/0 with the fact absent must not shout on a browser that has never been
+  // configured.
+  assert.equal(g.JumpPolicy.empty().diagnose({ originsGranted: true, quarantinedCount: 0 }),
+               "NO_SHORTCUTS", "an untouched profile has nothing to lose");
+
+  // Rank 10: ABOVE MISSING_ORIGINS. Slid below it, the wantsCatchAll() guard becomes
+  // an ornament and this code masks nothing it was meant to yield to.
+  let star = g.JumpPolicy.empty().withEngines(["google.com"]).value;
+  star = star.registerCatchAll(STAR, instance("https://c.atlassian.net")).value;
+  star = star.acknowledge(STAR, "CATCH_ALL").value;
+  star = star.armShortcut(STAR).value;
+  assert.equal(star.diagnose({ originsGranted: false, quarantinedCount: 0, installed: true }),
+               "COVERAGE_STATE_UNKNOWN", "never MISSING_ORIGINS");
+
+  // And the catalogue grew by exactly two ranks and two codes.
+  assert.equal(g.JumpPolicy.DIAGNOSES.length, 14, "fourteen ranks");
+  assert.equal(new Set(g.JumpPolicy.DIAGNOSES).size, 13, "thirteen codes: PARTIAL_POLICY sits twice");
 });
 
 test("every mutation returns the same shape, with events always present", () => {

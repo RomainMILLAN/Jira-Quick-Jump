@@ -145,6 +145,40 @@
     }
 
     /**
+     * "Does any engine WANT a catch-all?" -- the wanted half of the
+     * CoverageContract, re-derived here.
+     *
+     * THIS IS A NAMED DEROGATION from "one owner per question", and it is FORCED:
+     * section-host.js calls RuleInstaller.report() WITHOUT building a RuleSet, so
+     * without a contract, so the fact is not computable there.
+     *
+     * The two DIVERGE on UNKNOWN_ENGINE: rule-factory does `continue` BEFORE
+     * pushing into catchAll.engineIds, so a catch-all on an unknown engine is in
+     * activeBindings() and not in the contract -- wantsCatchAll() says YES where
+     * coverage was true by vacuity. OVER-SIGNALLING ONLY, never the reverse.
+     * Written down, because otherwise someone "tightens" it by pulling the engine
+     * catalogue into the core, which rule-factory.js declares impossible: "the
+     * core only holds opaque engine ids".
+     *
+     * It derives from activeBindings() -- the very predicate DIAGNOSES condemns
+     * above for excluding the disarmed policy. That is HARMLESS, but ONLY BECAUSE
+     * DISARMED sits above COVERAGE_STATE_UNKNOWN: written here, or the next reader
+     * "fixes the inconsistency" by lifting that code up the catalogue, and EVERY
+     * DISARMED PROFILE STARTS SHOUTING.
+     *
+     * NOT `catchAllShortcut()`, which rule-factory.js already argues against: it
+     * "is true as soon as the LINE EXISTS, while this is filled from
+     * activeBindings() -- armed, acknowledged, unshadowed". A freshly registered
+     * catch-all carries unacknowledgedWarnings: ["CATCH_ALL"], so it is excluded --
+     * and the WAITING state is the one every catch-all passes through. The residual
+     * silence there is CORRECT: rule-factory excludes the same binding, so the
+     * contract comes out empty() and satisfiedBy is true by vacuity.
+     */
+    wantsCatchAll() {
+      return this.activeBindings().some((binding) => binding.shortcut().key().isCatchAll());
+    }
+
+    /**
      * Who claims this reference, HERE AND NOW.
      *
      * On the aggregate rather than the registry, because the answer depends on
@@ -414,9 +448,40 @@
    * having stopped is worse than no emergency stop.
    */
   const DIAGNOSES = [
-    // `!== true`, never `=== false`: an ABSENT fact is indistinguishable from a true one
-    // under `=== false`, which is the fail-open this batch closes.
-    { code: "INSTALL_FAILED", applies: (p, f) => f.installed !== true },
+    // TWO codes, and the PARTITION is what makes them honest. `!== true` folded
+    // "it failed" and "I do not know" into one sentence: it over-signalled on a
+    // healthy profile whose receipt was merely absent, and it named the wrong
+    // cause. `=== false` alone would be the fail-open -- an ABSENT fact is
+    // indistinguishable from a true one -- so the pair must be DISJOINT and
+    // TOTAL, which is what the two predicates below are.
+    { code: "INSTALL_FAILED", applies: (p, f) => f.installed === false },
+    // `typeof !== "boolean"`, NOT `=== undefined`: null, "false" and 0 would fall
+    // through the hole and drop all the way to READY. diagnose() is PUBLIC and the
+    // tests call it directly, so InstallOutcome.read does not protect this hole.
+    //
+    // AND THE GUARD IS ON REALITY, NOT ON INTENTION. Three drafts got this wrong.
+    // `activeBindings().length > 0` excluded the DISARMED policy -- measured:
+    // armed()=false | activeBindings=0 | registry=1 -- so it fell to DISARMED, i.e.
+    // "no jump will fire" said without knowing whether the purge happened. Then
+    // `registry().size() > 0` alone opened a NEW fail-open -- measured:
+    // registry=0, quarantinedCount=2, fact absent  ->  PARTIAL_POLICY, a
+    // SUB-signalling, where the old `!== true` said INSTALL_FAILED.
+    //
+    // The name of the disjunction is "IS THERE ANYTHING TO LOSE?", not "are there
+    // rules installed?" -- that second wording justifies only ONE of the three
+    // terms (registry is intention, quarantinedCount a failed read), and someone
+    // would "simplify" towards it and reopen the fail-open. Disarming, deleting
+    // one's last shortcut, seeing everything quarantined: that is three ways of
+    // installing the void, and ignorance about the void is the kill switch's
+    // question. A blank profile (0/0/0) stays silent and falls to NO_SHORTCUTS.
+    //
+    // ABOVE DISARMED, or the measurement above falls back onto it.
+    {
+      code: "INSTALL_STATE_UNKNOWN",
+      applies: (p, f) =>
+        typeof f.installed !== "boolean" &&
+        (f.rulesInstalled === true || p.registry().size() > 0 || f.quarantinedCount > 0),
+    },
     { code: "DISARMED", applies: (p) => !p.armed() },
     // Before NO_SHORTCUTS: with everything quarantined there are not *no*
     // shortcuts, there are UNREADABLE ones -- and saying "no shortcut yet" is the
@@ -438,9 +503,21 @@
     { code: "ALL_SHORTCUTS_SHADOWED", applies: (p) => p.activeBindings().length === 0 },
     // The FACT is named for what it asserts -- every engine that wanted a catch-all got
     // one -- while the CODE stays the user's sentence. Renaming the reader without the
-    // writers, or the writers without this reader, makes the fact arrive ABSENT and
-    // this code fire permanently, masking the two below it.
-    { code: "CATCH_ALL_NOT_INSTALLED", applies: (p, f) => f.coverageSatisfied !== true },
+    // writers, or the writers without this reader, makes the fact arrive ABSENT --
+    // which no longer fires THIS code, since it now tests `=== false`, but its twin
+    // below, guarded on wantsCatchAll(). The masking moved with the subject.
+    { code: "CATCH_ALL_NOT_INSTALLED", applies: (p, f) => f.coverageSatisfied === false },
+    // JUST AFTER ITS TWIN, therefore ABOVE MISSING_ORIGINS -- prescribed, not left
+    // to the implementation: slid below MISSING_ORIGINS, the wantsCatchAll() guard
+    // becomes an ornament and this code masks nothing it was meant to yield to.
+    //
+    // The GUARD is what keeps it quiet on the profiles that never wanted a
+    // catch-all: without it, COVERAGE_STATE_UNKNOWN would mask MISSING_ORIGINS,
+    // PARTIAL_POLICY and SOME_SHADOWED on EVERY profile with an absent receipt.
+    {
+      code: "COVERAGE_STATE_UNKNOWN",
+      applies: (p, f) => typeof f.coverageSatisfied !== "boolean" && p.wantsCatchAll(),
+    },
     { code: "MISSING_ORIGINS", applies: (p, f) => !f.originsGranted },
     { code: "PARTIAL_POLICY", applies: (p, f) => f.quarantinedCount > 0 },
     { code: "SOME_SHADOWED", applies: (p) => p.shadowedShortcuts().length > 0 },

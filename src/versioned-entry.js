@@ -22,6 +22,28 @@
     },
 
     /**
+     * A BARE set of the same envelope, for an entry that has nothing to
+     * compare-and-set.
+     *
+     * It exists so the envelope literal `{ rev, value }` stays with its only
+     * author. A client that wrote it by hand would pierce this membrane from one
+     * side while believing in it from the other -- and the format would then have
+     * two owners, which is how the two of them drift.
+     *
+     * It THROWS when the area refuses, where update() converts a rejection into
+     * { ok: false, code: "QUOTA_EXCEEDED" }. That difference is load-bearing:
+     * a caller with no compare-and-set has no !ok branch to reach, so an
+     * invented one would be dead code with a live-looking guard over it.
+     *
+     * The `rev` policy belongs to the CALLER: this entry has no accumulation to
+     * protect, so `rev` here exists for one reason only -- to guarantee that
+     * storage.onChanged fires. See install-outcome.js.
+     */
+    async put(area, name, value, rev) {
+      await area.set({ [name]: { rev, value } });
+    },
+
+    /**
      * `mutate` receives the freshly re-read value and returns
      * { ok, value, events } | { ok: false, code, message }. It is REPLAYED on
      * conflict, which is why every intention must be idempotent and absolute.

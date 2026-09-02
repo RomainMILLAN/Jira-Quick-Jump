@@ -222,7 +222,7 @@ test("a successful install reports the rules as delivered, for the preview to si
   await withPlatform(fakeDnr(), async () => {
     const report = await g.RuleInstaller.install(armedCatchAll(), 0);
     // THE EXACT CODE, not "not INSTALL_FAILED". A notEqual excluding ONE code out of a
-    // twelve-entry catalogue proves nothing about the one you get -- and it is the only
+    // fourteen-entry catalogue proves nothing about the one you get -- and it is the only
     // automatic witness that the options page still says READY. Expected to redden the
     // day report() is split into two named doors: that is not a regression.
     assert.equal(report.diagnosis, "READY");

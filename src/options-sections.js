@@ -12,7 +12,8 @@
   "use strict";
 
   const { Dom, Platform, MutationResult, ProjectKey, JiraInstance, SearchEngineCatalog,
-          OriginRequirements, JumpPreview, ShortcutWarning, RowReorder } = global;
+          OriginRequirements, JumpPreview, ShortcutWarning, RowReorder,
+          DiagnosisPresentation } = global;
   const t = (k, f) => Platform.t(k, f);
   const el = Dom.el;
 
@@ -74,6 +75,61 @@
       this.ctx = ctx;
     },
 
+    /**
+     * Paints the ALARMING state, and it must be SAFE ON AN UNMOUNTED SECTION.
+     *
+     * Being a total member of the protocol protects against the absence of the
+     * MEMBER, not of the NODE -- so this guard is the only thing keeping the next
+     * caller from reopening the hole, even now that mounting has moved up.
+     *
+     * It paints the CLASS, not just the text: what is GREEN on screen is
+     * className === "tag ok". An implementation writing textContent and forgetting
+     * the class would pass a textual witness WITH THE GREEN PILL LIT -- and
+     * "Ready" is t("tagReady"), which in French is "Prêt", so a textual witness is
+     * only green through the absence of an i18n fake.
+     */
+    blank() {
+      if (!this.node) return;
+      // MOUNTED BUT NEVER RENDERED is a real state, and it is the FIRST LOAD on an
+      // unreadable policy -- measured. The span.tag is born in render(), which never
+      // runs on that path, so a querySelector alone painted NOTHING and the status
+      // line said nothing at all next to the host banner. The witness asks for the
+      // tag to CARRY the alarming tone, so it is created when absent.
+      let tag = this.node.querySelector(".tag");
+      if (!tag) {
+        tag = el("span", { class: "tag" });
+        this.node.appendChild(tag);
+      }
+      tag.className = `tag ${DiagnosisPresentation.WORST}`;
+      tag.textContent = DiagnosisPresentation.label("INSTALL_STATE_UNKNOWN");
+      let sub = this.node.querySelector(".status-s");
+      if (!sub) {
+        sub = el("div", { class: "status-s" });
+        this.node.appendChild(sub);
+      }
+      sub.textContent = DiagnosisPresentation.sentence("INSTALL_STATE_UNKNOWN");
+    },
+
+    /**
+     * THE CATCH PAINTS. The twin of the presentation contract: a section that fails
+     * leaves an ALARMING state, NEVER its placeholder.
+     *
+     * render() adds a span.tag.off of text "…" BEFORE its first await, so a throw in
+     * ctx.report() -- the DNR-failure path -- used to leave the LEAST alarming of the
+     * four tones on screen, permanently. A catch that merely "marks it as failed"
+     * gets implemented as console.warn.
+     */
+    fail(error) {
+      if (!this.node) return;
+      const tag = this.node.querySelector(".tag");
+      if (tag) {
+        tag.className = `tag ${DiagnosisPresentation.WORST}`;
+        tag.textContent = String((error && error.name) || "Error");
+      }
+      const sub = this.node.querySelector(".status-s");
+      if (sub) sub.textContent = String((error && error.message) || error);
+    },
+
     async render(stored, ctx) {
       const policy = stored.policy();
       Dom.clear(this.node);
@@ -95,17 +151,54 @@
         t("toggleAll", "Arm or disarm every shortcut"),
       ));
 
+      /**
+       * THE JOURNAL IS READ FIRST, AND THE BANNER RENDERED FIRST, IN ITS OWN try.
+       *
+       * The order used to be report() then journal.read(), with the banner mounted
+       * hidden -- so a failing getDynamicRules NEVER DISPLAYED "A destination
+       * changed", even with an unacknowledged UNKNOWN in the journal. The detector's
+       * channel reads storage.local and was doing fine: it was being switched off by
+       * the failure of a NEIGHBOURING organ. AN ORGAN OF PROOF NEVER DEPENDS ON THE
+       * ORGAN NEXT TO IT ON SCREEN.
+       *
+       * And the fallback carries its DIRECTION, like the badge: an unreadable journal
+       * SHOWS the banner saying the proof is unreadable, never the hidden
+       * placeholder. A bare `catch {}` would leave the detector as mute as the DNR
+       * failure did -- the same fault closed by the other door.
+       */
+      try {
+        await this.renderBanner(ctx);
+      } catch (error) {
+        this.banner.hidden = false;
+        Dom.clear(this.banner);
+        this.banner.appendChild(el("div", {
+          class: "alert-t",
+          text: t("changedTitle", "A destination changed"),
+        }));
+        this.banner.appendChild(el("div", {
+          class: "alert-s",
+          text: t("journalUnreadable", "The change record could not be read."),
+        }));
+      }
+      // A render suspended on the await above resumes and finishes its gesture --
+      // over whatever blank() has painted in the meantime. Asked after EVERY await
+      // that repaints, not just the first.
+      if (ctx.condemned()) return;
+
       // getDynamicRules is async and the popup can close first: show a placeholder
       // rather than a transient 0, which reads as a failure.
       const report = await ctx.report();
+      if (ctx.condemned()) return;
       const sub = this.node.querySelector(".status-s");
-      if (sub) sub.textContent = DIAGNOSIS()[report.diagnosis] || report.diagnosis;
+      if (sub) sub.textContent = DiagnosisPresentation.sentence(report.diagnosis);
       const tag = this.node.querySelector(".tag");
       if (tag) {
-        tag.textContent = TAG_TEXT()[report.diagnosis] || report.diagnosis;
-        tag.className = `tag ${TAG_TONE[report.diagnosis] || "off"}`;
+        tag.textContent = DiagnosisPresentation.label(report.diagnosis);
+        tag.className = `tag ${DiagnosisPresentation.tone(report.diagnosis)}`;
       }
+    },
 
+    async renderBanner(ctx) {
       const entries = await ctx.journal.read();
       this.banner.hidden = entries.acknowledged || entries.entries.length === 0;
       if (!this.banner.hidden) {
@@ -127,7 +220,13 @@
             class: "btn", text: t("changedAck", "I have checked it"),
             onClick: async () => {
               await ctx.journal.acknowledgeAll();
-              this.render(ctx.stored(), ctx);
+              // ctx.refresh() rather than a direct render call: those bypass BOTH
+              // the per-section try/catch AND the coalescing, and this one
+              // repainted the reassuring "…" placeholder before awaiting -- so a
+              // throw left it on screen for good, on the gesture the user makes
+              // JUST AFTER seeing the compromise banner. A full repaint is wanted
+              // here anyway: the banner has just changed state.
+              await ctx.refresh();
             },
           }),
         ]));
@@ -214,42 +313,13 @@
     CATCH_ALL: t("warnCatchAll", "Every search shaped like a 2-to-6-character key, a hyphen and a number will leave for this destination, on each engine you ticked. Only a short reserved list is held back."),
   });
 
-  const DIAGNOSIS = () => ({
-    DISARMED: t("diagDisarmed", "Every shortcut is off. Searches behave normally."),
-    NO_SHORTCUTS: t("diagNoShortcuts", "No shortcut yet, so nothing is intercepted."),
-    NO_ENGINES: t("diagNoEngines", "No search engine selected, so no rule can be built."),
-    ALL_SHORTCUTS_DISARMED: t("diagAllOff", "Every shortcut is disarmed."),
-    ALL_SHORTCUTS_AWAITING_ACKNOWLEDGEMENT: t("diagAllAwaitingAck", "Every armed shortcut is waiting for a warning to be accepted."),
-    ALL_SHORTCUTS_SHADOWED: t("diagAllShadowed", "Every shortcut sits below the catch-all, so none of them fires."),
-    CATCH_ALL_NOT_INSTALLED: t("diagCatchAllNotInstalled", "The catch-all could not be installed, so it claims nothing."),
-    INSTALL_FAILED: t("diagInstallFailed", "The rules could not be installed. What is running may differ from what you see."),
-    SOME_SHADOWED: t("diagSomeShadowed", "Some shortcuts sit below the catch-all and never fire."),
-    PARTIAL_POLICY: t("diagPartial", "Some saved entries could not be read back."),
-    MISSING_ORIGINS: t("diagMissingOrigins", "Rules are installed but cannot fire: access is missing."),
-    READY: t("diagReady", "Ready."),
-  });
-  const TAG_TEXT = () => ({
-    DISARMED: t("tagOff", "Off"),
-    NO_SHORTCUTS: t("tagEmpty", "Empty"),
-    NO_ENGINES: t("tagNoEngine", "No engine"),
-    ALL_SHORTCUTS_DISARMED: t("tagAllOff", "All off"),
-    ALL_SHORTCUTS_AWAITING_ACKNOWLEDGEMENT: t("tagAwaitingAck", "Not accepted"),
-    ALL_SHORTCUTS_SHADOWED: t("tagAllShadowed", "All shadowed"),
-    CATCH_ALL_NOT_INSTALLED: t("tagCatchAllOff", "Catch-all off"),
-    INSTALL_FAILED: t("tagInstallFailed", "Not installed"),
-    SOME_SHADOWED: t("tagSomeShadowed", "Some shadowed"),
-    PARTIAL_POLICY: t("tagPartial", "Partial"),
-    MISSING_ORIGINS: t("tagNoAccess", "No access"),
-    READY: t("tagReady", "Ready"),
-  });
-  const TAG_TONE = {
-    READY: "ok", MISSING_ORIGINS: "warn", PARTIAL_POLICY: "warn",
-    NO_ENGINES: "warn", NO_SHORTCUTS: "off", ALL_SHORTCUTS_DISARMED: "off", DISARMED: "off",
-    ALL_SHORTCUTS_AWAITING_ACKNOWLEDGEMENT: "warn", ALL_SHORTCUTS_SHADOWED: "warn",
-    CATCH_ALL_NOT_INSTALLED: "warn", SOME_SHADOWED: "warn",
-    // The only state where the installed reality contradicts the whole screen.
-    INSTALL_FAILED: "warn",
-  };
+  /**
+   * The three parallel tables that lived here -- DIAGNOSIS, TAG_TEXT, TAG_TONE --
+   * are now ONE table in ui/diagnosis-presentation.js, whose CONSTRUCTION refuses
+   * an incomplete catalogue. Only TAG_TONE ever had a fallback, and it was
+   * `|| "off"`: the LEAST alarming tone applied to the code that says "I do not
+   * know whether jumps are departing".
+   */
 
   /**
    * What a move did to the row that moved, as a CATALOGUE keyed by a TRIPLET --
@@ -374,6 +444,14 @@
      * same verb; the host calls this one generically on every section, so the name
      * has to stay generic.
      */
+    /**
+     * Nothing to blank: this section paints no verdict of its own, so a condemned
+     * page leaves it stale rather than lying. DECLARED rather than absent, because
+     * an optional protocol member is a presence test -- the null this repository
+     * bans everywhere else -- and structure.test.js pins that all eight declare it.
+     */
+    blank() {
+    },
     reconcile(stored, ctx) {
       if (!this.order) return;
       const ids = stored.policy().orderedIds();
@@ -749,6 +827,14 @@
   // --------------------------------------------------------------- Engines
 
   const Engines = {
+    /**
+     * Nothing to blank: this section paints no verdict of its own, so a condemned
+     * page leaves it stale rather than lying. DECLARED rather than absent, because
+     * an optional protocol member is a presence test -- the null this repository
+     * bans everywhere else -- and structure.test.js pins that all eight declare it.
+     */
+    blank() {
+    },
     reconcile() {
       /* No optimistic state to give up: this section writes through ctx.apply and
          never holds a pending order of its own. */
@@ -859,6 +945,14 @@
   // ---------------------------------------------------------------- Access
 
   const Access = {
+    /**
+     * Nothing to blank: this section paints no verdict of its own, so a condemned
+     * page leaves it stale rather than lying. DECLARED rather than absent, because
+     * an optional protocol member is a presence test -- the null this repository
+     * bans everywhere else -- and structure.test.js pins that all eight declare it.
+     */
+    blank() {
+    },
     reconcile() {
       /* No optimistic state to give up: this section writes through ctx.apply and
          never holds a pending order of its own. */
@@ -916,6 +1010,14 @@
   // --------------------------------------------------------- Test & transfer
 
   const Preview = {
+    /**
+     * Nothing to blank: this section paints no verdict of its own, so a condemned
+     * page leaves it stale rather than lying. DECLARED rather than absent, because
+     * an optional protocol member is a presence test -- the null this repository
+     * bans everywhere else -- and structure.test.js pins that all eight declare it.
+     */
+    blank() {
+    },
     reconcile() {
       /* No optimistic state to give up: this section writes through ctx.apply and
          never holds a pending order of its own. */
@@ -1025,6 +1127,14 @@
   // -------------------------------------------------------------- Transfer
 
   const Transfer = {
+    /**
+     * Nothing to blank: this section paints no verdict of its own, so a condemned
+     * page leaves it stale rather than lying. DECLARED rather than absent, because
+     * an optional protocol member is a presence test -- the null this repository
+     * bans everywhere else -- and structure.test.js pins that all eight declare it.
+     */
+    blank() {
+    },
     reconcile() {
       /* No optimistic state to give up: this section writes through ctx.apply and
          never holds a pending order of its own. */
@@ -1171,6 +1281,14 @@
   // ------------------------------------------------------------- Quarantine
 
   const Quarantine = {
+    /**
+     * Nothing to blank: this section paints no verdict of its own, so a condemned
+     * page leaves it stale rather than lying. DECLARED rather than absent, because
+     * an optional protocol member is a presence test -- the null this repository
+     * bans everywhere else -- and structure.test.js pins that all eight declare it.
+     */
+    blank() {
+    },
     reconcile() {
       /* No optimistic state to give up: this section writes through ctx.apply and
          never holds a pending order of its own. */
@@ -1237,6 +1355,14 @@
   // ---------------------------------------------------------------- Storage
 
   const Storage = {
+    /**
+     * Nothing to blank: this section paints no verdict of its own, so a condemned
+     * page leaves it stale rather than lying. DECLARED rather than absent, because
+     * an optional protocol member is a presence test -- the null this repository
+     * bans everywhere else -- and structure.test.js pins that all eight declare it.
+     */
+    blank() {
+    },
     reconcile() {
       /* No optimistic state to give up: this section writes through ctx.apply and
          never holds a pending order of its own. */
