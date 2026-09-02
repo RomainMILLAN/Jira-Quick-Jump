@@ -11,7 +11,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { installPlatform, reset, fire, store, dnrFaults, holdRead, holdWrite } from "./fake-platform.js";
+import { installPlatform, reset, fire, store, dnrFaults, holdRead, holdWrite, permissionState, i18nCatalogue } from "./fake-platform.js";
 import { loadCore } from "./load-core.js";
 
 // BEFORE any import of src/: platform.js captures `global.chrome` by VALUE at
@@ -216,10 +216,17 @@ test("7quater. a command that is not disarm-all returns false, and syncs nothing
   await seedPolicy(armedCatchAll());
   const before = store.badgeCalls();
 
+  // PROVED BY CONTRAST. It checked `rules().length === 0` on a policy that had
+  // never been synced -- a precondition already true BEFORE the gesture, so the
+  // test passed whatever the listener did. What has to be shown is that this
+  // event does not sync while another one does, on the same starting state.
   await fire.command("something-else");
-
-  assert.equal(store.rules().length, 0, "no sync was triggered");
+  assert.equal(store.rules().length, 0, "an unknown command syncs nothing");
   assert.ok(store.badgeCalls() > before, "but the badge is refreshed either way");
+
+  // The discriminant: an event whose body does NOT decline installs the rules.
+  await fire.permissionAdded({ origins: ["https://catchall.atlassian.net/*"] });
+  assert.ok(store.rules().length > 0, "so the absence above was the command's doing, not the fixture's");
 });
 
 test("8. a healthy install writes installed: true in BOTH the receipt and the projection", async () => {
@@ -307,9 +314,12 @@ test("the doorbell rings TWICE on the same pair of booleans", async () => {
   const second = store.entry("installOutcome").rev;
 
   assert.notEqual(first, second, "the envelope must differ from the previous entry");
-  // The fake notifies on a real write, as the browser does on changed bytes.
-  await fire.storageChanged({ installOutcome: {} }, "local");
-  assert.ok(rings > 0, "and the listener is wired");
+  // THE BELL IS NOT RUNG BY HAND. It used to call fire.storageChanged() itself and
+  // then assert `rings > 0` -- so the only interesting link, "different bytes make
+  // the browser notify", was simulated BY THE TEST. The fake now notifies on a real
+  // write, exactly as the browser does on changed bytes, and the count is what the
+  // two writes above produced.
+  assert.equal(rings, 2, "two writes of the same pair still wake the page twice");
 });
 
 test("the doorbell FILTERS the area, or a sync writer would wake every open page", async () => {
@@ -329,27 +339,55 @@ test("read() reconstructs: a forged `rules` or `applied` cannot ride along", asy
     value: { installed: true, coverageSatisfied: false, rules: ["FORGED"], applied: 99 },
   });
 
-  assert.deepEqual(await g.InstallOutcome.read(), { installed: true, coverageSatisfied: false });
+  // `skipped` is ALWAYS an array -- the page maps over it -- and the forged
+  // `rules`/`applied` still cannot ride along: read() reconstructs, never spreads.
+  assert.deepEqual(await g.InstallOutcome.read(),
+    { installed: true, coverageSatisfied: false, skipped: [] });
+});
+
+test("the causes of a refusal survive the trip to the page", async () => {
+  // They were produced by the worker, returned by _install and dropped: every
+  // named reason in Re2Budget.REASONS existed only in a value nobody kept, while
+  // the options page rendered `skipped.length` from an array it always built
+  // empty. Six named causes for a counter that read zero.
+  await g.InstallOutcome.record({
+    installed: false,
+    coverageSatisfied: false,
+    skipped: [g.NotInstalled.of("RUN_OVER_BUDGET", "reserved prefixes")],
+  });
+  const receipt = await g.InstallOutcome.read();
+  assert.deepEqual(receipt.skipped, [{ code: "RUN_OVER_BUDGET", subject: "reserved prefixes" }]);
+
+  // And a forged entry that is not a cause is not admitted as one.
+  store.put("installOutcome", { rev: 9, value: { skipped: [{ code: 42 }, "junk", null] } });
+  assert.deepEqual((await g.InstallOutcome.read()).skipped, []);
 });
 
 test("read() never throws, on the three shapes the store can hold", async () => {
   // VersionedEntry.read validates the ENVELOPE ONLY: on an absent entry it returns
   // { rev: 0 } with value === undefined, so a naive value.installed throws -- and
   // that is the NORMAL case, a fresh profile on first opening.
-  assert.deepEqual(await g.InstallOutcome.read(), {}, "absent");
+  assert.deepEqual(await g.InstallOutcome.read(), { skipped: [] }, "absent");
   store.put("installOutcome", { rev: 1, value: null });
-  assert.deepEqual(await g.InstallOutcome.read(), {}, "a null value");
+  assert.deepEqual(await g.InstallOutcome.read(), { skipped: [] }, "a null value");
   store.put("installOutcome", { rev: 2, value: { installed: "false" } });
-  assert.deepEqual(await g.InstallOutcome.read(), {}, "a non-boolean is not a fact");
+  assert.deepEqual(await g.InstallOutcome.read(), { skipped: [] }, "a non-boolean is not a fact");
   store.failReads(true);
-  assert.deepEqual(await g.InstallOutcome.read(), {}, "a dead area");
+  assert.deepEqual(await g.InstallOutcome.read(), { skipped: [] }, "a dead area");
   store.failReads(false);
 });
 
-test("forget() returns nothing and never throws", async () => {
+test("forget() returns nothing and never throws, INCLUDING when remove itself fails", async () => {
+  // `failReads` only touched `get`, and forget() calls `remove` -- which the fake
+  // made infallible. So the try/catch this test exists for was NEVER ENTERED: the
+  // assertion held because nothing could throw, not because the code catches.
   store.failReads(true);
   assert.equal(await g.InstallOutcome.forget(), undefined, "it returns NOTHING");
   store.failReads(false);
+
+  store.failRemoves(true);
+  assert.equal(await g.InstallOutcome.forget(), undefined, "and a dead remove is still silent");
+  store.failRemoves(false);
 });
 
 // ---------------------------------------------------------------------------
@@ -411,7 +449,10 @@ test("the queue keeps the PAIR: a replayed install does not lose quarantinedCoun
   // argument, so a re-run silently re-defaulted the count to 0 and PARTIAL_POLICY
   // could never fire.
   const policy = armedCatchAll();
-  const release = holdWrite("__never");   // no-op gate: nothing writes that name
+  // THE GATE HOLDS THE ENTRY THIS TEST IS ABOUT. It used to hold "__never" -- a
+  // name nothing writes -- so the barrier never retained anything and the whole
+  // scenario rested on natural coalescing while its setup claimed otherwise.
+  const release = holdWrite("installOutcome");
   release();
 
   const first = g.RuleInstaller.install(policy, 0);
@@ -532,10 +573,13 @@ test("report() cannot be overwritten on the way OUT", async () => {
   const real = store.rules().length;
   assert.ok(real > 0, "precondition: real rules exist");
 
-  const report = await g.RuleInstaller.report(
-    armedCatchAll(), [], 0,
-    { installed: true, rules: ["FORGED RULE"], applied: 99 },
-    "PAGE");
+  const report = await g.RuleInstaller.report({
+    policy: armedCatchAll(),
+    skipped: [],
+    quarantinedCount: 0,
+    reality: { installed: true, rules: ["FORGED RULE"], applied: 99 },
+    source: "PAGE",
+  });
 
   assert.equal(report.applied, real, "the REAL count, not the forged one");
   assert.notDeepEqual(report.rules, ["FORGED RULE"], "and the REAL rules, which the preview PAINTS");
@@ -551,8 +595,13 @@ test("report() cannot be overwritten on the way IN, and the POLARITY is what cou
   await bg.sync();
   assert.ok(store.rules().length > 0, "precondition: rules are really installed");
 
-  const report = await g.RuleInstaller.report(
-    g.JumpPolicy.empty(), [], 0, { rulesInstalled: false }, "PAGE");
+  const report = await g.RuleInstaller.report({
+    policy: g.JumpPolicy.empty(),
+    skipped: [],
+    quarantinedCount: 0,
+    reality: { rulesInstalled: false },
+    source: "PAGE",
+  });
 
   assert.equal(report.diagnosis, "INSTALL_STATE_UNKNOWN", "never NO_SHORTCUTS");
 });
@@ -564,12 +613,18 @@ test("the TWO call sites pass `source`, and a third one would go red", async () 
   const report = await g.RuleInstaller.install(armedCatchAll(), 0);
   assert.equal(report.source, "INSTALL");
 
-  const page = await g.RuleInstaller.report(armedCatchAll(), [], 0, {}, "PAGE");
+  const page = await g.RuleInstaller.report({
+    policy: armedCatchAll(), skipped: [], quarantinedCount: 0, reality: {}, source: "PAGE",
+  });
   assert.equal(page.source, "PAGE");
 
   // And with no source at all the guard cannot be reached: `undefined` is exactly
   // the meaningful absence the discriminant exists to abolish, and it fails CLOSED.
-  const nameless = await g.RuleInstaller.report(armedCatchAll(), [], 0, { installed: true });
+  // Named fields make the omission VISIBLE at the call site, which is the point:
+  // positionally, this read as a three-argument call and looked deliberate.
+  const nameless = await g.RuleInstaller.report({
+    policy: armedCatchAll(), skipped: [], quarantinedCount: 0, reality: { installed: true },
+  });
   assert.equal(nameless.source, undefined);
   assert.notEqual(nameless.source, "INSTALL", "a forgotten source never governs the projection");
 });
@@ -601,4 +656,40 @@ test("the presentation is TOTAL over the catalogue, and its accesses never throw
   assert.equal(g.DiagnosisPresentation.tone("INSTALL_FAILED"), "bad");
   assert.equal(g.DiagnosisPresentation.tone("INSTALL_STATE_UNKNOWN"), "bad");
   assert.equal(g.DiagnosisPresentation.tone("READY"), "ok");
+});
+
+test("the extension asks for the origins its own configuration needs, and no more", async () => {
+  // Both permission calls threw away `origins`, so nothing could detect that the
+  // extension asks for the WRONG origin, a TOO BROAD one, or the origin of an
+  // instance the user never configured. The whole Access section was
+  // unverifiable by construction.
+  await seedPolicy(armedCatchAll());
+  await bg.sync();
+
+  const asked = permissionState.asked.filter((call) => call.origins.length > 0);
+  assert.ok(asked.length > 0, "the façade really consults the platform");
+  const origins = new Set(asked.flatMap((call) => call.origins));
+
+  for (const origin of origins) {
+    assert.equal(origin.includes("*://"), false, `a scheme wildcard is too broad: ${origin}`);
+    assert.equal(origin, origin.trim());
+    assert.ok(/^https?:\/\/[^/]+\/\*$/.test(origin), `an origin, not a pattern: ${origin}`);
+  }
+  // And the catch-all's own destination is among them: that is what the rule needs.
+  assert.ok([...origins].some((o) => o.includes("catchall.atlassian.net")),
+    `the configured destination must be asked for, got ${[...origins].join(", ")}`);
+});
+
+test("a translated build is exercised, not merely compared key for key", async () => {
+  // getMessage returned "" for everything, so every t() fell back to its English
+  // literal: no test ever walked a translated path, and the French build was
+  // validated only by comparing key SETS.
+  i18nCatalogue.diagReady = "Tout est prêt.";
+  assert.equal(g.Platform.t("diagReady", "Everything is ready."), "Tout est prêt.");
+  assert.equal(g.DiagnosisPresentation.sentence("READY"), "Tout est prêt.",
+    "the presentation goes through the catalogue, not around it");
+
+  delete i18nCatalogue.diagReady;
+  assert.equal(g.Platform.t("diagReady", "Everything is ready."), "Everything is ready.",
+    "and an absent translation still falls back to the shipped English");
 });

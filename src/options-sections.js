@@ -11,9 +11,40 @@
 (function (global) {
   "use strict";
 
-  const { Dom, Platform, MutationResult, ProjectKey, JiraInstance, SearchEngineCatalog,
-          OriginRequirements, JumpPreview, ShortcutWarning, RowReorder,
-          DiagnosisPresentation } = global;
+  /**
+   * WHAT THIS FILE DEPENDS ON, all of it, in one place.
+   *
+   * There were two styles and no rule: twelve collaborators destructured here,
+   * and four more reached through `global.X` at call time -- so a reader auditing
+   * this module's couplings from its header missed a quarter of them.
+   *
+   * The split is REAL and it is kept, because the two groups differ:
+   *
+   *   captured here      -- everything loaded before this file, guaranteed by the
+   *                         five loading lists that structure.test.js compares;
+   *   read at call time  -- CustomEngine, JumpPolicy, PolicyRepository and
+   *                         ShortcutAdmission, which sit behind a user gesture and
+   *                         cost nothing to resolve late. Late resolution also
+   *                         means a wrong rank in one of those lists surfaces as a
+   *                         plain failure at the click rather than as `undefined`
+   *                         captured at load.
+   *
+   * Named here so the header answers the question, whichever group a name is in.
+   */
+  const {
+    Dom,
+    Platform,
+    MutationResult,
+    ProjectKey,
+    JiraInstance,
+    SearchEngineCatalog,
+    OriginRequirements,
+    JumpPreview,
+    ShortcutWarning,
+    RowReorder,
+    DiagnosisPresentation,
+    CatchAllKey,
+  } = global;
   const t = (k, f) => Platform.t(k, f);
   const el = Dom.el;
 
@@ -200,12 +231,27 @@
 
     async renderBanner(ctx) {
       const entries = await ctx.journal.read();
-      this.banner.hidden = entries.acknowledged || entries.entries.length === 0;
+      // UNSEEN EVIDENCE ONLY. The journal keeps the acts too -- it is the record
+      // of what changed -- but an act the user performed is not an alarm, and a
+      // fact they have already ticked off is not news.
+      const facts = entries.unseen;
+      this.banner.hidden = facts.length === 0;
       if (!this.banner.hidden) {
-        const last = entries.entries[0];
         Dom.clear(this.banner);
-        this.banner.appendChild(el("div", { class: "alert-t", text: t("changedTitle", "A destination changed") }));
-        this.banner.appendChild(el("div", { class: "alert-s" }, FACT_SENTENCE(last)));
+        // EVERY UNSEEN FACT, not just the newest one. It rendered `entries[0]`
+        // alone, so nineteen of the twenty were never shown: the cap, the sticky
+        // overflow marker and the per-commit limit all fed a surface that read one
+        // line. Evidence kept and unreadable is evidence lost, only more
+        // expensively. Bounded by MAX_ENTRIES, so the list cannot run away.
+        this.banner.appendChild(el("div", {
+          class: "alert-t",
+          text: facts.length > 1
+            ? t("changedTitleMany", "Destinations changed")
+            : t("changedTitle", "A destination changed"),
+        }));
+        for (const fact of facts) {
+          this.banner.appendChild(el("div", { class: "alert-s" }, FACT_SENTENCE(fact)));
+        }
         if (entries.overflowed) {
           // STICKY, and it says the evidence is MISSING rather than merely that
           // something overflowed. A camera that no longer films is useless; one
@@ -268,18 +314,58 @@
           ".",
         ];
       case "ShadowingChanged":
+        // TWO FACTS, BECAUSE THEY ARE TWO. The single sentence read "these keys now
+        // go to the catch-all", which is FALSE for a key of more than six
+        // characters or a reserved prefix: the catch-all does not claim those at
+        // all, so they are not intercepted any more and leave IN CLEAR for the
+        // search engine. The wrong destination, named on the surface whose whole
+        // job is to be believed -- and wrong in the reassuring direction.
         return [
-          t("factShadowed", "These keys now go to the catch-all:"),
+          t("factShadowedStopped", "These keys no longer fire, because the catch-all moved above them:"),
           " ",
-          plain((fact.affectedKeys || []).join(", ")),
-          " ",
-          t("changedNow", "now points to"),
+          plain(fact.affectedKeys.join(", ")),
+          ". ",
+          t("factShadowedClaims", "What the catch-all does claim goes to"),
           " ",
           host(fact.catchAllBaseUrl),
           ".",
         ];
       case "PolicyReplaced":
         return [t("factReplaced", "The whole configuration changed elsewhere. Check every destination.")];
+      case "KeyChanged":
+        return [
+          plain(fact.oldKey),
+          " ",
+          t("factKeyChanged", "no longer intercepts what it did; the key is now"),
+          " ",
+          plain(fact.newKey),
+          ". ",
+          t("changedNow", "now points to"),
+          " ",
+          host(fact.baseUrl),
+          ".",
+        ];
+      case "ShortcutArmed":
+        return [
+          plain(fact.key || t("catchAllKey", "Any short key")),
+          " ",
+          t("factArmed", "was armed and now redirects to"),
+          " ",
+          host(fact.baseUrl),
+          ".",
+        ];
+      case "EnginesAdded":
+        return [
+          t("factEnginesAdded", "More search engines are intercepted than before. Check the Access section."),
+        ];
+      case "PolicyArmed":
+        return [t("factPolicyArmed",
+          "The extension was switched back on elsewhere, and every shortcut redirects again.")];
+      case "PolicyUnreadable":
+        // The path a compromised sync reaches most easily, and it used to be
+        // mute: purge, badge to `off`, not one line anywhere.
+        return [t("factUnreadable",
+          "What was saved stopped being readable, so nothing is installed. Check every destination.")];
       default:
         return [
           plain(fact.key),
@@ -376,7 +462,7 @@
     // The OPTIMISTIC order: an array of ids while a coalesced write is pending,
     // null otherwise. section-host re-renders this subtree (isEditing only
     // protects INPUT and TEXTAREA), so it has to survive a redraw.
-    order: null,
+    order: undefined,
 
     mount(root, ctx) {
       root.appendChild(label(
@@ -443,8 +529,7 @@
      * INSTALLED RULES against the policy and produces facts. Different subject,
      * same verb; the host calls this one generically on every section, so the name
      * has to stay generic.
-     */
-    /**
+     *
      * Nothing to blank: this section paints no verdict of its own, so a condemned
      * page leaves it stale rather than lying. DECLARED rather than absent, because
      * an optional protocol member is a presence test -- the null this repository
@@ -458,7 +543,7 @@
       const sameSet =
         this.order.length === ids.length && this.order.every((id) => ids.includes(id));
       if (!sameSet) {
-        this.order = null;
+        this.order = undefined;
         ctx.cancel("shortcuts:order");
         this.announce(t("orderDropped", "The list changed, so your move was dropped."));
         return;
@@ -501,7 +586,7 @@
       shown.splice(toIndex, 0, ...shown.splice(from, 1));
       const after = policy.withOrder(shown);
       if (!before.ok || !after.ok) {
-        this.announce((before.ok ? after : before).message);
+        this.announce(RefusalPresentation.sentence(before.ok ? after : before));
         return false;
       }
 
@@ -532,7 +617,7 @@
       const policy = stored.policy();
       const ordered = this.orderToShow(stored);
       Dom.clear(this.rows);
-      let toFocus = null;
+      let toFocus = undefined;
       ordered.forEach((id, index) => {
         const shortcut = policy.shortcutFor(id);
         if (!shortcut) return;
@@ -562,7 +647,7 @@
       this.actions.appendChild(el("button", {
         class: "btn", text: t("addShortcut", "Add shortcut"),
         onClick: () => {
-          this.drafts.push({ rowId: crypto.randomUUID(), key: "", url: "", catchAll: false });
+          this.drafts.push({ rowId: crypto.randomUUID(), key: "", url: "", catchAll: false, error: "" });
           this.render(ctx.stored(), ctx);
         },
       }));
@@ -578,7 +663,7 @@
             this.announce(t("catchAllExists", "There can only be one catch-all."));
             return;
           }
-          this.drafts.push({ rowId: crypto.randomUUID(), key: "", url: "", catchAll: true });
+          this.drafts.push({ rowId: crypto.randomUUID(), key: "", url: "", catchAll: true, error: "" });
           this.render(ctx.stored(), ctx);
         },
       }));
@@ -731,7 +816,15 @@
     },
 
     draftRow(draft, ctx) {
-      const message = el("div", { class: "row-msg refused", hidden: true });
+      // The refusal SURVIVES a repaint. It was a node created hidden on every
+      // render, so `draft.key` and `draft.url` came back and the reason they were
+      // refused did not: the user faced a visibly wrong field with nothing to
+      // explain it.
+      const message = el("div", {
+        class: "row-msg refused",
+        hidden: !draft.error,
+        text: draft.error || "",
+      });
       // The catch-all draft has NO key field at all: the Key input never sees `*`,
       // at any point. The UI expresses a gesture and the core forges the key.
       // No written form here: it belongs to the key, and a draft has no key yet.
@@ -777,7 +870,12 @@
         draft.catchAll
           ? el("div", {
               class: "row-msg pending", id: "catch-all-note",
-              text: t("catchAllNote", "Any 2-to-6-character key followed by a hyphen and a number goes to this destination, on the engines you ticked. A short reserved list is held back."),
+              // THE BOUNDS COME FROM THEIR OWNERS. They were written into the sentence --
+              // "2-to-6" -- in two places and two languages, with no link to
+              // CatchAllKey.claimsKeysUpTo() or to the key validator. Lowering either
+              // left the UI lying in both languages, and the i18n test stayed green
+              // because it compares the code to the catalogue, never to the truth.
+              text: catchAllNote(),
             })
           : null,
         message,
@@ -786,24 +884,53 @@
     },
 
     /** Validation runs on every keystroke; the write only happens once both parse. */
-    tryRegister(draft, row, message, ctx) {
+    async tryRegister(draft, row, message, ctx) {
       // A catch-all draft has no key to parse: only its destination.
       const key = draft.catchAll ? { ok: true } : ProjectKey.parse(draft.key);
       const instance = JiraInstance.parse(draft.url);
-      const failure = !key.ok && draft.key !== "" ? key : !instance.ok && draft.url !== "" ? instance : null;
-      message.hidden = failure === null;
-      message.textContent = failure ? failure.message : "";
-      row.classList.toggle("is-refused", failure !== null);
+      // WRITTEN AS THE RULE IT IS. A nested ternary encoded a display policy --
+      // "do not shout at a field the user has not filled in yet" -- and the case
+      // where BOTH are wrong showed only one of the two reasons.
+      const typed = (raw, parsed) => (raw !== "" && !parsed.ok ? parsed : undefined);
+      const failure = typed(draft.key, key) ?? typed(draft.url, instance);
+      // `undefined`, because `typed()` returns undefined. Replacing the ternary
+      // without moving these two comparisons left `failure` never equal to null,
+      // so EVERY draft row wore the red refusal border from the first keystroke --
+      // including when nothing was wrong.
+      message.hidden = failure === undefined;
+      message.textContent = failure ? RefusalPresentation.sentence(failure) : "";
+      row.classList.toggle("is-refused", failure !== undefined);
       if (!key.ok || !instance.ok) return;
 
+      // THE DRAFT IS DROPPED ONLY ONCE THE WRITE IS ACCEPTED.
+      //
+      // It was removed FIRST, and the promise was not awaited. On a refusal --
+      // DUPLICATE_KEY, DUPLICATE_CATCH_ALL, SHORTCUT_LIMIT, BINDING_LIMIT --
+      // commit() does not reload, so the row stayed on screen while no longer
+      // being in `drafts`: the user went on typing into a dead object, and at the
+      // next render the row vanished with everything they had written. Losing
+      // someone's typing right after telling them their input was refused is the
+      // one thing this page must never do.
       const id = draft.rowId;
-      this.drafts = this.drafts.filter((d) => d !== draft);
-      ctx.applyToPolicy((policy) =>
+      draft.pending = true;
+      const written = await ctx.applyToPolicy((policy) =>
         draft.catchAll
           ? policy.registerCatchAll(id, instance.value)
           // The named door that keeps "a shortcut is useless below the catch-all"
           // inside the membrane, and composes register + withOrder there.
           : policy.registerAboveCatchAll(id, key.value, instance.value));
+      draft.pending = false;
+      if (!written || !written.ok) {
+        // The refusal is shown ON THE ROW, where the correction happens, and the
+        // draft keeps everything that was typed.
+        draft.error = RefusalPresentation.sentence(written);
+        message.hidden = draft.error === "";
+        message.textContent = draft.error;
+        row.classList.toggle("is-refused", draft.error !== "");
+        return;
+      }
+      draft.error = "";
+      this.drafts = this.drafts.filter((d) => d !== draft);
     },
 
     editKey(input, id, ctx) {
@@ -921,7 +1048,7 @@
               const engine = global.CustomEngine.parse({ host: host.value, shape });
               if (!engine.ok) {
                 message.hidden = false;
-                message.textContent = engine.message;
+                message.textContent = RefusalPresentation.sentence(engine);
                 return;
               }
               const result = await ctx.apply((s) => {
@@ -931,7 +1058,7 @@
                 return selected.ok ? MutationResult.ok(s.withPolicy(selected.value)) : selected;
               });
               message.hidden = result.ok;
-              if (!result.ok) message.textContent = result.message;
+              if (!result.ok) message.textContent = RefusalPresentation.sentence(result);
               else this.adding = false;
             } }),
           el("button", { class: "btn plain", text: t("cancel", "Cancel"),
@@ -998,8 +1125,21 @@
           // fake it nor pre-approve it. On some browsers it closes the popup.
           onClick: async () => {
             const result = await Platform.requestOrigins(origins);
-            this.failure.hidden = result.ok;
-            if (!result.ok) this.failure.textContent = result.message;
+            // THREE OUTCOMES, NOT TWO. `ok` says the prompt ran; `granted` says
+            // what the user answered. Reading only `ok` meant a plain "Deny" left
+            // the message hidden and the screen unchanged -- the button appeared
+            // to do nothing at all, on the one control standing between the
+            // extension and the user's data.
+            if (!result.ok) {
+              this.failure.hidden = false;
+              this.failure.textContent = RefusalPresentation.sentence(result);
+            } else if (!result.granted) {
+              this.failure.hidden = false;
+              this.failure.textContent = t("accessDeclined",
+                "Access was not granted, so nothing will redirect to these hosts.");
+            } else {
+              this.failure.hidden = true;
+            }
             this.render(ctx.stored(), ctx);
           },
         }));
@@ -1038,11 +1178,12 @@
       root.appendChild(this.input);
       root.appendChild(this.out);
       root.appendChild(this.why);
-      this.ctx = ctx;
     },
 
     render() {
-      /* Stateless: the preview only reflects what is typed into it. */
+      /* Stateless: the preview only reflects what is typed into it. Every gesture
+         receives its ctx, so nothing is stored -- the field that used to be kept
+         here had no reader at all. */
     },
 
     async preview(ctx) {
@@ -1065,23 +1206,72 @@
     },
 
     async evaluate(ctx) {
-      const typed = this.input.value;
+      const typed = this.input.value.trim();
+      Dom.clear(this.out);
+      Dom.clear(this.why);
+
+      // AN EMPTY FIELD IS NOT A FAILED ANSWER. It fell through to
+      // forSearchUrl(""), where `new URL("")` throws, and the screen read "That is
+      // not a URL." over a field the user had merely cleared.
+      if (typed === "") {
+        this.out.className = "preview empty";
+        this.out.textContent = t("tryItEmpty", "Nothing yet.");
+        return;
+      }
+
       // The rules AS INSTALLED, memoised per render by section-host -- never
       // fetched per keystroke.
       const report = await ctx.report();
       const rules = report.rules || [];
       const policy = ctx.stored().policy();
       const catalog = SearchEngineCatalog.forPolicy(policy);
-      const engine = catalog.find(policy.engineIds()[0]);
+      const engineIds = policy.engineIds();
 
-      // TWO NAMED DOORS, and the UI arbitrates -- it is the one that knows the
-      // intention. The gate is a SCHEME test, not "contains a space": `covid 19`
-      // and `iso 9001` are exactly the forms that justify this screen.
-      let result = JumpPreview.forSearchUrl(typed, rules);
-      if (result.code === "NOT_A_URL") result = JumpPreview.forTypedText(typed, rules, engine);
+      // NO ENGINE IS ITS OWN ANSWER, and it used to borrow someone else's. With
+      // nothing ticked, `catalog.find(undefined)` handed forTypedText an absent
+      // engine, which answered NOT_A_SEARCH_URL -- so the screen blamed the text
+      // for a configuration problem. The organ built to be believed said the
+      // wrong thing about the one question it exists for.
+      if (engineIds.length === 0) {
+        this.out.className = "preview empty";
+        this.out.textContent = PREVIEW_MISS().NO_ENGINES;
+        return;
+      }
 
-      Dom.clear(this.out);
-      Dom.clear(this.why);
+      // TWO NAMED DOORS, and the UI arbitrates ON WHAT IT KNOWS -- the shape of
+      // the input -- rather than on the other door's refusal code. Testing
+      // `result.code === "NOT_A_URL"` made the fallback depend on a refusal
+      // internal to forSearchUrl: renaming that code would have silently sent
+      // every typed reference down the wrong door. A scheme test, not "contains a
+      // space": `covid 19` and `iso 9001` are exactly the forms this screen
+      // exists for.
+      const pasted = /^https?:\/\//i.test(typed);
+
+      // EVERY TICKED ENGINE, not the first one in an array. With Bing and
+      // DuckDuckGo ticked the verdict was computed for whichever sat at index
+      // zero, and nothing said so. They do not share a shape, so the answers can
+      // genuinely differ; the honest screen is the one that agrees across all of
+      // them, and names the engine when they disagree.
+      let result;
+      let disagreeing;
+      if (pasted) {
+        result = JumpPreview.forSearchUrl(typed, rules);
+      } else {
+        const verdicts = engineIds
+          .map((id) => ({ id, engine: catalog.find(id) }))
+          .filter(({ engine }) => engine !== undefined)
+          .map(({ id, engine }) => ({ id, verdict: JumpPreview.forTypedText(typed, rules, engine) }));
+        result = verdicts.length > 0 ? verdicts[0].verdict : { ok: false, code: "NO_ENGINES" };
+        disagreeing = verdicts.find(({ verdict }) => verdict.code !== result.code);
+      }
+
+      if (disagreeing) {
+        this.out.className = "preview empty";
+        this.out.textContent = t("previewEngineDisagreement",
+          "The answer depends on which search engine the address bar uses.");
+        return;
+      }
+
       if (!result.ok) {
         this.out.className = "preview empty";
         this.out.textContent = PREVIEW_MISS()[result.code] || result.code;
@@ -1107,13 +1297,61 @@
           class: "row-msg pending",
           text: t("installDiffers", "The installed configuration differs from the one you see."),
         }));
+        // AND WHY, not merely that. Six named causes existed -- RUN_OVER_BUDGET,
+        // GUARDS_NOT_A_PARTITION, PREFIX_NOT_KEY_SHAPED, REGEX_UNSUPPORTED,
+        // UNIT_INCOMPLETE, UNKNOWN_ENGINE -- and reached a `.length`. A
+        // configuration that produces no rule must explain itself; a counter is
+        // not an explanation.
+        for (const cause of report.skipped) {
+          this.why.appendChild(el("span", {
+            class: "row-msg pending",
+            // THE SUBJECT IS TRANSLATED TOO when it is one of the named reasons.
+            // RUN_OVER_BUDGET and its siblings arrive as the SUBJECT of
+            // CONSTRUCTION_REFUSED, never as a code -- so listing them among the
+            // codes left three dead entries while the user read a raw enum inside
+            // a translated sentence.
+            text: [
+              SKIPPED_SENTENCE()[cause.code] || cause.code,
+              SKIPPED_SENTENCE()[cause.subject] || cause.subject,
+            ].filter(Boolean).join(" "),
+          }));
+        }
       }
     },
   };
 
+  /** One sentence per named cause, so a refusal explains itself. */
+  const SKIPPED_SENTENCE = () => ({
+    UNKNOWN_ENGINE: t("skipUnknownEngine", "A ticked search engine is no longer known."),
+    REGEX_UNSUPPORTED: t("skipRegexUnsupported", "The browser refused the pattern for this rule."),
+    UNIT_INCOMPLETE: t("skipUnitIncomplete", "This rule was dropped with the group it belongs to."),
+    CONSTRUCTION_REFUSED: t("skipConstructionRefused", "The rules could not be built."),
+    RUN_OVER_BUDGET: t("skipRunOverBudget", "The reserved-prefix guard is too long for the browser."),
+    ENVELOPE_OVER_BUDGET: t("skipEnvelopeOverBudget", "This search engine's address leaves no room for a rule."),
+    KEY_LENGTH_OVER_BUDGET: t("skipKeyLengthOverBudget", "The catch-all claims longer keys than the browser can match."),
+  });
+
   /** Lazy and translated, like DIAGNOSIS: these four never went through t(). */
+  /** The catch-all's own bounds, asked of the objects that hold them. */
+  const catchAllNote = () => {
+    const shortest = 2;
+    // The CONSTANT, never `CatchAllKey.only()`: this file must not mint a
+    // catch-all key, and a structure test holds that line.
+    const longest = CatchAllKey.CLAIMS_KEYS_UP_TO;
+    // The fallback carries the SAME placeholders as the catalogue, so the English
+    // and the French are filled by one substitution rather than two spellings of
+    // the bound. A template literal here would also hide the call from the i18n
+    // scan, which only reads double-quoted pairs.
+    return t("catchAllNote", "Any {min}-to-{max}-character key followed by a hyphen and a number goes to this destination, on the engines you ticked. A short reserved list is held back.")
+      .replace("{min}", String(shortest))
+      .replace("{max}", String(longest));
+  };
+
   const PREVIEW_MISS = () => ({
     NOT_A_URL: t("previewNotAUrl", "That is not a URL."),
+    // A configuration answer, never a verdict on the text: with nothing ticked
+    // the preview used to blame the input for a problem it did not have.
+    NO_ENGINES: t("previewNoEngines", "Tick a search engine first: nothing is intercepted yet."),
     NOT_A_SEARCH_URL: t("previewNotASearchUrl", "That is not a search URL."),
     NO_MATCH: t("previewNoMatch", "This search would go through untouched."),
     INPUT_TOO_LONG: t("previewTooLong", "That is too long to be a search URL."),
@@ -1140,7 +1378,7 @@
          never holds a pending order of its own. */
     },
 
-    proposal: null,
+    proposal: undefined,
 
     mount(root, ctx) {
       root.appendChild(label(t("transfer", "Import and export"),
@@ -1174,7 +1412,7 @@
       const file = this.file.files && this.file.files[0];
       this.file.value = "";
       if (!file) return;
-      if (file.size > 64 * 1024) {
+      if (file.size > global.ShortcutAdmission.MAX_TRANSFER_BYTES) {
         this.fail(t("importTooBig", "That file is too large to be a configuration."));
         return;
       }
@@ -1193,7 +1431,7 @@
     },
 
     fail(message) {
-      this.proposal = null;
+      this.proposal = undefined;
       Dom.clear(this.review);
       this.review.appendChild(el("p", { class: "row-msg refused", text: message }));
     },
@@ -1242,7 +1480,7 @@
           "Everything arrives disarmed, and warnings you accepted before are not carried over.") }),
         el("div", { class: "btn-row" }, [
           el("button", { class: "btn plain", text: t("cancel", "Cancel"),
-            onClick: () => { this.proposal = null; this.render(ctx.stored(), ctx); } }),
+            onClick: () => { this.proposal = undefined; this.render(ctx.stored(), ctx); } }),
           el("button", { class: "btn primary", text: t("importConfirm", "Import, disarmed"),
             onClick: () => this.confirm(ctx) }),
         ]),
@@ -1251,30 +1489,28 @@
 
     async confirm(ctx) {
       const proposed = this.proposal.policy;
-      this.proposal = null;
+      this.proposal = undefined;
 
       // The change journal is what surfaces a swapped destination BEFORE the next
       // jump, and an import is exactly the source it exists to attribute. The
-      // previous destinations therefore have to be read BEFORE the write: after
-      // it, `stored` already holds the imported policy and every comparison finds
-      // nothing — which is silence exactly where the alarm belongs.
-      const before = ctx.stored().policy();
-      const events = [];
-      for (const shortcut of proposed.shortcuts()) {
-        const old = before.shortcuts().find((s) => s.key().toString() === shortcut.key().toString());
-        if (old && old.instance().baseUrl() !== shortcut.instance().baseUrl()) {
-          events.push({
-            shortcutId: shortcut.id(), key: shortcut.key().toString(),
-            oldBaseUrl: old.instance().baseUrl(), newBaseUrl: shortcut.instance().baseUrl(),
-          });
-        }
-      }
-      await ctx.apply((s) => MutationResult.ok(s.withPolicy(proposed)));
-      if (events.length > 0) {
-        await ctx.journal.record(events, 0, "IMPORT", Date.now());
-        // The journal is not the policy, so nothing has redrawn it yet.
-        await ctx.refresh();
-      }
+      // NO SECOND DIFF HERE. This block used to walk the two policies by hand and
+      // journal its own list -- so an import wrote every change TWICE: once from
+      // PolicyDiff at the commit, once from here.
+      //
+      // And the hand-rolled one was the wrong one. It paired shortcuts by
+      // `key().toString()` instead of by identity, emitted facts with no `type`
+      // (readable only through the legacy path meant for entries written by older
+      // builds), carried the id of the IMPORTED file rather than the one in the
+      // policy, and bypassed MAX_FACTS_PER_COMMIT -- so importing a hundred
+      // destinations wrote a hundred entries and set the sticky `overflowed`
+      // marker for good. policy-diff.js promises "One implementation, one corpus";
+      // there were three, and this was the false one.
+      //
+      // The commit's own facts already describe the import, and they reach the
+      // journal as CLAIMED: the user chose the file and read the review screen.
+      const result = await ctx.apply((s) => MutationResult.ok(s.withPolicy(proposed)));
+      // The journal is not the policy, so nothing has redrawn it yet.
+      if (result && result.ok) await ctx.refresh();
     },
   };
 
@@ -1309,7 +1545,7 @@
 
       this.body.appendChild(label(t("quarantine", "Could not be read back"),
         t("quarantineNote", "Kept, never deleted on your behalf.")));
-      entries.forEach((raw, index) => {
+      entries.forEach(({ entry: raw, fingerprint }) => {
         const message = el("div", { class: "row-msg refused", hidden: true });
         // Fixing means EDITING what could not be read, then sending it back
         // through the one door — re-submitting the same rejected bytes would just
@@ -1322,9 +1558,9 @@
           el("div", { class: "f-key" }, [key]),
           el("div", { class: "f-url" }, [url]),
           el("div", { class: "f-arm" }, [el("button", { class: "btn", text: t("fix", "Fix"),
-            onClick: () => this.fix(index, key.value, url.value, message, ctx) })]),
+            onClick: () => this.fix(fingerprint, raw, key.value, url.value, message, ctx) })]),
           el("div", { class: "f-del" }, [el("button", { class: "btn plain", text: t("delete", "Delete"),
-            onClick: () => ctx.apply((s) => s.dropQuarantined(index)) })]),
+            onClick: () => ctx.apply((s) => s.dropQuarantined(fingerprint)) })]),
           message,
         ]));
       });
@@ -1337,18 +1573,44 @@
      * key uniqueness does not extend to quarantine, and the corrected entry may
      * clash with a shortcut created since.
      */
-    async fix(index, rawKey, rawUrl, message, ctx) {
-      const key = ProjectKey.parse(rawKey);
+    async fix(fingerprint, raw, rawKey, rawUrl, message, ctx) {
       const instance = JiraInstance.parse(rawUrl);
-      const failure = !key.ok ? key : !instance.ok ? instance : null;
-      if (failure) {
+      if (!instance.ok) {
         message.hidden = false;
-        message.textContent = failure.message;
+        message.textContent = instance.message;
         return;
       }
-      const result = await ctx.apply((s) => s.promote(index, key.value, instance.value));
+      // A QUARANTINED CATCH-ALL TAKES THE OTHER DOOR.
+      //
+      // ProjectKey.parse refuses `*`, so parsing first made the repair path for a
+      // catch-all unreachable -- it failed on KEY_SHAPE before ever asking to be
+      // readmitted, and the only way out was deletion. This page still never
+      // types a catch-all key: it asks the folder to readmit the one the entry
+      // already carries.
+      // Struck ONCE, before the compare-and-set, so a replayed attempt reuses it
+      // instead of inventing a second identity.
+      const freshId = crypto.randomUUID();
+      const untouched = String((raw && raw.key) ?? "") === rawKey;
+      if (untouched) {
+        const result = await ctx.apply((s) => s.readmit(fingerprint, instance.value, freshId));
+        this.showOutcome(result, message);
+        return;
+      }
+      const key = ProjectKey.parse(rawKey);
+      if (!key.ok) {
+        message.hidden = false;
+        message.textContent = key.message;
+        return;
+      }
+      const result = await ctx.apply((s) => s.promoteAs(fingerprint, key.value, instance.value, freshId));
+      this.showOutcome(result, message);
+    },
+
+    /** The `hidden = ok, else print the message` idiom, named once. It was
+     *  written out at three call sites, and a fourth was about to be. */
+    showOutcome(result, message) {
       message.hidden = result.ok;
-      if (!result.ok) message.textContent = result.message;
+      if (!result.ok) message.textContent = RefusalPresentation.sentence(result);
     },
   };
 
@@ -1378,7 +1640,10 @@
     },
 
     async render(stored, ctx) {
-      const current = (await Platform.api.storage.local.get("storageArea")).storageArea || "local";
+      // THROUGH THE FACADE. Reading the entry here gave the key `storageArea` two
+      // owners -- Platform, which exists to own it, and this render function --
+      // and the literal was spelled in both.
+      const current = await Platform.storageAreaName();
       Dom.clear(this.chips);
       for (const [area, text] of [["local", t("storageLocal", "This device only")],
                                   ["sync", t("storageSync", "Sync across devices")]]) {

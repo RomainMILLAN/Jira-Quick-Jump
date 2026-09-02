@@ -45,7 +45,16 @@
     if (typeof raw.host !== "string") {
       return { ok: false, code: "HOST_NOT_A_STRING", message: "Enter a domain such as google.it." };
     }
-    const host = raw.host.trim().toLowerCase();
+    // `www.` IS STRIPPED, because the emitted pattern already carries `(?:www\.)?`.
+    //
+    // Kept, it produced `(?:www\.)?www\.google\.com` -- a DIFFERENT signature
+    // from the built-in `(?:www\.)?google\.com`, so the catalogue's
+    // deduplication saw two entries where the two regexes match the same URLs.
+    // Two rules for one engine burn budget and rule ids, and the one the user
+    // ticked is not the one that fires. Normalising here rather than at the
+    // catalogue means the identity `custom:<host>` is normalised too, so the same
+    // domain typed twice cannot enter twice.
+    const host = raw.host.trim().toLowerCase().replace(/^www\./, "");
     if (host.length > 100) {
       return { ok: false, code: "HOST_TOO_LONG", message: "That domain is too long." };
     }

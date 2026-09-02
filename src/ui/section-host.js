@@ -63,11 +63,31 @@
        * toggle would come back armed.
        */
       async function commit(intention) {
+        // CLAIMED BEFORE THE COMMIT. The policy write is what wakes the worker, so
+        // claiming afterwards left a race the journal itself called "the likelier
+        // order": the window reconciled first and reported the user's own edit
+        // under the code reserved for compromise. Claiming the content we are
+        // about to write means the window can never see a state whose claim is not
+        // already on tape.
+        const proposed = intention(stored());
+        if (proposed.ok) await DestinationJournal.claimAhead(proposed.value.policy().fingerprint());
         const result = await PolicyRepository.apply(intention);
-        if (result.ok && result.events && result.events.length > 0) {
+        // `result.events` without a presence test: every result carries it. The
+        // two `?? []` / `&& …` that used to sit here and in versioned-entry.js were
+        // the exact tests mutation-result.js forbids -- present because the
+        // invariant was false, not because the rule was wrong.
+        if (result.ok && result.events.length > 0) {
           // Written AFTER the commit and never inside the mutator: the retry would
           // otherwise log the same change up to three times.
-          await DestinationJournal.record(result.events, result.rev, "MANUAL", Date.now());
+          // THE COMMITTED STATE, not the speculative one. claimAhead spoke first
+          // on our stale snapshot, which is its job; this claims what the
+          // compare-and-set actually wrote, so a replay on a fresher base leaves
+          // both on the ring.
+          await DestinationJournal.recordClaimed(
+            result.events,
+            result.committed.policy().fingerprint(),
+            Date.now()
+          );
         }
         if (!result.ok) {
           // A refused mutation changed nothing, so there is nothing to redraw —
@@ -95,8 +115,7 @@
        * NEVER per keystroke. The preview consumes the rules AS INSTALLED, and
        * asking the platform on each character would make it asynchronous and
        * collide head-on with the ReDoS budget.
-       */
-      /**
+       *
        * The section whose subtree the user is physically holding, or null.
        *
        * Same family as isEditing, and a re-render there does not merely look
@@ -129,11 +148,21 @@
       let lastReport = null;
       async function report() {
         if (!lastReport) {
-          // THE RECEIPT, and the FIFTH parameter. Called with three arguments,
-          // `reality` was {} and report() re-fabricated `installed: true` -- so the
-          // page owned two labels it could STRUCTURALLY never display.
-          lastReport = await RuleInstaller.report(
-            stored.policy(), [], stored.quarantinedCount(), await InstallOutcome.read(), "PAGE");
+          // NAMED, so a missing field is visible here rather than silently
+          // defaulted. Called positionally with three arguments, `reality` fell
+          // back to {} and report() re-fabricated `installed: true` -- the page
+          // owned two labels it could STRUCTURALLY never display.
+          //
+          // `skipped` is EMPTY on this surface and that is a fact, not an
+          // oversight: the causes are produced during an installation, which only
+          // the worker performs. What the page can show comes from the receipt.
+          lastReport = await RuleInstaller.report({
+            policy: stored.policy(),
+            skipped: [],
+            quarantinedCount: stored.quarantinedCount(),
+            reality: await InstallOutcome.read(),
+            source: "PAGE",
+          });
         }
         return lastReport;
       }
@@ -152,31 +181,59 @@
         pending.delete(coalesceKey);
       }
 
+      /**
+       * A DEBOUNCED apply RESOLVES WITH ITS REAL OUTCOME, not with a fabricated ok.
+       *
+       * It used to `return Promise.resolve({ ok: true, events: [] })` before any
+       * write had been attempted -- a success invented for a commit that had not
+       * happened. Nobody awaited it yet, which made it a trap rather than a bug:
+       * the first caller to believe that value would believe a lie. Now the
+       * promise settles when the coalesced commit settles, so awaiting it means
+       * what it says.
+       */
       function apply(intention, coalesceKey) {
         if (!coalesceKey) return commit(intention);
         const existing = pending.get(coalesceKey);
-        if (existing) clearTimeout(existing.timer);
+        if (existing) {
+          clearTimeout(existing.timer);
+          // The keystroke this one replaces never reaches storage. Its waiters are
+          // told so rather than left hanging for the life of the page.
+          existing.settle({ ok: false, code: "SUPERSEDED", message: "", events: [] });
+        }
+        let settle;
+        const settled = new Promise((resolve) => { settle = resolve; });
         // Coalescing by field: a keystroke replaces the previous keystroke in the
         // SAME field, and never the toggle next to it.
         pending.set(coalesceKey, {
           intention,
+          settle,
           timer: setTimeout(() => {
             pending.delete(coalesceKey);
-            commit(intention);
+            commit(intention).then(settle, settle);
           }, DEBOUNCE_MS),
         });
-        return Promise.resolve({ ok: true, events: [] });
+        return settled;
       }
 
+      /**
+       * IT RETURNS ITS WORK, so a caller that can wait does.
+       *
+       * `pagehide` cannot be held open, and that limit is real -- but it was not
+       * the only caller: stop() flushed too, and dropped the promises on the
+       * floor. Handing the work back lets the one caller that CAN await it do so,
+       * and makes the remaining loss the browser's rather than ours.
+       */
       function flush() {
         const queued = [...pending.values()];
         pending.clear();
-        for (const entry of queued) {
+        return Promise.allSettled(queued.map((entry) => {
           clearTimeout(entry.timer);
           // The same verified path: on a conflict this keystroke is lost rather
           // than overwriting what the other surface just saved.
-          commit(entry.intention);
-        }
+          const done = commit(entry.intention);
+          done.then(entry.settle, entry.settle);
+          return done;
+        }));
       }
 
       /**
@@ -320,7 +377,10 @@
         if (!banner) return;
         bannerCause = cause;
         banner.hidden = false;
-        banner.textContent = result.message || String(result.code || "");
+        // THROUGH THE PRESENTATION. It printed the domain's own sentence, which is
+        // hard-coded English -- so the French build showed English on every
+        // refusal, at the one moment the user is being told something went wrong.
+        banner.textContent = RefusalPresentation.sentence(result);
       }
 
       function hideFailure(cause) {
@@ -419,7 +479,7 @@
       // The one refusal of a navigating drop, per surface. Not in the HTML: an
       // inline script there is killed by script-src 'self', in silence, so the
       // guard would exist in the repository and not in the browser.
-      const allowFileDrops = Dom.refuseFileDrops(document);
+      const stopRefusingFileDrops = Dom.refuseFileDrops(document);
 
       const onHide = () => {
         if (document.visibilityState === "hidden") flush();
@@ -446,17 +506,27 @@
       }
 
       return {
-        stop() {
+        /**
+         * ASYNC, and it returns the flush.
+         *
+         * It called flush() and threw the work away, which was the same silent
+         * loss as the debounce's fabricated ok: a caller that tears the host down
+         * had no way to wait for the last keystroke to land. `pagehide` still
+         * cannot wait -- that is the browser's rule, not ours -- but this caller
+         * can, and now may.
+         */
+        async stop() {
           if (disposed) return;
           disposed = true;
-          flush();
+          const flushed = flush();
           document.removeEventListener("pointerdown", onPointerDown);
           document.removeEventListener("pointerup", onPointerUp);
           document.removeEventListener("dragstart", onDragStart);
           document.removeEventListener("dragend", onDragEnd);
           root.removeEventListener("focusin", onFocusIn);
           root.removeEventListener("focusout", onFocusOut);
-          allowFileDrops();
+          await flushed;
+          stopRefusingFileDrops();
           document.removeEventListener("visibilitychange", onHide);
           window.removeEventListener("pagehide", flush);
         },

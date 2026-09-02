@@ -37,6 +37,11 @@
 
   const { MutationResult, Consent } = global;
 
+  /** ONE owner for the sentence. It was written out three times -- here and at
+   *  both admission doors -- and a sentence of the ubiquitous language with three
+   *  authors drifts like any other duplicate. */
+  const DUPLICATE_ID_MESSAGE = "Two entries claim the same identifier.";
+
   class ShortcutRegistry {
     /**
      * The internal dictionary is a Map, never an object literal. A key named
@@ -112,14 +117,30 @@
      * it does not found it.
      */
     shadowedIds() {
-      const ids = this.orderedIds();
-      const catchAll = this.catchAll();
-      if (!catchAll) return [];
-      return ids.slice(ids.indexOf(catchAll.id()) + 1);
+      return [...this._shadowed()];
+    }
+
+    /**
+     * MEMOISED, and safe because this registry is immutable: every mutation
+     * returns a NEW one, so a derived answer can never go stale.
+     *
+     * It was recomputed by five callers -- activeBindings, claimantFor, statusOf
+     * via isShadowed, shadowedShortcuts, and PolicyDiff -- and diagnose() reaches
+     * three of them up to four times. With isShadowed doing a linear `includes`
+     * on top, painting a list of n rows cost O(n^2) walks of the order, per
+     * keystroke, inside the service worker.
+     */
+    _shadowed() {
+      if (this._shadowedCache === undefined) {
+        const catchAll = this.catchAll();
+        const ids = this.orderedIds();
+        this._shadowedCache = new Set(catchAll ? ids.slice(ids.indexOf(catchAll.id()) + 1) : []);
+      }
+      return this._shadowedCache;
     }
 
     isShadowed(id) {
-      return this.shadowedIds().includes(id);
+      return this._shadowed().has(id);
     }
 
     /**
@@ -192,9 +213,20 @@
       if (!wellFormed.ok) return MutationResult.refused(wellFormed.code, wellFormed.message);
       const existing = this._byId.get(id);
       if (existing) {
+        // The REPLAY no-op, and it must stay: VersionedEntry re-runs intentions,
+        // so an identical register is a retry, not a collision.
         if (existing.key().equals(key) && existing.instance().equals(instance)) {
           return MutationResult.ok(this);
         }
+        // A CONTRADICTORY REDEFINITION, and it used to fall through to _with(),
+        // where Map.set OVERWROTE the living shortcut AND HANDED IT ITS POSITION
+        // -- the evaluation order, which is to say who intercepts what. Neither a
+        // refusal, nor a quarantine, nor a dropped entry: a squat of identity,
+        // silent, from a document this door exists to distrust.
+        //
+        // IDENTITY IS TESTED BEFORE THE KEY, deliberately. The other way round, a
+        // squatter carrying a free key comes back ok.
+        return MutationResult.refused("DUPLICATE_ID", DUPLICATE_ID_MESSAGE);
       }
       // Before _holdsKey, or CatchAllKey.equals would answer DUPLICATE_KEY and
       // the code would lose its precise meaning. Kept as a better MESSAGE, not
@@ -291,6 +323,8 @@
       return this.shortcuts().map((s) => s.toJSON());
     }
   }
+
+  ShortcutRegistry.DUPLICATE_ID_MESSAGE = DUPLICATE_ID_MESSAGE;
 
   ShortcutRegistry.empty = function () {
     return new ShortcutRegistry(new Map());

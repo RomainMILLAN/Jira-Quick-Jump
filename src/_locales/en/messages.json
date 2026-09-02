@@ -5,6 +5,9 @@
   "accessAll": {
     "message": "Every origin this configuration needs has been granted."
   },
+  "accessDeclined": {
+    "message": "Access was not granted, so nothing will redirect to these hosts."
+  },
   "accessMissing": {
     "message": "Some origins have not been granted yet."
   },
@@ -51,7 +54,19 @@
     "message": "Any short key"
   },
   "catchAllNote": {
-    "message": "Any 2-to-6-character key followed by a hyphen and a number goes to this destination, on the engines you ticked. A short reserved list is held back."
+    "message": "Any {min}-to-{max}-character key followed by a hyphen and a number goes to this destination, on the engines you ticked. A short reserved list is held back."
+  },
+  "badgeOff": {
+    "message": "off"
+  },
+  "badgeReady": {
+    "message": "Quick Jump for Jira: shortcuts are active."
+  },
+  "badgeUnseen": {
+    "message": "Quick Jump for Jira: a destination changed. Open the options to check it."
+  },
+  "badgeOffTitle": {
+    "message": "Quick Jump for Jira: nothing is redirecting right now."
   },
   "changedAck": {
     "message": "I have checked it"
@@ -61,6 +76,9 @@
   },
   "changedTitle": {
     "message": "A destination changed"
+  },
+  "changedTitleMany": {
+    "message": "Destinations changed"
   },
   "changedWas": {
     "message": "It used to point to"
@@ -82,6 +100,9 @@
   },
   "diagAllShadowed": {
     "message": "Every shortcut sits below the catch-all, so none of them fires."
+  },
+  "diagNothingToInstall": {
+    "message": "Nothing is active right now, so no shortcut fires. Check the rows below."
   },
   "diagCatchAllNotInstalled": {
     "message": "The catch-all could not be installed, so it claims nothing."
@@ -149,8 +170,26 @@
   "factReplaced": {
     "message": "The whole configuration changed elsewhere. Check every destination."
   },
-  "factShadowed": {
-    "message": "These keys now go to the catch-all:"
+  "factShadowedStopped": {
+    "message": "These keys no longer fire, because the catch-all moved above them:"
+  },
+  "factShadowedClaims": {
+    "message": "What the catch-all does claim goes to"
+  },
+  "factKeyChanged": {
+    "message": "no longer intercepts what it did; the key is now"
+  },
+  "factArmed": {
+    "message": "was armed and now redirects to"
+  },
+  "factEnginesAdded": {
+    "message": "More search engines are intercepted than before. Check the Access section."
+  },
+  "factPolicyArmed": {
+    "message": "The extension was switched back on elsewhere, and every shortcut redirects again."
+  },
+  "factUnreadable": {
+    "message": "What was saved stopped being readable, so nothing is installed. Check every destination."
   },
   "fix": {
     "message": "Fix"
@@ -178,6 +217,27 @@
   },
   "installDiffers": {
     "message": "The installed configuration differs from the one you see."
+  },
+  "skipUnknownEngine": {
+    "message": "A ticked search engine is no longer known."
+  },
+  "skipRegexUnsupported": {
+    "message": "The browser refused the pattern for this rule."
+  },
+  "skipUnitIncomplete": {
+    "message": "This rule was dropped with the group it belongs to."
+  },
+  "skipConstructionRefused": {
+    "message": "The rules could not be built."
+  },
+  "skipRunOverBudget": {
+    "message": "The reserved-prefix guard is too long for the browser."
+  },
+  "skipEnvelopeOverBudget": {
+    "message": "This search engine's address leaves no room for a rule."
+  },
+  "skipKeyLengthOverBudget": {
+    "message": "The catch-all claims longer keys than the browser can match."
   },
   "journalOverflowed": {
     "message": "Some changes could not be recorded."
@@ -233,11 +293,107 @@
   "previewNoMatch": {
     "message": "This search would go through untouched."
   },
+  "previewEngineDisagreement": {
+    "message": "The answer depends on which search engine the address bar uses."
+  },
   "previewNotASearchUrl": {
     "message": "That is not a search URL."
   },
   "previewNotAUrl": {
     "message": "That is not a URL."
+  },
+  "refuseDuplicateKey": {
+    "message": "That key is already used by another shortcut."
+  },
+  "refuseDuplicateCatchAll": {
+    "message": "There is already a catch-all shortcut."
+  },
+  "refuseDuplicateId": {
+    "message": "Two entries claim the same identifier."
+  },
+  "refuseDuplicateEngine": {
+    "message": "That domain is already listed."
+  },
+  "refuseUnknownShortcut": {
+    "message": "This shortcut no longer exists."
+  },
+  "refuseUnknownQuarantined": {
+    "message": "This entry is no longer set aside."
+  },
+  "refuseKeyNature": {
+    "message": "A catch-all cannot be renamed, and a shortcut cannot become a catch-all."
+  },
+  "refuseMissingFreshId": {
+    "message": "This entry needs a new identifier before it can be restored."
+  },
+  "refuseKeyShape": {
+    "message": "A key looks like ABC: 2 to 20 letters, digits or underscores, starting with a letter."
+  },
+  "refuseKeyControl": {
+    "message": "That key contains an invisible or control character."
+  },
+  "refuseKeyLookalike": {
+    "message": "That key contains look-alike characters."
+  },
+  "refuseBaseEmpty": {
+    "message": "Enter a Jira address."
+  },
+  "refuseBaseScheme": {
+    "message": "Only http and https addresses are accepted."
+  },
+  "refuseBaseUserinfo": {
+    "message": "An address cannot carry credentials."
+  },
+  "refuseBaseQuery": {
+    "message": "An address cannot carry a query string."
+  },
+  "refuseBaseFragment": {
+    "message": "An address cannot carry a fragment."
+  },
+  "refuseBaseCanonical": {
+    "message": "Write the address in its plain form, for example https://example.atlassian.net/jira."
+  },
+  "refuseBaseForbiddenHost": {
+    "message": "That address is a cloud metadata or link-local endpoint."
+  },
+  "refuseBaseUnsafePort": {
+    "message": "Browsers refuse to connect to that port."
+  },
+  "refuseBasePathDepth": {
+    "message": "An address cannot have more than four path segments."
+  },
+  "refuseBaseTooLong": {
+    "message": "That address is too long."
+  },
+  "refuseHostShape": {
+    "message": "Enter a plain domain name, with no scheme and no path."
+  },
+  "refuseHostTooLong": {
+    "message": "That domain name is too long."
+  },
+  "refuseShortcutLimit": {
+    "message": "That would create more shortcuts than this extension keeps."
+  },
+  "refuseBindingLimit": {
+    "message": "That would create more redirect rules than the browser allows."
+  },
+  "refuseOrderStale": {
+    "message": "The order changed in another window. Try again."
+  },
+  "refuseConflict": {
+    "message": "Another window changed the configuration at the same time. Try again."
+  },
+  "refuseQuota": {
+    "message": "There is no room left to save this."
+  },
+  "refuseUnacknowledged": {
+    "message": "Read the destination warnings before switching this shortcut on."
+  },
+  "refuseUnknownWarning": {
+    "message": "That acknowledgement is not one this version knows."
+  },
+  "previewNoEngines": {
+    "message": "Tick a search engine first: nothing is intercepted yet."
   },
   "previewReservedPrefix": {
     "message": "Held back by a reserved prefix, so the catch-all leaves it alone."
@@ -307,6 +463,9 @@
   },
   "tagAllShadowed": {
     "message": "All shadowed"
+  },
+  "tagNothingToInstall": {
+    "message": "Nothing active"
   },
   "tagAwaitingAck": {
     "message": "Not accepted"

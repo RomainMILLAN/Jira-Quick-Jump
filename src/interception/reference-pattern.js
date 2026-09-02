@@ -7,7 +7,7 @@
  * expression the core does not assemble -- broken the day an engine's
  * searchUrlPattern introduces a capture group before it.
  *
- * A TABLE OF TWO ENTRIES rather than an `if`: the arity is then declared NEXT TO
+ * THE KEY'S CLAIM, spelled here rather than branched on: the arity is then declared NEXT TO
  * the pattern that produces it. With a branch, the two can drift two lines
  * apart. Same gesture as the diagnosis catalogue and the list of caps in
  * _guarded.
@@ -96,40 +96,45 @@
     return pattern;
   };
 
-  /** The two natures of key, each declaring its own arity next to its pattern. */
-  const SHAPES = {
-    named: {
+  /** The notation, and the only place that knows one. */
+  /**
+   * THE NOTATION LIVES HERE, and the key never spells it.
+   *
+   * It branches on the CLAIM -- a domain value -- never on the type of the key
+   * and never on `instanceof`. That is what a two-entry SHAPES table plus
+   * `shapeOf()` was pretending to do while branching on isCatchAll() three lines
+   * further down; and it is what an over-corrected first fix broke the other way,
+   * by putting the fragment, the arity and the backreferences into the key
+   * protocol -- at which point the DOMAIN was emitting RE2 and calling Re2Budget
+   * from `core/`.
+   *
+   * THE FOREIGN SYSTEM IS ASKED ON THIS SIDE. catch-all-key.js says "the domain
+   * proposes, the foreign system says whether it can carry"; the proposal is
+   * `{ anyKeyUpTo }`, and the asking is this line -- where the refusal already has
+   * a channel that reaches the user.
+   */
+  const spell = (claim) => {
+    if (typeof claim.anyKeyUpTo === "number") {
+      const claimed = claim.anyKeyUpTo;
+      if (!global.Re2Budget.conservative().affordsKeyOfLength(claimed)) {
+        throw global.Re2Budget.refusal("KEY_LENGTH_OVER_BUDGET", { claimed });
+      }
+      return {
+        fragment: "(" + global.ProjectKey.caseInsensitiveShape(claimed) + ")",
+        arity: 2,
+        // Two groups: the key this rule captured, then the reference number.
+        reference: IssueReference.render({ toString: () => "\\1" }, "\\2"),
+      };
+    }
+    // A literal key opens no group of its own; the reference number is the rule's
+    // single one. Written in UPPER CASE, which is why abc-1 lands on /browse/ABC-1
+    // even though the condition is case-insensitive.
+    return {
+      fragment: claim.literal,
       arity: 1,
-      backreferences: ["\\1"],
-      fragmentFor: (key) => key.toString(),
-      // The key is written LITERALLY and in upper case, which is why abc-1 lands
-      // on /browse/ABC-1 even though the rule is case-insensitive.
-      referenceFor: () => IssueReference.render({ toString: () => "" }, "\\1"),
-    },
-    catchAll: {
-      arity: 2,
-      backreferences: ["\\1", "\\2"],
-      // THE change of this batch: the regex RE2 refuses. The character set still
-      // comes from its owner -- never a copy -- but AT THE LENGTH THE KEY CLAIMS,
-      // which is less than a named key may be.
-      //
-      // We ASK the key rather than reaching for a global singleton: forKey already
-      // hands the key to fragmentFor, so the traveller shows his own passport. The
-      // other alternative would have undone the whole point of putting the bound
-      // in the domain.
-      //
-      // This makes the table polymorphic on a member OUTSIDE the protocol --
-      // SHAPES.named receives a ProjectKey, SHAPES.catchAll a CatchAllKey, and
-      // only the second carries claimsKeysUpTo(). That is what the ISP decision
-      // wants: each shape calls only what ITS nature of key carries, which is why
-      // this is a table and not an `if`.
-      fragmentFor: (key) =>
-        "(" + global.ProjectKey.caseInsensitiveShape(key.claimsKeysUpTo()) + ")",
-      referenceFor: () => IssueReference.render({ toString: () => "\\1" }, "\\2"),
-    },
+      reference: IssueReference.render({ toString: () => claim.literal }, "\\1"),
+    };
   };
-
-  const shapeOf = (key) => (key.isCatchAll() ? SHAPES.catchAll : SHAPES.named);
 
   const ReferencePattern = {
     IN_URL,
@@ -143,19 +148,33 @@
      * instance. Writing that restriction here instead would make claimantFor and
      * the emitted rule disagree, and the agreement test would fail the day it is
      * written.
+     *
+     * THE KEY ANSWERS ALL THREE QUESTIONS, so there is no table and no `if`.
+     *
+     * There used to be `SHAPES` -- two entries -- plus
+     * `shapeOf(key) = key.isCatchAll() ? catchAll : named`. A table does not
+     * remove a branch on the type, it moves it three lines down; and this one had
+     * to be polymorphic on `claimsKeysUpTo()`, a member the key protocol
+     * deliberately excluded, which shortcut-key.js documented as a substitution
+     * violation. Both problems were one problem: the airlock was deciding
+     * something only the key knows.
+     *
+     * Adding a third nature of key now costs a class, not an edit here.
      */
     forKey(key) {
-      const shape = shapeOf(key);
-      const pattern = emit(shape.fragmentFor(key), key.separators(), shape.arity);
+      const spelled = spell(key.claim());
+      const arity = spelled.arity;
+      const pattern = emit(spelled.fragment, key.separators(), arity);
       return {
-        arity: shape.arity,
+        arity,
         pattern,
         substitutionFor(instance) {
           const substitution =
-            escapeSubstitution(instance.baseUrl()) +
-            "/browse/" +
-            (key.isCatchAll() ? shape.referenceFor() : IssueReference.render(key, "\\1"));
-          assertBackreferences(substitution, shape.backreferences);
+            escapeSubstitution(instance.baseUrl()) + "/browse/" + spelled.reference;
+          assertBackreferences(
+            substitution,
+            Array.from({ length: arity }, (_, at) => "\\" + (at + 1))
+          );
           return substitution;
         },
       };

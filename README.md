@@ -136,7 +136,7 @@ refuse it and open an issue.
   limits: it accepts **the hyphen only** (so `SALARY 2024`, `WINDOWS 11` and
   every other "two tokens ending in a number" go through), and it leaves a
   **closed list of reserved prefixes** alone (`ISO`, `CVE`, `RFC`, `COVID`, `WD`,
-  `MP`, `PS`, `GTA` and about forty more). That list is a **mitigation, never a
+  `MP`, `PS`, `GTA` and forty-one more, 49 in all). That list is a **mitigation, never a
   guarantee of completeness**: `MP3-320`, `X1-9` and `T2-500` are key-shaped and
   will be caught. If that is not a trade you want, declare your keys instead —
   they keep working exactly as before.

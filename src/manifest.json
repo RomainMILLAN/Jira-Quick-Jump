@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "default_locale": "en",
   "name": "__MSG_extensionName__",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "__MSG_extensionDescription__",
   "icons": {
     "16": "icons/icon-16.png",
@@ -25,7 +25,7 @@
   "declarative_net_request": {
     "rule_resources": [
       {
-        "id": "guard",
+        "id": "firefox-1921353-workaround",
         "enabled": true,
         "path": "rules.json"
       }
@@ -36,6 +36,7 @@
     "scripts": [
       "platform.js",
       "core/mutation-result.js",
+      "core/engine-id.js",
       "core/reserved-prefix.js",
       "core/issue-reference.js",
       "core/shortcut-warning.js",
@@ -47,10 +48,12 @@
       "core/shortcut-registry.js",
       "core/custom-engine.js",
       "core/jump-policy.js",
+      "core/diagnosis.js",
       "core/policy-diff.js",
       "core/admission.js",
       "interception/search-engine-catalog.js",
       "interception/re2-budget.js",
+      "interception/not-installed.js",
       "interception/reference-pattern.js",
       "interception/rule-ranking.js",
       "interception/installed-rule.js",
@@ -82,6 +85,10 @@
   },
   "commands": {
     "disarm-all": {
+      "suggested_key": {
+        "default": "Alt+Shift+J",
+        "mac": "Alt+Shift+J"
+      },
       "description": "__MSG_commandDisarmAll__"
     }
   },

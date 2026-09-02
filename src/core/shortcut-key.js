@@ -5,7 +5,7 @@
  * are closed. This is a documented protocol plus a parse, and the two
  * implementations (ProjectKey, CatchAllKey) are checked against it by test.
  *
- * SIX MEMBERS, exactly:
+ * EIGHT MEMBERS, exactly:
  *
  *   toString()              -> the written form: a project key, or the catch-all's
  *   equals(other)           -> boolean
@@ -13,14 +13,29 @@
  *   captures(projectKey)    -> boolean   -- the domain question
  *   exampleKey()            -> ProjectKey, for display only
  *   separators()            -> the separators this key accepts
+ *   claim()                 -> what this key claims, in domain words:
+ *                              { literal } or { anyKeyUpTo } -- never a regex
+ *   nature()                -> "named" or "catch-all": the word, not a boolean
+ *                              read backwards by whoever needs a label
  *
- * claimsKeysUpTo() is deliberately NOT in the protocol either, and unlike
- * collidesWithOrdinarySearches() it is carried by CatchAllKey ALONE: on a
- * ProjectKey the honest answer to "your key length ceiling" is its own length, not
- * the validator's twenty -- two contracts under one name, a substitution violation
- * a typeof check would never see. Its only caller is SHAPES.catchAll in
- * reference-pattern.js, which branches on shapeOf(key) BEFORE asking, so no caller
- * is polymorphic. A test asserts it exists on the catch-all without adding it here.
+ * `claim()` IS WHY THE SHAPE TABLE IS GONE. The airlock held a two-entry table
+ * and a `shapeOf(key) = key.isCatchAll() ? … : …`, which is the branch on the type
+ * its own header said it had removed -- a table does not remove a branch, it moves
+ * it. And that table was polymorphic on claimsKeysUpTo(), a member this protocol
+ * deliberately excludes, which forced this file to document a substitution
+ * violation it could not fix.
+ *
+ * The first fix over-corrected: it put the regex FRAGMENT, its capture ARITY and
+ * its BACKREFERENCE in this protocol, so the domain began emitting RE2 and
+ * CatchAllKey reached into `interception/` to ask a budget. A key says what it
+ * CLAIMS; the airlock decides how to spell it. One is a domain fact, the other a
+ * notation, and this protocol carries only the first.
+ *
+ * claimsKeysUpTo() STAYS OUT, and now genuinely has no polymorphic caller: on a
+ * ProjectKey the honest answer to "your key length ceiling" is its own length,
+ * not the validator's twenty -- two contracts under one name. It is CatchAllKey's
+ * private business, consulted by CatchAllKey.fragmentFor alone. A test asserts it
+ * exists there without adding it here.
  *
  * collidesWithOrdinarySearches() is deliberately NOT in the protocol: it is the
  * only candidate that does not speak about BEING a key, and it forced
@@ -60,6 +75,12 @@
     /** The protocol, named once so the conformance test cannot drift from it. */
     MEMBERS: Object.freeze([
       "toString", "equals", "isCatchAll", "captures", "exampleKey", "separators",
+      // THE THREE THAT ENDED THE SHAPE TABLE. reference-pattern.js used to carry a
+      // two-entry table and a `shapeOf()` that branched on isCatchAll(), which is
+      // the `if` on the type its own header claimed to have removed. Asking the
+      // key instead puts the answer where the knowledge is -- and makes these
+      // three genuinely polymorphic, unlike claimsKeysUpTo() below.
+      "claim", "nature",
     ]),
   };
 

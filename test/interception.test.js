@@ -320,11 +320,11 @@ test("InstalledRule normalises ONCE, and the forge keeps its own canary", () => 
     true,
     "absent means the platform default, which is sensitive");
 
-  // AND THE FORGE'S CANARY IS STILL ALIVE on a raw rule: isCatchAllRule stays TOTAL,
+  // AND THE FORGE'S CANARY IS STILL ALIVE: isCatchAllBand stays TOTAL, so a band
   // which rule-set.js designates as THE content check. The delegation passes a
   // SYNTHESISED band precisely so this stays true.
-  assert.throws(() => g.RuleRanking.isCatchAllRule({ id: 1 }), /priority band/);
-  assert.throws(() => g.RuleRanking.isCatchAllRule({ id: 1, priority: "3" }), /priority band/);
+  assert.throws(() => g.RuleRanking.isCatchAllBand(undefined), /priority band/);
+  assert.throws(() => g.RuleRanking.isCatchAllBand("3"), /priority band/);
 });
 
 test("the whole rule set is locked against a literal expectation", () => {
@@ -461,7 +461,7 @@ test("a shadowed shortcut produces no rule at all", () => {
   const shadowed = withCatchAll().withOrder([STAR, ABC, OPS]).value;
   const rules = delivered(shadowed);
   assert.equal(rules.filter((r) => r.action.type === "redirect").length, 1);
-  assert.equal(rules.filter((r) => g.RuleRanking.isCatchAllRule(r)).length, 1);
+  assert.equal(rules.filter((r) => g.RuleRanking.isCatchAllBand(r.priority)).length, 1);
 });
 
 test("the reserved prefixes are a few allow rules per engine, never one per prefix", () => {
@@ -545,16 +545,36 @@ test("the domain and the simulator always agree on where a key lands", () => {
   // and the ticked engines, which the registry knows nothing about.
   const policy = withCatchAll();
   const rules = delivered(policy);
+  // GENERATED, not hand-picked. Seventeen chosen entries are blind to the case
+  // nobody thought of, and this is a security control: a regex that claims MORE
+  // than the domain is a universal redirector. Every reserved prefix, every
+  // separator, and the lengths either side of what the catch-all claims.
+  const reach = g.CatchAllKey.only().claimsKeysUpTo();
+  const lengths = [2, reach - 1, reach, reach + 1, 20, 21];
   const corpus = [
     "ABC-1", "abc-1", "OPS-9", "PAYROLL-3", "BAN-123", "T1-123", "BESSON-42",
-    "ISO-9001", "COVID-19", "WD-40", "HTTPS-1", "CVE-2024", "ABC 7", "PAYROLL 5",
     "ABC", "ABC-", "ABCDEFGHIJKLMNOPQRSTU-1",
+    ...g.ReservedPrefix.ALL.flatMap((word) => [`${word}-1`, `${word} 1`, `${word}+1`, word.toLowerCase() + "-9"]),
+    ...lengths.map((n) => "K".repeat(Math.max(1, n)) + "-1"),
+    ...lengths.map((n) => "K".repeat(Math.max(1, n)) + " 1"),
   ];
   for (const typed of corpus) {
     const reference = g.IssueReference.parse(typed, (k) => g.ProjectKey.parse(k));
     const fromDomain = reference.ok ? policy.claimantFor(reference.value) : { code: "NO_MATCH" };
     const engine = g.SearchEngineCatalog.find("google.com");
     const fromRules = g.JumpPreview.forTypedText(typed, rules, engine);
+    // THE FOLD IS NAMED, and NON_DETERMINISTIC is not in it. Folding every other
+    // simulator code into NO_MATCH silenced a canary through the very test that
+    // exists to keep the two engines honest.
+    // NO_MATCH is a verdict in its own right; the other three genuinely mean "not
+    // a search this rule set has anything to say about". NON_DETERMINISTIC is
+    // deliberately absent: it is an assertion canary, and folding it into NO_MATCH
+    // silenced it through the very test that keeps the two engines honest.
+    const FOLDED = new Set(["NO_MATCH", "NOT_A_URL", "NOT_A_SEARCH_URL", "INPUT_TOO_LONG"]);
+    assert.ok(
+      fromRules.ok || fromRules.code === "RESERVED_PREFIX" || FOLDED.has(fromRules.code),
+      `${JSON.stringify(typed)}: the simulator said ${fromRules.code}, which the fold would have hidden`
+    );
     const simulated = fromRules.ok ? fromRules.code : fromRules.code === "RESERVED_PREFIX" ? "RESERVED_PREFIX" : "NO_MATCH";
     assert.equal(
       simulated,
@@ -654,4 +674,123 @@ test("the guard holds HTTP and HTTPS, the pair a substring check confounded", ()
     false,
     "MYHTTP-1 must not be caught by the HTTP alternative"
   );
+});
+
+test("an envelope that leaves nothing to spend is refused where the arithmetic happens", () => {
+  // Subtracting an envelope was unguarded, so the first real client the header
+  // names -- a custom domain of sixty-odd characters -- produced a budget of zero
+  // or less. The cutter then threw on the FIRST word, which rule-installer turns
+  // into a global INSTALL_FAILED: one long domain name, and nothing installs.
+  assert.throws(
+    () => g.Re2Budget.forEnvelope(g.Re2Budget.MAX_ALTERNATION_COST),
+    (error) => error instanceof g.Re2Budget.Refusal
+      && error.reason === g.Re2Budget.REASONS.ENVELOPE_OVER_BUDGET
+  );
+  assert.throws(() => g.Re2Budget.forEnvelope(g.Re2Budget.MAX_ALTERNATION_COST + 100));
+
+  // And a usable one still comes back usable.
+  const budget = g.Re2Budget.forEnvelope(10);
+  assert.equal(budget.affordsAlternation(["ABC"]), true);
+});
+
+test("the domain proposes a key length and the foreign system gets to answer, in production", () => {
+  // The changelock between CatchAllKey.claimsKeysUpTo() and the measured RE2
+  // ceiling lived ONLY in the tests: nothing in production asked. Lowering one
+  // without the other shipped a pattern the platform refuses, and
+  // updateDynamicRules rejects THE WHOLE BATCH -- every shortcut dies for one
+  // number nobody re-measured.
+  // A key that claims more than the measured ceiling. It answers the whole
+  // protocol itself, which is the point: there is no shape table left to consult.
+  // A key that CLAIMS more than the measured ceiling. It says so in domain words;
+  // the airlock is the one that asks the foreign system whether it can carry it.
+  const overreaching = {
+    isCatchAll: () => true,
+    nature: () => "catch-all",
+    claim: () => ({ anyKeyUpTo: g.Re2Budget.LONGEST_MEASURED_KEY + 1 }),
+    separators: () => ["-"],
+    toString: () => "*",
+  };
+  assert.throws(
+    () => g.ReferencePattern.patternFor(overreaching),
+    (error) => error instanceof g.Re2Budget.Refusal
+      && error.reason === g.Re2Budget.REASONS.KEY_LENGTH_OVER_BUDGET,
+    "a claim beyond the measured ceiling must be refused where it is emitted"
+  );
+
+  // And the shipped bound still passes, which is what makes the guard honest
+  // rather than decorative.
+  assert.ok(g.ReferencePattern.patternFor(g.CatchAllKey.only()).length > 0);
+});
+
+test("a rule whose action we cannot simulate is skipped, never dereferenced", () => {
+  // These rules come from the DNR store -- "a foreign system", says jump-preview's
+  // own header. A block or upgradeScheme rule, from an older build or a future
+  // one, walked into `undefined.replace` and killed the whole preview with
+  // "Could not read the installed rules".
+  const hostile = [
+    { id: 1, priority: 1, action: { type: "block" }, condition: { regexFilter: ".*", isUrlFilterCaseSensitive: false } },
+  ];
+  const result = g.JumpPreview.forSearchUrl("https://www.google.com/search?q=ABC-1", hostile);
+  assert.equal(result.ok, false);
+  assert.equal(result.code, "NO_MATCH", "an unsimulatable action tells us nothing, and says so");
+});
+
+test("a custom domain cannot shadow a built-in engine through its www form", () => {
+  // `www.google.com` produced `(?:www\.)?www\.google\.com` -- a different
+  // signature from the built-in `(?:www\.)?google\.com`, so deduplication saw two
+  // entries where the two regexes match the same URLs. Two rules for one engine
+  // burn budget and rule ids, and the one the user ticked is not the one firing.
+  const engine = g.CustomEngine.parse({ host: "www.google.com", shape: "search-q" });
+  assert.equal(engine.ok, true);
+  assert.equal(engine.value.host(), "google.com", "the www form is normalised away");
+  assert.equal(engine.value.id(), "custom:google.com", "so the identity cannot enter twice");
+});
+
+test("the preview encodes a space the way a browser does", () => {
+  // encodeURIComponent gives %20; an address bar emits `+`. The rule matches both,
+  // so the preview still said "matched" -- but through the OTHER branch of the
+  // alternation than the one reality takes. A screen claiming to simulate the
+  // delivered programme was validating a path no navigation ever walks.
+  const catalog = g.SearchEngineCatalog.forPolicy(
+    g.JumpPolicy.empty().withEngines(["google.com"]).value
+  );
+  const url = catalog.find("google.com").searchUrlFor("covid 19");
+  assert.ok(url.includes("q=covid+19"), `expected a + separator, got ${url}`);
+  assert.equal(url.includes("%20"), false);
+});
+
+test("two rules can never share an id, and the assertion that says so exists", () => {
+  // rule-factory.js cited this guard rail as if it were there: "RuleSet asserts
+  // that all ids are distinct". It did not. The separation between the binding
+  // band (1..300) and the reserved-prefix band (1001+) rested on nothing --
+  // raise MAX_BINDINGS past a thousand and two rules collide, at which point
+  // updateDynamicRules rejects THE WHOLE BATCH and every shortcut dies together.
+  const collide = {
+    units: [[{ id: 7, priority: 1, action: {}, condition: {} }],
+            [{ id: 7, priority: 2, action: {}, condition: {} }]],
+    skipped: [],
+    contract: g.CoverageContract.empty(),
+  };
+  assert.throws(
+    () => g.RuleSet.sealed(collide).assertIdsAreDistinct(),
+    /two rules share id 7/
+  );
+
+  // And a real programme passes it, which is what makes the guard honest.
+  const policy = withCatchAll();
+  assert.ok(g.RuleFactory.buildRules(policy, g.SearchEngineCatalog.forPolicy(policy),
+    g.Re2Budget.conservative()).rules().length > 0);
+});
+
+test("a sealed rule set cannot be rewritten under its readers", () => {
+  // The seal copied the runs and left the rule objects SHARED, with a note saying
+  // "nobody trusts an immutability that does not exist" -- a strange thing to
+  // write on a value object whose whole contract is that it cannot change.
+  const policy = withCatchAll();
+  const set = g.RuleFactory.buildRules(policy, g.SearchEngineCatalog.forPolicy(policy),
+    g.Re2Budget.conservative());
+  const rule = set.rules()[0];
+  const before = rule.condition.regexFilter;
+  try { rule.condition.regexFilter = ".*"; } catch { /* strict mode throws, also fine */ }
+  assert.equal(set.rules()[0].condition.regexFilter, before, "the pattern cannot be swapped after sealing");
 });

@@ -44,13 +44,18 @@
     throw new Error("the priority bands must be strictly ordered");
   }
 
+  /** One band per nature of key. */
+  const BANDS = Object.freeze({ named: NAMED, "catch-all": CATCH_ALL });
+
   const RuleRanking = {
     NAMED,
     RESERVED_PREFIX,
     CATCH_ALL,
 
     forKey(key) {
-      return key.isCatchAll() ? CATCH_ALL : NAMED;
+      // BY NATURE, not by a ternary on a predicate: a third nature of key gets a
+      // band by adding a row here, not by editing a condition.
+      return BANDS[key.nature()] ?? NAMED;
     },
 
     forReservedPrefixes() {
@@ -92,10 +97,23 @@
      * the Jira instance. The sentence lies by accusing the extension of a flow it does
      * not have. It is the argument for a total-constructor value object on a rule read
      * back -- not a refactoring bonus.
+     *
+     * Does this BAND mean "catch-all"?
+     *
+     * It used to take a rule and read `rule.priority` -- so it only ever worked on
+     * the raw platform literal, and InstalledRule, which carries the same fact
+     * under the name `band()`, had to FORGE A DUMMY (`{ priority: this._band }`)
+     * to ask a question about itself. Ten lines of comment then explained that the
+     * dummy made the function's own canary "DEAD HERE BY CONSTRUCTION".
+     *
+     * A predicate whose contract has to be neutralised by a mannequin is asking
+     * about the wrong thing. It asks about the band now, and both shapes can hand
+     * theirs over: the forge reads `rule.priority`, the read-back value reads
+     * `band()`.
      */
-    isCatchAllRule(rule) {
-      if (!Number.isInteger(rule.priority)) throw new Error("a rule has no priority band");
-      return rule.priority === CATCH_ALL;
+    isCatchAllBand(band) {
+      if (!Number.isInteger(band)) throw new Error("a rule has no priority band");
+      return band === CATCH_ALL;
     },
 
     /**
@@ -121,7 +139,7 @@
     winner(matches) {
       if (matches.length === 0) return { code: "NO_MATCH" };
       // band() and actionType(), not the raw DNR fields: the signature is
-      // UNCHANGED -- it still receives { rule, destination, subject } and arbitrates
+      // UNCHANGED -- it still receives { rule, destination } and arbitrates
       // on m.destination, a datum that is not on the rule -- and InstalledRule
       // replaces the primitive INSIDE each match.
       const ranked = [...matches].sort((a, b) => {

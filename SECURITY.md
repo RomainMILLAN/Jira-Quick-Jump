@@ -34,7 +34,9 @@ the catch-all, doing this required guessing a configured key. Rules still apply 
 top-level navigation only, so nothing can probe your network from a sub-resource.
 
 **Failing closed costs availability.** When the configuration cannot be read back
-at all, the dynamic rules are now emptied rather than left running, and the
+at all, the dynamic rules are emptied rather than left running -- on every path
+  that can end an installation, the refused build included, and not only on the
+  two that throw. The
 options page degrades to a recovery view. That is the right direction — a denied
 jump beats a hijacked one — but it means a compromised sync account can reliably
 *disable* the extension by writing enough unreadable entries. We accept that
@@ -74,7 +76,11 @@ trade rather than leave stale rules firing under a badge that says `off`.
   them collision-prone, and only a short reserved list holds that end. Adding a word
   to that list is the answer to one too many, not a floor.
 - **The reserved-prefix guard ships as several rules, and they are indivisible.**
-  Chrome refuses a single rule carrying all 49 alternatives (`memoryLimitExceeded`),
+  Chrome refuses a single rule carrying all 49 alternatives (`memoryLimitExceeded`).
+  **This one is a measurement, not a check**: it was observed once, on one build,
+  and no test in this repository executes RE2. Everything else on this page is
+  verifiable from the source or the suite; this line is not, and it is marked so
+  rather than sitting unmarked among things that are.
   so the guard is cut into runs. Each run belongs to the SAME unit as the catch-all
   of its engine: none can be installed without the others, and a refused run takes
   that engine's catch-all with it. The final set is checked prefix by prefix, per
@@ -93,6 +99,12 @@ trade rather than leave stale rules firing under a badge that says `off`.
   account cannot accept a universal redirect on your behalf. The limit, stated:
   this separates the **sync channel**, not a local attacker — who could write that
   record just as easily as the configuration itself. Same limit as the journal.
+- **The change detector tells an act from a discovery.** A change somebody
+  claimed at the commit is recorded without raising anything; only a divergence
+  nobody claims raises the banner. The claim is an IDENTITY -- which revision,
+  written by whom -- never a height, because a height is a number the hostile
+  writer chooses. The residual window is narrowed, not closed: an attribution
+  landing after a divergence has been written is not caught.
 - **The change detector survives a restart.** The last installed policy is kept
   locally and compared on every wake-up, so a write pushed while the service
   worker was dead is still reported. Its absence is treated as a change, never as
@@ -113,7 +125,7 @@ trade rather than leave stale rules firing under a badge that says `off`.
   to the installed reality. The **status line** used to read `READY` while the
   catch-all had failed to install: the service worker records the result of each
   installation in local storage (`installOutcome`) and the page reads it, so a
-  failed install and an *unknown* install are now two distinct sentences with two
+  failed install and an *unknown* install are two distinct sentences with two
   distinct tones, rather than one reassuring silence.
 - **That receipt is FORGEABLE by a local attacker, and here is exactly what it
   buys.** `installOutcome` lives in `storage.local`, **never** in sync — so the

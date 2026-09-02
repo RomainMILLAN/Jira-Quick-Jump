@@ -5,7 +5,7 @@
 (function (global) {
   "use strict";
 
-  const { Platform, RuleFactory, SearchEngineCatalog, OriginRequirements, Re2Budget } = global;
+  const { Platform, RuleFactory, SearchEngineCatalog, OriginRequirements, Re2Budget, NotInstalled } = global;
   const dnr = () => Platform.api.declarativeNetRequest;
 
   /**
@@ -22,6 +22,9 @@
    *     SHARED DEFERRED, RE-ARMED AT EVERY REPLAY: everyone who coalesced onto the
    *     same slot gets the result of the run that actually reflects it.
    *
+   * (b-bis) EXCEPT A REQUEST THE PURGE PRIMED OVER: it is rejected with
+   *     SUPERSEDED_BY_PURGE rather than handed the purge's own (empty) result.
+   *
    * (c) THE REPLAY PROMISE WAS ABANDONED: `if (next) this.install(next)` dropped
    *     its promise on the floor, so a rejection there surfaced nowhere. With a
    *     single driver draining the slot, every outcome reaches a waiter -- which is
@@ -33,10 +36,6 @@
    * empties the slot. Otherwise the fail-closed gesture would be cancelled by the
    * very queue meant to protect it.
    */
-  let pending = null;
-  let queued = null;
-  let deferred = null;
-
   const defer = () => {
     let resolve;
     let reject;
@@ -47,14 +46,121 @@
     return { promise, resolve, reject };
   };
 
+  /**
+   * THE SINGLE-SLOT QUEUE, AS AN OBJECT.
+   *
+   * `pending`, `queued` and `deferred` were three module-level variables, so the
+   * mechanism could not be instantiated twice, could not be isolated in a test,
+   * and leaked between test cases -- a run that reached the deadlock this class
+   * now closes poisoned every case after it.
+   *
+   * Three attributes, and the run() it is handed: the queue knows how to
+   * coalesce and drain, and nothing about DNR.
+   */
+  class SingleSlot {
+    constructor(run) {
+      this._run = run;
+      this._pending = undefined;
+      this._queued = undefined;
+      this._waiters = undefined;
+    }
+
+    /**
+     * LAST REQUEST WINS -- EXCEPT OVER A PURGE.
+     *
+     * The header has always claimed "THE PURGE PRIMES", and the code did not do
+     * it: the slot was overwritten uniformly, so
+     *
+     *   sync() fails -> purge()      -> slot = PURGE
+     *   storage.onChanged -> sync()  -> slot = INSTALL   <- purge gone
+     *
+     * cancelled the fail-closed gesture with the very queue meant to carry it,
+     * and both halves are reachable in one turn of the loop. A pending purge is a
+     * decision already taken to install nothing; a later install is a decision
+     * taken on older information.
+     */
+    accept(slot, primes) {
+      // A REQUEST THE PURGE PRIMED OVER IS TOLD SO, never handed the purge's
+      // result. It used to fall through to the shared waiter, so an install
+      // dropped in favour of a queued purge resolved with `undefined` -- and
+      // background.js reads `report.installed` one line after the await. The
+      // outcome stayed fail-closed (the outer catch purges again), but a named
+      // refusal was replaced by an anonymous TypeError, and the header's promise
+      // that "everyone who coalesced gets the result of the run that reflects
+      // them" was false in exactly this branch.
+      if (this._queued && primes(this._queued) && !primes(slot)) {
+        return Promise.reject(new Error("SUPERSEDED_BY_PURGE"));
+      }
+      this._queued = slot;
+      if (!this._waiters) this._waiters = defer();
+      const waiting = this._waiters.promise;
+      this._pump();
+      return waiting;
+    }
+
+    /**
+     * Starts a drain, and GUARANTEES that a slot posted while one was unwinding
+     * gets its own.
+     *
+     * The bug this closes was a DEADLOCK, reachable by the kill switch itself.
+     * Clearing `pending` lands in a microtask, while a rejected waiter is resumed
+     * BEFORE it: the run rejects, the waiter is rejected and the drain returns,
+     * sync()'s catch calls purge() -- and purge() found the slot still busy, so it
+     * filled it, returned a fresh promise, and NOBODY DRAINED IT. purge() never
+     * settled, sync()'s finally never ran: no receipt, no badge, and THE OLD RULES
+     * STILL FIRING.
+     *
+     * So the re-check happens where the answer is finally knowable.
+     */
+    _pump() {
+      if (this._pending) return;
+      this._pending = this._drain().finally(() => {
+        this._pending = undefined;
+        if (this._queued) this._pump();
+      });
+    }
+
+    /** One slot in flight at a time, and every outcome -- value or throw -- handed
+     *  to the callers who coalesced onto it. */
+    async _drain() {
+      while (this._queued) {
+        const slot = this._queued;
+        const waiters = this._waiters;
+        this._queued = undefined;
+        this._waiters = undefined;
+        try {
+          waiters.resolve(await this._run(slot));
+        } catch (error) {
+          waiters.reject(error);
+        }
+      }
+    }
+  }
+
+  const isPurge = (slot) => slot.kind === "PURGE";
+
+  /** ONE queue for the extension, created on first use -- but a queue that CAN be
+   *  created twice, which is what makes it testable and what module-level
+   *  variables made impossible. */
+  let theSlot;
+  const slot = () => {
+    if (!theSlot) {
+      theSlot = new SingleSlot((s) =>
+        s.kind === "PURGE" ? RuleInstaller._purge() : RuleInstaller._install(s.policy, s.quarantinedCount)
+      );
+    }
+    return theSlot;
+  };
+
   const RuleInstaller = {
+    SingleSlot,
     /**
      * storage.onChanged and permissions.onAdded can fire almost simultaneously,
      * and two interleaved wholesale replacements would transiently empty the
      * rules -- precisely when the user has just granted access and is testing.
      */
     async install(policy, quarantinedCount = 0) {
-      return this._enqueue({ kind: "INSTALL", policy, quarantinedCount });
+      return slot().accept({ kind: "INSTALL", policy, quarantinedCount }, isPurge);
     },
 
     /**
@@ -71,7 +177,7 @@
      * "nothing leaks" becomes STRUCTURAL rather than measured.
      */
     async purge() {
-      await this._enqueue({ kind: "PURGE" });
+      await slot().accept({ kind: "PURGE" }, isPurge);
     },
 
     /**
@@ -87,41 +193,6 @@
     async installedRuleCount() {
       const rules = await dnr().getDynamicRules();
       return rules.length;
-    },
-
-    _enqueue(slot) {
-      // LAST REQUEST WINS, the purge included -- and the purge arriving last is
-      // exactly the case that must not be coalesced away.
-      queued = slot;
-      if (!deferred) deferred = defer();
-      const waiting = deferred.promise;
-      if (!pending) {
-        pending = this._drain().finally(() => {
-          pending = null;
-        });
-      }
-      return waiting;
-    },
-
-    /**
-     * The single driver. One slot in flight at a time, and every slot's outcome --
-     * value or throw -- handed to the callers who coalesced onto it.
-     */
-    async _drain() {
-      while (queued) {
-        const slot = queued;
-        const waiters = deferred;
-        queued = null;
-        deferred = null;
-        try {
-          const outcome = slot.kind === "PURGE"
-            ? await this._purge()
-            : await this._install(slot.policy, slot.quarantinedCount);
-          waiters.resolve(outcome);
-        } catch (error) {
-          waiters.reject(error);
-        }
-      }
     },
 
     async _purge() {
@@ -145,40 +216,69 @@
         // factory pick its own measurement would leave that Strategy without a
         // path.
         const set = RuleFactory.buildRules(policy, catalog, Re2Budget.conservative());
-      // The awaits happen HERE, and the atomicity decision is a synchronous
-      // property of the set: a value object must not need a platform fake to be
-      // tested.
-      const unsupported = [];
-      for (const rule of set.rules()) {
-        // THE CHECK MUST ASK THE QUESTION THE RULE ACTUALLY POSES, and both
-        // options were left out -- each defaulting to the OPPOSITE of what every
-        // rule here does (verified against the API reference):
+        // The awaits happen HERE, and the atomicity decision is a synchronous
+        // property of the set: a value object must not need a platform fake to be
+        // tested.
         //
-        //   isCaseSensitive  defaults to TRUE, while every condition sets
-        //                    isUrlFilterCaseSensitive: false, so that abc-1 lands
-        //                    on /browse/ABC-1;
-        //   requireCapturing defaults to FALSE, while every redirect rule carries
-        //                    a regexSubstitution with backreferences -- two of
-        //                    them for a catch-all.
+        // ASKED IN PARALLEL, AND ASKED ONCE PER DISTINCT QUESTION.
         //
-        // Both cost RE2 memory, so a regex can be supported bare and refused as
-        // the rule needs it. Asked bare, the call vouches for an expression we
-        // never install, and it FAILS OPEN: the rule reaches updateDynamicRules,
-        // which rejects THE WHOLE BATCH. Rules are replaced wholesale, so one
-        // over-budget regex would take every other shortcut down with it instead
-        // of being the single skipped entry the design promises.
+        // This was a sequential await per rule, re-run on every sync() -- that is,
+        // on every debounced keystroke in the options page. With the reserved
+        // prefixes cut into runs and one rule per engine, that is dozens of
+        // serialised IPC round trips against a service worker whose whole budget
+        // is staying alive long enough to finish. And the reserved-prefix guards
+        // are IDENTICAL across engines and CONSTANT between runs, so most of those
+        // trips asked the same question twice.
         //
-        // Derived from the rule rather than restated, so the two can never drift.
-        const substitutes =
-          rule.action.type === "redirect" &&
-          Boolean(rule.action.redirect && rule.action.redirect.regexSubstitution);
-        const check = await dnr().isRegexSupported({
+        // The key is the whole question, never just the regex: isCaseSensitive and
+        // requireCapturing both cost RE2 memory, so the same expression can be
+        // supported bare and refused as the rule needs it.
+        const questionFor = (rule) => ({
           regex: rule.condition.regexFilter,
           isCaseSensitive: rule.condition.isUrlFilterCaseSensitive,
-          requireCapturing: substitutes,
+          // THE CHECK MUST ASK THE QUESTION THE RULE ACTUALLY POSES, and both
+          // options were left out -- each defaulting to the OPPOSITE of what every
+          // rule here does (verified against the API reference):
+          //
+          //   isCaseSensitive  defaults to TRUE, while every condition sets
+          //                    isUrlFilterCaseSensitive: false, so that abc-1 lands
+          //                    on /browse/ABC-1;
+          //   requireCapturing defaults to FALSE, while every redirect rule carries
+          //                    a regexSubstitution with backreferences -- two of
+          //                    them for a catch-all.
+          //
+          // Asked bare, the call vouches for an expression we never install, and it
+          // FAILS OPEN: the rule reaches updateDynamicRules, which rejects THE
+          // WHOLE BATCH. Rules are replaced wholesale, so one over-budget regex
+          // would take every other shortcut down with it instead of being the
+          // single skipped entry the design promises.
+          //
+          // Derived from the rule rather than restated, so the two cannot drift.
+          requireCapturing:
+            rule.action.type === "redirect" &&
+            Boolean(rule.action.redirect && rule.action.redirect.regexSubstitution),
         });
-        if (!check.isSupported) unsupported.push(rule.id);
-      }
+
+        const asked = new Map();
+        for (const rule of set.rules()) {
+          const question = questionFor(rule);
+          const key = JSON.stringify(question);
+          if (!asked.has(key)) asked.set(key, dnr().isRegexSupported(question));
+        }
+        const answers = new Map();
+        await Promise.all(
+          [...asked].map(async ([key, pending]) => answers.set(key, await pending))
+        );
+        const unsupported = set
+          .rules()
+          .filter((rule) => {
+            const answer = answers.get(JSON.stringify(questionFor(rule)));
+            // An absent answer cannot happen -- every rule was asked -- but a
+            // missing one must read as UNSUPPORTED, never as a silent yes.
+            return !(answer && answer.isSupported);
+          })
+          .map((rule) => rule.id);
+
         // withoutRules replays the post-condition through the constructor, so the
         // explicit call that used to sit here is gone: two notes stuck on a
         // blister are still notes.
@@ -195,9 +295,11 @@
         // unchanged badge. Safe (the previous set was sealed) but MUTE, and a
         // refusal has to be readable. INSTALL_FAILED is first in DIAGNOSES.
         //
-        // A rejection leaves the call atomic: nothing changes, THE PREVIOUS RULES
-        // STAY ALIVE, and the promise would otherwise surface in a listener where
-        // nobody catches it. After this feature that is the KILL SWITCH breaking.
+        // A rejection leaves THIS CALL atomic: the batch is all-or-nothing, so no
+        // mixed programme is ever installed. It no longer leaves the previous
+        // rules running, though -- the catch below purges. Atomicity protects
+        // against a half-written programme; it is not what protects against a
+        // stale one, and conflating the two is how the kill switch broke.
         const existing = await dnr().getDynamicRules();
         await dnr().updateDynamicRules({
           removeRuleIds: existing.map((r) => r.id),
@@ -214,19 +316,59 @@
         const reason = error instanceof Re2Budget.Refusal
           ? error.reason
           : Re2Budget.REASONS.UNKNOWN;
-        skipped = [...skipped, { code: "CONSTRUCTION_REFUSED", reason }];
+        skipped = [...skipped, NotInstalled.of("CONSTRUCTION_REFUSED", reason)];
         coverageSatisfied = false;
+        // AND THE FAIL-CLOSED HAPPENS HERE, not only in background.js.
+        //
+        // This catch RESOLVES -- it does not rethrow -- so sync()'s own catch is
+        // never reached and never purges. Without this line a refused build left
+        // THE PREVIOUS PROGRAMME FIRING while the policy said something else:
+        // SECURITY.md's "the dynamic rules are now emptied rather than left
+        // running" covered the throw and the unreadable policy, and missed the
+        // one path that a custom domain's envelope reaches on its own.
+        //
+        // A DIRECT CALL, never _enqueue: we are INSIDE the drain, and re-entering
+        // the queue from here would fill a slot nobody drains until we return.
+        //
+        // Its own failure is swallowed on purpose: `installed` is already false,
+        // and the badge asks the platform for the real count rather than trusting
+        // this frame. A throw here would replace a named refusal with an
+        // anonymous one.
+        try {
+          await this._purge();
+        } catch {
+          /* the count the badge reads is the platform's, not ours */
+        }
       }
-      return this.report(policy, skipped, quarantinedCount, { installed, coverageSatisfied }, "INSTALL");
+      return this.report({
+        policy,
+        skipped,
+        quarantinedCount,
+        reality: { installed, coverageSatisfied },
+        source: "INSTALL",
+      });
     },
 
     /**
      * Rules are installed even when the required origins are missing: a redirect
      * rule without host access simply never fires, and becomes active on its own
      * the moment permission is granted, with no further sync.
-     */
-    /**
-     * `source` is a FIFTH NAMED PARAMETER WITH NO DEFAULT.
+     *
+     * A NAMED OBJECT, because the signature needed a paragraph.
+     *
+     * It was `report(policy, skipped = [], quarantinedCount = 0, reality = {},
+     * source)` -- five parameters, four defaults, and the only MANDATORY one
+     * last -- defended by twenty-seven lines explaining why. Those lines were
+     * right about the danger and wrong about the remedy: the comment itself
+     * recounts that a three-argument call had already fabricated an
+     * `installed: true`. Defaults that make an omission SILENT are the disease;
+     * a fifth positional argument was a splint.
+     *
+     * Named, an omission is visible at the call site, and there is no order to
+     * remember. The original note follows, because its reasoning about `source`
+     * is still exactly right:
+     *
+     * `source` HAS NO DEFAULT.
      *
      * With a default, the two call sites that forget it leave `undefined` -- the
      * MEANINGFUL ABSENCE the discriminant exists to abolish -- and a default of
@@ -252,7 +394,7 @@
      * verifiable control would become the channel of the lie, with the preview's
      * authority behind it.
      */
-    async report(policy, skipped = [], quarantinedCount = 0, reality = {}, source) {
+    async report({ policy, skipped, quarantinedCount, reality, source }) {
       const origins = OriginRequirements.requiredOrigins(policy, SearchEngineCatalog.forPolicy(policy));
       const originsGranted = await Platform.grantedOrigins(origins);
       const rules = await dnr().getDynamicRules();

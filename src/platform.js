@@ -9,6 +9,10 @@
 (function (global) {
   "use strict";
 
+  // Captured once for the load-time bindings below; the STORAGE methods go
+  // through `this.api` instead, because that is the handle every other module in
+  // the project already uses -- and a facade that cannot be stood in for is a
+  // facade its own tests must reach around.
   const api = global.browser ?? global.chrome;
 
   const Platform = {
@@ -36,17 +40,35 @@
      * without touching the extension.
      */
     async storageArea() {
+      return this.storageAreaFor(await this.storageAreaName());
+    },
+
+    /**
+     * WHICH area is in charge, by name.
+     *
+     * The name was only ever readable by comparing the OBJECT storageArea()
+     * returns, so callers that needed to know "am I already there?" reached past
+     * this facade and re-read the `storageArea` entry themselves -- giving the
+     * key two owners. It has one.
+     */
+    async storageAreaName() {
       try {
-        const { storageArea } = await api.storage.local.get("storageArea");
-        return storageArea === "sync" && api.storage.sync ? api.storage.sync : api.storage.local;
+        const { storageArea } = await this.api.storage.local.get("storageArea");
+        return storageArea === "sync" && this.api.storage.sync ? "sync" : "local";
       } catch {
-        return api.storage.local;
+        return "local";
       }
+    },
+
+    /** The area an intention names, whether or not it is the one in charge. A
+     *  migration has to hold both at once. */
+    storageAreaFor(name) {
+      return name === "sync" && this.api.storage.sync ? this.api.storage.sync : this.api.storage.local;
     },
 
     /** The setting itself always lives in local, or one device could re-enable sync on another. */
     async setStorageArea(area) {
-      await api.storage.local.set({ storageArea: area });
+      await this.api.storage.local.set({ storageArea: area });
     },
 
     async grantedOrigins(origins) {

@@ -94,6 +94,21 @@
     isCatchAll() {
       return false;
     }
+    /**
+     * WHAT KIND OF KEY THIS IS, as a word rather than a boolean read backwards.
+     *
+     * Five sites spelled `key.isCatchAll() ? "catch-all" : "named"` -- the
+     * acknowledgement row key, the rule label, two fact types, one badge. Each is
+     * a dispatch wearing a ternary, and each would need editing to admit a third
+     * nature of key. Asking the key costs one method per class instead.
+     *
+     * NOT a replacement for isCatchAll(): the registry legitimately ASKS whether
+     * a key is the catch-all -- "is there one already", "which row is it" -- and a
+     * predicate is the honest form of that question.
+     */
+    nature() {
+      return "named";
+    }
     /** A named key claims itself, and nothing else. */
     captures(projectKey) {
       return this.equals(projectKey);
@@ -110,6 +125,27 @@
      */
     separators() {
       return global.IssueReference.SEPARATORS;
+    }
+
+    /**
+     * WHAT THIS KEY CLAIMS, in the domain's own words.
+     *
+     * The airlock used to hold a two-entry table plus
+     * `shapeOf(key) = key.isCatchAll() ? … : …` -- the branch on the type its own
+     * header claimed to have removed; a table does not remove a branch, it moves
+     * it. Asking the key killed that, and the first attempt over-corrected: it put
+     * `fragmentFor()`, `arity()` and `referenceFor()` in the key protocol, so the
+     * DOMAIN started emitting RE2 -- capture-group counts, `\1` backreferences --
+     * and CatchAllKey.fragmentFor even called into `interception/`. That was the
+     * only live core -> airlock dependency in the project, created by the very
+     * batch that removed the other one.
+     *
+     * So the key says what it CLAIMS, and nothing about how a regex spells it.
+     * reference-pattern.js branches on this DATA -- not on a type, not on
+     * instanceof -- and asks Re2Budget on its own side of the membrane.
+     */
+    claim() {
+      return { literal: this._value };
     }
   }
 

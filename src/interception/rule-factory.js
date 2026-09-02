@@ -23,7 +23,7 @@
   //
   // THE BAND MATTERS FOUR TIMES MORE SINCE THE GUARD WAS CUT. Bindings run
   // 1..MAX_BINDINGS (300), because binding.ruleId() is _ruleIndex + 1; guards now
-  // number engines x runs -- at most 24 x 4 = 96 -- so they occupy [1001, 1096].
+  // number engines x runs -- at most 24 x 4 = 96 -- so they occupy [1001, 1256].
   // No overlap, and RuleSet asserts that all ids are distinct, which covers the
   // monotonic counter that nothing else keeps inside its band.
   const RESERVED_RULE_ID_BASE = 1001;
@@ -61,14 +61,14 @@
       // { key, engineIds } rather than a Map<engineId, key>: catchAll() is
       // SINGULAR, so a map would carry the same value once per engine with a
       // uniformity invariant asserted nowhere.
-      let catchAll = null;
+      let catchAll = undefined;
 
       for (const binding of policy.activeBindings()) {
         const engine = catalog.find(binding.engineId());
         if (!engine) {
           // The core only holds opaque engine ids, so it cannot check that one
           // exists. Filtering is the airlock's job: translate AND filter.
-          skipped.push({ binding, code: "UNKNOWN_ENGINE" });
+          skipped.push(global.NotInstalled.of("UNKNOWN_ENGINE", binding.describe()));
           continue;
         }
         const shortcut = binding.shortcut();
@@ -86,18 +86,24 @@
           // rules reach the platform.
           //
           // NOT "for the preview" any more: the preview reads the BAND through
-          // RuleRanking.isCatchAllRule, because it is fed the rules READ BACK from the
+          // RuleRanking.isCatchAllBand, because it is fed the rules READ BACK from the
           // store, where no label survives. Leaving that word here would justify a
           // field by a reader who no longer exists -- the exact exit this file warns
           // about below.
           engineId: binding.engineId(),
           isCatchAll: key.isCatchAll(),
         };
-        if (key.isCatchAll()) {
-          if (catchAll === null) catchAll = { key, engineIds: [] };
-          catchAll.engineIds.push(binding.engineId());
-        }
         units.push([rule]);
+        if (key.isCatchAll()) {
+          // INDEXED WHERE IT IS CREATED, not searched for afterwards. The unit was
+          // recovered by scanning `units` for a LABEL -- inside the per-engine loop,
+          // so linear work under a loop, and resting on an invariant its own comment
+          // called "one edit away from being an undefined.push". The unit is known
+          // here; remembering it costs a Map entry and removes the search, the
+          // invariant and the label lookup at once.
+          if (catchAll === undefined) catchAll = { key, units: new Map() };
+          catchAll.units.set(binding.engineId(), units[units.length - 1]);
+        }
       }
 
       // Only where a catch-all is actually active: without one, these would kill
@@ -107,13 +113,9 @@
         ? ReferencePattern.reservedPrefixGuards(catchAll.key, budget)
         : [];
       let nextGuardId = RESERVED_RULE_ID_BASE;
-      for (const engineId of catchAll ? catchAll.engineIds : []) {
+      for (const [engineId, unit] of catchAll ? catchAll.units : []) {
         const engine = catalog.find(engineId);
         if (!engine) continue;
-        // engineIds is only filled after the binding loop's own `if (!engine)
-        // continue`, so the unit exists. Written down because it is one edit away
-        // from being an undefined.push.
-        const unit = units.find((u) => u[0].isCatchAll && u[0].engineId === engineId);
         // The catch-all of THIS engine and its guards form one unit: none can be
         // installed without the others. THE UNIT IS NOW FIVE RULES INSTEAD OF TWO,
         // so a single over-budget run kills the catch-all OF THAT ENGINE -- still
@@ -138,15 +140,15 @@
       // docket: without empty(), a null catch-all would throw a TypeError on the
       // MAJORITY path -- every profile without a catch-all, on every sync.
       const contract = catchAll
-        ? new global.CoverageContract(catchAll.key.prefixesWithinReach(), catchAll.engineIds)
+        ? new global.CoverageContract(catchAll.key.prefixesWithinReach(), [...catchAll.units.keys()])
         : global.CoverageContract.empty();
-      const set = RuleSet.sealed({ units, skipped, contract });
+      const set = RuleSet.sealed({ units, skipped, contract }).assertIdsAreDistinct();
 
       // THE BAND POST-CONDITION, both ways, where the two facts still coexist.
       //
       // `isCatchAll => band CATCH_ALL` is the natural direction to write; it is the
       // OTHER one the simulator infers, so both are asserted. Asked through
-      // RuleRanking.isCatchAllRule and never by reading `priority` here: this file must
+      // RuleRanking.isCatchAllBand and never by reading `priority` here: this file must
       // not start reading the field whose sole owner is the ranking module.
       //
       // TOTAL -- every rule of the set -- because since platformRules() derives from
@@ -159,7 +161,7 @@
       // green forever. It has real content on the GUARDS -- two independent literals --
       // and on the day a fourth band appears.
       for (const rule of set.rules()) {
-        if (RuleRanking.isCatchAllRule(rule) !== rule.isCatchAll) {
+        if (RuleRanking.isCatchAllBand(rule.priority) !== rule.isCatchAll) {
           throw new Error("a rule's band and its catch-all label disagree: " + rule.id);
         }
       }

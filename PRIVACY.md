@@ -30,6 +30,12 @@ Your shortcuts — issue keys and their Jira base URLs — plus which engines yo
 selected and what you acknowledged. Also a short journal, capped at 20 entries,
 of when a destination changed, and two small local records described below.
 
+When the journal is full, what it sacrifices is written down rather than left to
+chance: changes **you** made go first, oldest first, and a change nobody claimed
+is the last to go — the oldest of those last of all, because that one dates the
+event. If anything at all had to be dropped, the banner says so and keeps saying
+it: the missing evidence does not come back.
+
 **A catch-all sends more than you might expect.** With a catch-all armed, *any*
 text shaped like an issue key — `PAYROLL-3`, `BAN-123`, a project you never
 declared — leaves for that Jira instance and lands in its access logs as
@@ -37,7 +43,7 @@ declared — leaves for that Jira instance and lands in its access logs as
 creates it, so it is stated here rather than left for you to discover. Two things
 bound it: a catch-all accepts the hyphen only, so `SALARY 2024` and `WINDOWS 11`
 never leave; and a closed list of reserved prefixes (`ISO`, `CVE`, `COVID`, `WD`
-and about forty-five more) is left alone. The list is a mitigation, never a
+and forty-five more, 49 in all) is left alone. The list is a mitigation, never a
 completeness claim — `MP3-320` and `X1-9` are key-shaped and will be caught.
 
 Two records live in **local storage only**, never synced and never exported, for

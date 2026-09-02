@@ -32,11 +32,16 @@
     //     <li draggable> from hijacking text selection inside a field.
     "aria-disabled", "aria-atomic",
     "width", "height", "viewBox", "fill", "stroke", "stroke-width",
-    "stroke-linecap", "stroke-linejoin", "d", "rel", "target",
+    "stroke-linecap", "stroke-linejoin", "d",
   ]);
 
   const SVG_NS = "http://www.w3.org/2000/svg";
-  const SVG_TAGS = new Set(["svg", "path", "circle", "rect", "g"]);
+  // ONLY what ATTRS can actually furnish. `circle`, `rect` and `g` were listed
+  // here while cx/cy/r/x/y were absent from the whitelist above, so building one
+  // THREW on its first attribute -- a trap that read as an offer. A tag belongs
+  // in this set when the attributes that make it a shape are in ATTRS, and not
+  // before.
+  const SVG_TAGS = new Set(["svg", "path"]);
 
   const Dom = {
     el(tag, props = {}, children = []) {
@@ -65,27 +70,6 @@
         node.appendChild(typeof child === "string" ? document.createTextNode(child) : child);
       }
       return node;
-    },
-
-    /**
-     * A link is created ONLY for a re-parsed http(s) URL, and href receives the
-     * parsed object's href rather than the string that was handed in. The rule
-     * that matters is not "escape it": a script-scheme URL placed in an href
-     * executes in the extension's own origin, with the extension's privileges.
-     * The grep in test/structure.test.js is deliberately literal, so that
-     * scheme is never spelled out anywhere under src/ -- not even in a comment.
-     */
-    link(rawUrl, props, children) {
-      let url;
-      try {
-        url = new URL(rawUrl);
-      } catch {
-        return Dom.el("span", props, children);
-      }
-      if (url.protocol !== "https:" && url.protocol !== "http:") {
-        return Dom.el("span", props, children);
-      }
-      return Dom.el("a", { ...props, rel: "noopener noreferrer", target: "_blank" }, children);
     },
 
     /**

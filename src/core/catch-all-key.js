@@ -44,6 +44,11 @@
     isCatchAll() {
       return true;
     }
+
+    /** See ProjectKey.nature. */
+    nature() {
+      return "catch-all";
+    }
     /**
      * NOT part of the key protocol, and false on purpose -- an acknowledgeable,
      * arming-blocking CATCH_ALL warning is strictly stronger than a piece of
@@ -71,9 +76,8 @@
      * NOT part of the ShortcutKey protocol, and deliberately carried by
      * CatchAllKey ALONE. On a ProjectKey the honest answer to "your key length
      * ceiling" would be its own length, not 20 -- two contracts under one name,
-     * a substitution violation a typeof test would never see. And no caller is
-     * polymorphic: reference-pattern.js branches on shapeOf(key) BEFORE calling
-     * shape.fragmentFor(key), so SHAPES.named never receives the question.
+     * a substitution violation a typeof test would never see. Its only reader is
+     * claim() below; see shortcut-key.js for why it stays outside.
      */
     claimsKeysUpTo() {
       return 6;
@@ -165,6 +169,20 @@
       return global.ProjectKey.parse("SAMPLE").value;
     }
 
+    /**
+     * WHAT THIS KEY CLAIMS: any key up to a length, and no literal of its own.
+     *
+     * NOT a regex fragment. The first attempt had this method emit one -- and, to
+     * honour "the domain proposes, the foreign system says whether it can carry",
+     * call Re2Budget from `core/`. That created the project's only live
+     * core -> interception dependency, in the batch that removed the other one.
+     * The proposal belongs here; the asking belongs on the other side, where the
+     * refusal already has a channel (`skipped`).
+     */
+    claim() {
+      return { anyKeyUpTo: this.claimsKeysUpTo() };
+    }
+
     toJSON() {
       return WRITTEN_FORM;
     }
@@ -176,6 +194,19 @@
   CatchAllKey.only = function () {
     return only;
   };
+
+  /**
+   * The bound, READABLE WITHOUT MINTING A KEY.
+   *
+   * The options page needs it to write its own sentence, and it may not call
+   * CatchAllKey.only(): a structure test forbids that file from turning anything
+   * into a catch-all key, because the single door that does so must stay out of
+   * the surface where the user types. A frozen number crosses that line safely
+   * where an instance would not.
+   */
+  Object.defineProperty(CatchAllKey, "CLAIMS_KEYS_UP_TO", {
+    value: only.claimsKeysUpTo(), writable: false, configurable: false, enumerable: true,
+  });
 
   Object.defineProperty(CatchAllKey, "VERDICTS", {
     value: VERDICTS, writable: false, configurable: false, enumerable: true,

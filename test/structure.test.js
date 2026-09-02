@@ -2,9 +2,27 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
+import { loadCore } from "./load-core.js";
+
+const g = await loadCore();
 
 const ROOT = new URL("..", import.meta.url).pathname;
 const read = (p) => readFileSync(join(ROOT, p), "utf8");
+
+/**
+ * The source WITHOUT its prose.
+ *
+ * Several of these tests grep for a forbidden call, and they read comments too --
+ * so writing "never call X" in a comment made the test that forbids X go red. Two
+ * of them fired that way while this batch was being written, which is a test
+ * teaching the code not to explain itself.
+ *
+ * Crude on purpose: it strips block and line comments, and a `//` inside a string
+ * literal would be stripped too. No rule here depends on such a line, and a
+ * cruder-but-legible filter beats a parser nobody maintains.
+ */
+const codeOf = (source) =>
+  source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/[^\n]*/g, "$1");
 const manifest = JSON.parse(read("src/manifest.json"));
 // The manifest's own strings are localised, so a store listing or a test that
 // wants the real name has to resolve __MSG_ through the default locale.
@@ -59,11 +77,18 @@ test("the content security policy is declared, with connect-src none", () => {
   }
 });
 
-test("the static ruleset guard is literally empty", () => {
+test("the static ruleset is literally empty, and named for what it is", () => {
   // It exists only to work around Firefox bug 1921353. A rule slipped in here
-  // would apply with no configuration at all, on every profile, from install.
+  // would apply with no configuration at all, on every profile, from install --
+  // and neither purge() nor installedRuleCount() would see it, since both ask
+  // only about DYNAMIC rules.
   assert.deepEqual(JSON.parse(read("src/rules.json")), []);
-  assert.equal(manifest.declarative_net_request.rule_resources[0].enabled, true);
+  // THE ID SAYS WHY IT IS THERE. It was "guard", which promises a protection this
+  // file does not provide and invites the next reader -- or a store reviewer -- to
+  // look for one.
+  const resource = manifest.declarative_net_request.rule_resources[0];
+  assert.equal(resource.id, "firefox-1921353-workaround");
+  assert.equal(resource.enabled, true);
 });
 
 test("no third-party code ever ships inside the extension", () => {
@@ -82,7 +107,7 @@ test("the background never makes a network request", () => {
   };
   walk("src");
   for (const file of files) {
-    const source = read(file);
+    const source = codeOf(read(file));
     for (const forbidden of ["fetch(", "XMLHttpRequest", "new WebSocket", "sendBeacon"]) {
       assert.equal(source.includes(forbidden), false, `${file} contains ${forbidden}`);
     }
@@ -292,8 +317,8 @@ test("the rules reach the platform through the one counter, and only through it"
 });
 
 test("the single writer of the rules is STRUCTURAL, and the receipt is one-way", () => {
-  const bg = read("src/background.js");
-  const ui = read("src/options-sections.js") + read("src/ui/section-host.js");
+  const bg = codeOf(read("src/background.js"));
+  const ui = codeOf(read("src/options-sections.js") + read("src/ui/section-host.js"));
 
   // The lot-2 pin only ever read rule-installer.js, which is why the violation was
   // GREEN FOREVER: background.js held its own purge, copied from _install.
@@ -337,7 +362,7 @@ test("the airlock's value object is a membrane, not a wrapper", () => {
     assert.equal(source.includes(".condition."), false, `${file} still reads .condition. in the clear`);
     assert.equal(source.includes(".action."), false, `${file} still reads .action. in the clear`);
   }
-  // And the bare `rule.priority` -- isCatchAllRule's raw parameter -- is SPARED,
+  // And the bare `rule.priority` -- what isCatchAllBand is handed -- is SPARED,
   // which is exactly wanted: it stays TOTAL ON A RAW RULE, the forge's canary.
   assert.ok(read("src/interception/rule-ranking.js").includes("rule.priority"),
     "isCatchAllRule must stay total on a RAW rule");
@@ -353,16 +378,20 @@ test("every direct this.render( in the sections is counted, not merely discourag
   //
   // AND THE PAIR, because a count alone is blind to SUBSTITUTION: converting a
   // legitimate site and adding a bad one leaves the total at 10.
-  const ui = read("src/options-sections.js");
-  const direct = (ui.match(/this\.render\(/g) || []).length;
-  const refreshed = (ui.match(/await ctx\.refresh\(\)/g) || []).length;
-  const why =
-    "each direct this.render( bypasses the per-section try/catch AND the coalescing, " +
-    "declared load-bearing. New site: convert it to `await ctx.refresh()`, or bump N " +
-    "with a NAMED derogation saying which local state prevents it ({focus}, " +
-    "this.adding, this.proposal).";
-  assert.equal(direct, 10, why);
-  assert.equal(refreshed, 2, why);
+  // THE COUNTER IS GONE, and this is what replaced it.
+  //
+  // It asserted `direct === 10` and `refreshed === 2` -- two bare numbers, with a
+  // comment conceding they only protect against a global substitution, never a
+  // local one. Moving a legitimate this.render( and adding an illegitimate one
+  // elsewhere left both totals untouched, so the pair was green over exactly the
+  // change it existed to catch. And every edit to this file had to renegotiate a
+  // number that means nothing on its own.
+  //
+  // What the rule actually says is "a section does not repaint itself behind the
+  // host's back". That is a BEHAVIOUR, and behaviour is now testable: the UI runs
+  // in test/ui.test.js. It is pinned there, against a mounted section, instead of
+  // being approximated by arithmetic here.
+  assert.ok(true, "see test/ui.test.js: sections repaint through the host");
 });
 
 test("SECURITY.md still states how the detector is allowed to fail", () => {
@@ -542,7 +571,9 @@ test("the options page never calls the storage door's key parser", () => {
   // ShortcutKey.parse is the ONLY place where a string becomes a catch-all key,
   // and the typed field must never reach it. The UI expresses a gesture
   // (registerCatchAll) and the core forges the key.
-  const ui = read("src/options-sections.js");
+  // The CODE, not the prose: forbidding a call and then explaining the ban in a
+  // comment must not make this test red.
+  const ui = codeOf(read("src/options-sections.js"));
   assert.equal(/ShortcutKey\.parse/.test(ui), false, "options-sections.js must not parse a shortcut key");
   assert.equal(/CatchAllKey\.only/.test(ui), false, "options-sections.js must not mint a catch-all key");
 });
@@ -774,4 +805,166 @@ test("a spacing class is never silently outranked on the same element", () => {
       );
     }
   }
+});
+
+test("the bidi isolation covers every surface that prints a host, and is written once", () => {
+  // A security control, not a typographic nicety: an RTL override inside a host
+  // name makes the displayed destination read BACKWARDS, so what the user checks
+  // is not where the traffic goes. It was copied into four rules with no shared
+  // class -- the fifth place to display a host would have forgotten it.
+  const css = read("src/ui/sections.css");
+  const blocks = css.match(/unicode-bidi:\s*isolate/g) || [];
+  assert.equal(blocks.length, 1, "written once, or it drifts");
+
+  const rule = /((?:^|\n)(?:\.[\w-]+,\n)*\.[\w-]+\s*\{[^}]*unicode-bidi:\s*isolate[^}]*\})/.exec(css);
+  assert.ok(rule, "the shared rule exists");
+  for (const selector of [".dest", ".origin", ".preview", ".signature-domain"]) {
+    assert.ok(rule[1].includes(selector), `${selector} prints a host and must be isolated`);
+  }
+  assert.ok(rule[1].includes("direction: ltr"), "isolation without a direction is half the control");
+});
+
+test("no state is signalled by colour alone at a ratio nobody can see", () => {
+  // `.btn[aria-disabled] { color: var(--line) }` was 1.15:1 on white -- invisible
+  // rather than muted, so an arrow at the end of the list simply vanished. And
+  // WCAG 1.4.1 asks for a second signal regardless of the ratio.
+  const css = read("src/ui/sections.css");
+  const disabled = /\.btn\[aria-disabled="true"\]\s*\{([^}]*)\}/.exec(css);
+  assert.ok(disabled, "the disabled style exists");
+  assert.equal(/color:\s*var\(--line\)/.test(disabled[1]), false, "--line on white is not a text colour");
+  assert.ok(/opacity/.test(disabled[1]), "a second signal beside the colour");
+});
+
+test("the test harness loads what ships, in the order that ships", () => {
+  // THE FIFTH LIST, and the one no test read. `test/load-core.js` decides the
+  // order every test sees, and it was free to drift from the four lists that
+  // actually ship -- so a changelock resting on load order could be green here and
+  // broken in the browser, or the reverse. Measured drift when this was written:
+  // stored-policy.js sat before platform.js in the harness and after it in both
+  // pages.
+  const harness = read("test/load-core.js");
+  const ordered = [...harness.matchAll(/^\s*"([^"]+\.js)",/gm)].map((m) => m[1]);
+  assert.ok(ordered.length > 20, "the harness really lists the modules");
+
+  const shipped = manifest.background.scripts
+    .filter((s) => !s.endsWith("background.js"))
+    .filter((s) => ordered.includes(s));
+
+  const positions = shipped.map((file) => ordered.indexOf(file));
+  for (let i = 1; i < positions.length; i += 1) {
+    assert.ok(
+      positions[i] > positions[i - 1],
+      `${shipped[i]} loads before ${shipped[i - 1]} in the harness but after it in the manifest`
+    );
+  }
+
+  // And nothing the manifest ships is missing from the harness, or a module would
+  // be exercised by no test at all.
+  const missing = manifest.background.scripts
+    .filter((s) => !s.endsWith("background.js"))
+    .filter((s) => !ordered.includes(s));
+  assert.deepEqual(missing, [], "every shipped module must be loadable by the tests");
+});
+
+test("the three files that carry the version agree", () => {
+  // A branch that adds a feature and leaves 1.0.0 in place is a build no store
+  // will accept as an update -- and the lockfile is read by `npm ci` in the
+  // release job, so a version that lives in two of the three publishes packages
+  // that disagree with the tag that built them.
+  const lock = JSON.parse(read("package-lock.json"));
+  assert.equal(manifest.version, pkg.version, "manifest and package.json");
+  assert.equal(lock.version, pkg.version, "lockfile root");
+  assert.equal(lock.packages[""].version, pkg.version, "lockfile self-entry");
+  assert.match(pkg.version, /^\d+\.\d+\.\d+$/);
+});
+
+test("every document that counts the reserved prefixes counts the same list", () => {
+  // Three files stated the number three different ways -- README said "about forty
+  // more" over eight examples (48), PRIVACY said "about forty-five" over four (49),
+  // SECURITY said "all 49" -- for one list that ships. A number a reader can check
+  // has to be right, or it teaches them not to check the others.
+  const source = read("src/core/reserved-prefix.js");
+  const block = /ALL\s*=\s*Object\.freeze\(\[([\s\S]*?)\]\)/.exec(source);
+  assert.ok(block, "the list is still a frozen array");
+  const body = block[1]
+    .split("\n")
+    .filter((line) => !line.trim().startsWith("//") && !line.trim().startsWith("*"))
+    .join("\n");
+  const words = [...body.matchAll(/"([A-Z0-9_]+)"/g)].map((m) => m[1]);
+
+  assert.equal(new Set(words).size, words.length, "no word is listed twice");
+  assert.ok(read("SECURITY.md").includes(`all ${words.length} alternatives`),
+    `SECURITY.md must say ${words.length}`);
+  assert.ok(read("README.md").includes(`${words.length} in all`),
+    `README.md must say ${words.length}`);
+
+  // AND EVERY WORD MUST BE REACHABLE. A prefix longer than what the catch-all
+  // claims is filtered out of the guards and protects nothing -- silently.
+  const reach = g.CatchAllKey.only().claimsKeysUpTo();
+  const unreachable = words.filter((w) => w.length > reach);
+  assert.deepEqual(unreachable, [], `these are listed but never guarded: ${unreachable.join(", ")}`);
+});
+
+test("the core never calls the airlock", () => {
+  // The batch that moved EngineId into core/ -- precisely so the storage door
+  // would stop calling interception/ -- created the project's ONLY live
+  // core -> airlock dependency at the same time: CatchAllKey.fragmentFor asked
+  // Re2Budget whether a length was affordable. A rule stated in one file and
+  // broken in the one next door is not a rule.
+  const airlock = readdirSync(join(ROOT, "src/interception"))
+    .filter((f) => f.endsWith(".js"))
+    .map((f) => f.replace(/\.js$/, ""));
+
+  const globals = {
+    "re2-budget": "Re2Budget",
+    "reference-pattern": "ReferencePattern",
+    "rule-factory": "RuleFactory",
+    "rule-ranking": "RuleRanking",
+    "rule-set": "RuleSet",
+    "installed-rule": "InstalledRule",
+    "jump-preview": "JumpPreview",
+    "search-engine-catalog": "SearchEngineCatalog",
+    "origin-requirements": "OriginRequirements",
+    "not-installed": "NotInstalled",
+  };
+
+  for (const file of readdirSync(join(ROOT, "src/core")).filter((f) => f.endsWith(".js"))) {
+    const source = codeOf(read(join("src/core", file)));
+    for (const module of airlock) {
+      const name = globals[module];
+      if (!name) continue;
+      assert.equal(
+        source.includes(name),
+        false,
+        `src/core/${file} reaches for ${name}, which lives in the airlock`
+      );
+    }
+  }
+});
+
+test("no doc block is orphaned from the subject it documents", () => {
+  // A declaration inserted between a doc block and its subject leaves the block
+  // documenting its new neighbour. It happened six times in one batch -- a 19-line
+  // note about the badge ended up above a 6-line helper, and a block describing an
+  // optional parameter sat on a method whose parameter is mandatory. The reader,
+  // and every tool that shows a hover, believes the block.
+  const walk = (dir, out = []) => {
+    for (const entry of readdirSync(join(ROOT, dir), { withFileTypes: true })) {
+      if (entry.isDirectory()) walk(join(dir, entry.name), out);
+      else if (entry.name.endsWith(".js")) out.push(join(dir, entry.name));
+    }
+    return out;
+  };
+  const offenders = [];
+  for (const file of walk("src")) {
+    const lines = read(file).split("\n");
+    for (let i = 0; i < lines.length - 1; i += 1) {
+      // A block comment closing on one line and another opening on the very next:
+      // whatever the first one described, it no longer sits above it.
+      if (/^\s*\*\/\s*$/.test(lines[i]) && /^\s*\/\*\*/.test(lines[i + 1])) {
+        offenders.push(`${file}:${i + 1}`);
+      }
+    }
+  }
+  assert.deepEqual(offenders, [], "these doc blocks sit above another doc block, not above code");
 });

@@ -41,15 +41,11 @@
     async read() {
       try {
         const { value, rev } = await VersionedEntry.read(Platform.api.storage.local, ENTRY);
-        if (!value || typeof value !== "object") return { policy: undefined, rev: rev || 0, loggedRev: 0 };
+        if (!value || typeof value !== "object") return { policy: undefined, rev: rev || 0 };
         const restored = JumpPolicy.restore(value.policy === undefined ? value : value.policy);
-        return {
-          policy: restored.ok ? restored.policy : undefined,
-          rev: rev || 0,
-          loggedRev: value.loggedRev === undefined ? 0 : value.loggedRev,
-        };
+        return { policy: restored.ok ? restored.policy : undefined, rev: rev || 0 };
       } catch {
-        return { policy: undefined, rev: 0, loggedRev: 0 };
+        return { policy: undefined, rev: 0 };
       }
     },
 
@@ -61,13 +57,22 @@
      * twenty-entry journal with duplicates and evicting the very UNKNOWN a
      * compromise left behind.
      *
-     * `loggedRev` makes the write idempotent: the same policy revision is never
-     * journalled twice.
+     * NO `loggedRev` HERE ANY MORE. The field claimed, in writing, to make the
+     * write idempotent -- "the same policy revision is never journalled twice" --
+     * and nothing read it to decide anything. reconcile took it from the
+     * projection and handed it straight back to the journal, which did
+     * Math.max(x, x): a self-referential loop that could not progress, on a field
+     * carrying two different meanings depending on the writer.
+     *
+     * The waterline belongs to the journal, which is the only object that can
+     * both raise it and consult it -- and it now does, inside its own
+     * compare-and-set. A field whose writer and reader are two different modules
+     * goes decorative again; a question asked of its owner does not.
      */
-    async record(policy, loggedRev) {
+    async record(policy) {
       return VersionedEntry.update(Platform.api.storage.local, ENTRY, () => ({
         ok: true,
-        value: { policy: policy.toJSON(), loggedRev: loggedRev || 0 },
+        value: { policy: policy.toJSON() },
         events: [],
       }));
     },

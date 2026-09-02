@@ -64,6 +64,12 @@
     GUARD_DOES_NOT_HOLD: "GUARD_DOES_NOT_HOLD",
     GUARDS_NOT_A_PARTITION: "GUARDS_NOT_A_PARTITION",
     RUN_OVER_BUDGET: "RUN_OVER_BUDGET",
+    // The envelope alone leaves nothing to spend. Distinct from RUN_OVER_BUDGET
+    // on purpose: that one says a WORD is too long, this one says the budget was
+    // never usable -- two different things to fix.
+    ENVELOPE_OVER_BUDGET: "ENVELOPE_OVER_BUDGET",
+    // The domain claims a key length the measured RE2 ceiling cannot carry.
+    KEY_LENGTH_OVER_BUDGET: "KEY_LENGTH_OVER_BUDGET",
     UNKNOWN: "UNKNOWN",
   });
 
@@ -75,17 +81,50 @@
    * that constraint has to be written rather than assumed. And `cause` is always
    * forwarded -- a catch that swallows destroys the only thing that helps debug,
    * and lets code continue in a state it believes valid.
+   *
+   * A NAMED DEROGATION from "no inheritance", and the only one in the project.
+   * `throw` is a platform contract: a value that is not an Error loses the stack,
+   * and every tool that reads a crash -- the console, the browser, node's test
+   * runner -- reads Error. Refusing to extend it here would not buy purity, it
+   * would buy an unreadable failure at the exact moment a failure has to be read.
+   *
+   * THE CONSTRUCTOR ASSIGNS AND NOTHING ELSE. It used to normalise the reason and
+   * unwrap `detail` -- deciding, in a constructor, in a project whose second rule
+   * is that constructors do not decide. Both now happen in the factory below,
+   * which is the one door anyone uses.
    */
   class Refusal extends Error {
-    constructor(reason, detail) {
-      super("construction refused: " + reason, detail && detail.cause ? { cause: detail.cause } : undefined);
+    constructor(message, reason, detail, options) {
+      super(message, options);
       this.name = "Refusal";
-      this.reason = REASONS[reason] || REASONS.UNKNOWN;
-      this.detail = detail && detail.word ? detail.word : undefined;
+      this.reason = reason;
+      this.detail = detail;
     }
   }
 
-  const refusal = (reason, detail) => new Refusal(reason, detail);
+  /** What may travel: never the user's destination or key, only shipped words and
+   *  numbers. The constraint is written rather than assumed, because refusals land
+   *  in the service worker console. */
+  const detailOf = (detail) => {
+    if (!detail || typeof detail !== "object") return undefined;
+    const kept = {};
+    for (const field of ["word", "claimed", "envelopeCost"]) {
+      if (detail[field] !== undefined) kept[field] = detail[field];
+    }
+    return Object.keys(kept).length > 0 ? kept : undefined;
+  };
+
+  /** The single door. It decides; the constructor stores. */
+  const refusal = (reason, detail) =>
+    new Refusal(
+      "construction refused: " + reason,
+      REASONS[reason] || REASONS.UNKNOWN,
+      // THE WHOLE DETAIL, minus the cause. Keeping `word` alone silently threw
+      // away `{ claimed }` and `{ envelopeCost }` -- two of the three call sites --
+      // so a refusal reached `skipped` with nothing to say about itself.
+      detailOf(detail),
+      detail && detail.cause ? { cause: detail.cause } : undefined
+    );
 
   class Re2Budget {
     constructor(maxAlternationCost, longestKey) {
@@ -148,11 +187,32 @@
    *  path is the worst case. */
   Re2Budget.conservative = () => new Re2Budget(MAX_ALTERNATION_COST, LONGEST_MEASURED_KEY);
 
-  /** The per-engine budget, the day the envelope stops being ignorable. Named now
-   *  so that `if (engineId === "duckduckgo.com")` stays unwritable. */
-  Re2Budget.forEnvelope = (envelopeCost) =>
-    new Re2Budget(MAX_ALTERNATION_COST - envelopeCost, LONGEST_MEASURED_KEY);
+  /**
+   * The per-engine budget, the day the envelope stops being ignorable. Named now
+   * so that `if (engineId === "duckduckgo.com")` stays unwritable.
+   *
+   * IT REFUSES AN UNUSABLE BUDGET RATHER THAN MINTING ONE. Subtracting an
+   * envelope was unguarded, so the first real client the header names -- a custom
+   * domain of sixty-odd characters -- produced a budget of zero or less. The
+   * cutter then threw RUN_OVER_BUDGET on the FIRST word, which rule-installer
+   * turns into a global INSTALL_FAILED: one long domain name, and nothing
+   * installs at all. A budget that cannot pay for a single shortest word is not a
+   * tight budget, it is an arithmetic error, and it must be named where the
+   * arithmetic happens.
+   *
+   * The floor is the cheapest word this cutter can ever be handed: a two-letter
+   * key plus its separator.
+   */
+  const CHEAPEST_WORD_COST = 3;
+  Re2Budget.forEnvelope = (envelopeCost) => {
+    const remaining = MAX_ALTERNATION_COST - envelopeCost;
+    if (!Number.isFinite(remaining) || remaining < CHEAPEST_WORD_COST) {
+      throw refusal("ENVELOPE_OVER_BUDGET", { envelopeCost });
+    }
+    return new Re2Budget(remaining, LONGEST_MEASURED_KEY);
+  };
 
+  Re2Budget.CHEAPEST_WORD_COST = CHEAPEST_WORD_COST;
   Re2Budget.MAX_ALTERNATION_COST = MAX_ALTERNATION_COST;
   Re2Budget.LONGEST_MEASURED_KEY = LONGEST_MEASURED_KEY;
   Re2Budget.REASONS = REASONS;

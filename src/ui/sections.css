@@ -163,10 +163,18 @@ code {
   color: var(--muted);
 }
 
-/* A 40x24 hit area: WCAG 2.2 AA asks for 24x24 minimum. */
+/* A 40x24 hit area: WCAG 2.2 AA asks for 24x24 minimum.
+
+   FOUR NUMBERS THAT HAD TO AGREE -- width, the knob's left, its size and the
+   translate -- and nothing tied them: changing the track width moved the knob
+   off the end in silence. They are derived from two now. */
 .sw {
-  width: 40px;
-  height: 24px;
+  --sw-w: 40px;
+  --sw-h: 24px;
+  --sw-pad: 3px;
+  --sw-knob: calc(var(--sw-h) - 2 * var(--sw-pad));
+  width: var(--sw-w);
+  height: var(--sw-h);
   border-radius: 999px;
   background: var(--teal);
   border: none;
@@ -178,19 +186,21 @@ code {
 .sw::after {
   content: "";
   position: absolute;
-  top: 3px;
-  left: 19px;
-  width: 18px;
-  height: 18px;
+  top: var(--sw-pad);
+  left: calc(var(--sw-w) - var(--sw-pad) - var(--sw-knob));
+  width: var(--sw-knob);
+  height: var(--sw-knob);
   border-radius: 50%;
-  background: #fff;
+  background: var(--card);
   transition: transform 0.14s;
 }
+/* --line-strong, not a hexadecimal nobody can find again: the off state is a
+   neutral of the palette like everything else. */
 .sw[aria-checked="false"] {
-  background: #cfcdc5;
+  background: var(--line-strong);
 }
 .sw[aria-checked="false"]::after {
-  transform: translateX(-16px);
+  transform: translateX(calc(-1 * (var(--sw-w) - var(--sw-h))));
 }
 .sw:disabled {
   opacity: 0.4;
@@ -322,9 +332,15 @@ ol.rows {
   padding: 0;
 }
 /* aria-disabled, never disabled: a disabled button is not focusable, so moving a
-   row to the top would drop focus to <body>. */
+   row to the top would drop focus to <body>.
+
+   NOT COLOUR ALONE, and not at 1.15:1. `--line` on white is invisible rather
+   than muted, so an arrow at the end of the list simply vanished -- and WCAG
+   1.4.1 asks for a second signal whatever the ratio. Opacity keeps the glyph
+   legible, the cursor says it is inert, and aria-disabled says it out loud. */
 .btn[aria-disabled="true"] {
-  color: var(--line);
+  color: var(--muted);
+  opacity: .45;
   cursor: default;
 }
 .f-key {
@@ -380,6 +396,25 @@ input.f[aria-invalid="true"] {
   border-color: var(--red);
 }
 
+/* A HOST NAME IS NEVER REORDERED BY ITS OWN CONTENT.
+
+   A security control, not a typographic nicety: an RTL override inside a host
+   name makes the displayed destination read backwards, so what the user checks
+   is not where the traffic goes -- and this product's second principle is that
+   every surface shows where a shortcut sends you.
+
+   It was copied into four rules with no shared class, so the fifth place to
+   display a host would have forgotten it. One class, listed with the four
+   selectors that need it today. */
+.ltr-isolate,
+.dest,
+.origin,
+.preview,
+.signature-domain {
+  unicode-bidi: isolate;
+  direction: ltr;
+}
+
 .dest {
   font-family: var(--mono);
   font-size: 12.5px;
@@ -387,8 +422,6 @@ input.f[aria-invalid="true"] {
   text-overflow: ellipsis;
   white-space: nowrap;
   /* Isolated so a right-to-left character cannot reorder a host name on screen. */
-  unicode-bidi: isolate;
-  direction: ltr;
 }
 .dest .host {
   font-weight: 600;
@@ -437,7 +470,9 @@ input.f[aria-invalid="true"] {
 .btn.primary {
   background: var(--teal);
   border-color: var(--teal);
-  color: #fff;
+  /* --on-teal, not #fff: on the dark palette the teal lightens, and white text
+     on it drops below the AA floor. The token moves with the ground. */
+  color: var(--on-teal);
 }
 .btn.plain {
   color: var(--muted);
@@ -493,8 +528,10 @@ input.f[aria-invalid="true"] {
   background: var(--teal);
   flex-shrink: 0;
 }
+/* The palette's amber, not a second one. `#c9a227` sat here while --amber served
+   the .row-msg.pending a few rules away: one state, two colours. */
 .dot.pending {
-  background: #c9a227;
+  background: var(--amber);
 }
 .origins {
   margin-top: 9px;
@@ -508,8 +545,6 @@ input.f[aria-invalid="true"] {
   font-family: var(--mono);
   font-size: 11.5px;
   color: var(--faint);
-  unicode-bidi: isolate;
-  direction: ltr;
 }
 
 .alert {
@@ -544,8 +579,6 @@ input.f[aria-invalid="true"] {
   border-left: 2px solid var(--teal);
   font-family: var(--mono);
   font-size: 12.5px;
-  unicode-bidi: isolate;
-  direction: ltr;
 }
 .preview .host {
   font-weight: 600;
@@ -595,8 +628,6 @@ input.f[aria-invalid="true"] {
   font-family: var(--mono);
   font-size: 10.5px;
   color: var(--faint);
-  unicode-bidi: isolate;
-  direction: ltr;
 }
 @media (prefers-reduced-motion: reduce) {
   .signature .rm-tag-logo:hover .rm-tag-logo-circle {

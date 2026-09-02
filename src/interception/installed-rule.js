@@ -76,16 +76,16 @@
     /**
      * DELEGATES to the forge's predicate, passing a SYNTHESISED band.
      *
-     * `isCatchAllRule` stays TOTAL ON A RAW RULE -- rule-set.js designates it as
+     * `isCatchAllBand` stays TOTAL -- rule-set.js designates it as
      * THE content check, and rule-factory.js keeps its changelock on the raw rule.
-     * Written naively as `isCatchAllRule(this)` it would THROW SYSTEMATICALLY, an
-     * InstalledRule having no `.priority`; and on the preview path the throw is
-     * caught but the panel would keep the previous keystroke's verdict, which the
-     * batch before this one just closed. So the canary is DEAD HERE BY
-     * CONSTRUCTION, and that is the intention: the forge keeps its own.
+     *
+     * It used to forge `{ priority: this._band }` -- a dummy of the OTHER shape --
+     * because the predicate took a rule and read `.priority`, which an
+     * InstalledRule does not have. Asking about the BAND lets both shapes answer
+     * with what they hold, and the guard inside the predicate stays live for both.
      */
     isCatchAll() {
-      return RuleRanking.isCatchAllRule({ priority: this._band });
+      return RuleRanking.isCatchAllBand(this._band);
     }
   }
 

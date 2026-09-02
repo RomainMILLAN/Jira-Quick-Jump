@@ -37,8 +37,7 @@
    * indirection down. And it COPIES its own arrays -- "at the boundary" means at
    * the boundary, and an array received from a caller stays mutable by that
    * caller.
-   */
-  /**
+   *
    * THE FOUR MEMBERS OF chrome.declarativeNetRequest.Rule, named here because this file
    * becomes the one that knows the PAYLOAD SHAPE (rule-installer.js keeping the
    * ENVELOPE). The spec is closed: four top-level members, not five.
@@ -54,10 +53,28 @@
       this._engineIds = Object.freeze([...engineIds]);
     }
 
-    /** Read by the constructor's post-condition, per engine. NOT a test-only
-     *  field: it is the only non-tautological reference the coverage check has. */
-    prefixes() {
-      return this._prefixes;
+    /**
+     * IT ANSWERS, IT DOES NOT HAND OVER ITS INSIDES.
+     *
+     * `prefixes()` returned the array and assertGuardsCover iterated it from the
+     * outside -- the header claims "IT ANSWERS, IT DOES NOT EXPOSE" two lines
+     * above. The question the post-condition actually asks is "is this word one
+     * of the ones you cover", so that is the question this offers.
+     */
+    covers(word) {
+      return this._prefixes.includes(word);
+    }
+
+    /**
+     * The first word this set of guards leaves uncovered, if any.
+     *
+     * The caller used to take `prefixes()` and loop -- so the post-condition of
+     * the contract was enforced from OUTSIDE the object that carries it. Asking
+     * puts the check back with the invariant, and the caller only has to say what
+     * it did.
+     */
+    firstUncoveredIn(covered) {
+      return this._prefixes.find((word) => !covered.has(word));
     }
 
     /** Availability, not safety: did every engine that wanted a catch-all get one?
@@ -105,13 +122,27 @@
      * not make an inversion impossible nor an omission visible. The constructor
      * stays the internal door, and it is the one that seals.
      *
-     * The copy is deliberately SHALLOW -- units.map spread copies the runs, not
-     * the rule objects. Harmless here, since the factory forges them and lets go
-     * in the same expression, but written down so nobody trusts an immutability
-     * that does not exist, nor "deepens" the copy and breaks the frozen runs.
+     * THE SEAL REACHES THE RULES, and it did not. `units.map(spread)` copied the
+     * runs and left the rule objects shared -- "written down so nobody trusts an
+     * immutability that does not exist", said the note, which is a strange thing
+     * to write on a value object whose whole contract is that it cannot change
+     * under its readers. A documented falsehood is still a falsehood; freezing
+     * costs one call and makes the sentence true.
+     *
+     * The rules are plain platform literals with no nested object beyond
+     * action/condition, so a shallow freeze of each is the depth that matters:
+     * nothing can swap a regexFilter or a redirect target after sealing.
      */
     static sealed({ units, skipped, contract }) {
-      return new RuleSet(units.map((unit) => [...unit]), [...skipped], contract);
+      const frozen = units.map((unit) =>
+        Object.freeze(unit.map((rule) => {
+          if (rule.action) Object.freeze(rule.action);
+          if (rule.action && rule.action.redirect) Object.freeze(rule.action.redirect);
+          if (rule.condition) Object.freeze(rule.condition);
+          return Object.freeze(rule);
+        }))
+      );
+      return new RuleSet(Object.freeze(frozen), Object.freeze([...skipped]), contract);
     }
 
     /** Synchronous, and the UNIT decides: one refused rule drops its whole unit. */
@@ -126,7 +157,10 @@
           continue;
         }
         for (const rule of unit) {
-          skipped.push({ binding: rule.id, code: refused.has(rule.id) ? "REGEX_UNSUPPORTED" : "UNIT_INCOMPLETE" });
+          skipped.push(global.NotInstalled.of(
+            refused.has(rule.id) ? "REGEX_UNSUPPORTED" : "UNIT_INCOMPLETE",
+            `rule ${rule.id}`
+          ));
         }
       }
       // THE CONTRACT IS CARRIED OVER UNCHANGED: pruning rules does not change what
@@ -174,10 +208,36 @@
       }
       for (const engineId of needing) {
         const covered = guarded.get(engineId) ?? new Set();
-        for (const prefix of this._contract.prefixes()) {
-          if (!covered.has(prefix)) {
-            throw new Error(`catch-all on ${engineId} is unguarded for ${prefix}`);
+        const missing = this._contract.firstUncoveredIn(covered);
+        if (missing !== undefined) {
+          throw new Error(`catch-all on ${engineId} is unguarded for ${missing}`);
+        }
+      }
+      return this;
+    }
+
+    /**
+     * EVERY RULE ID IS DISTINCT, and rule-factory.js already cited this assertion
+     * as if it existed.
+     *
+     * Its header says the id counter is safe because "RuleSet asserts that all ids
+     * are distinct". It did not. The separation between the binding band (1..300)
+     * and the reserved-prefix band (1001+) rested on nothing at all: raise
+     * MAX_BINDINGS past a thousand, or let ReservedPrefix.ALL grow, and two rules
+     * collide -- at which point updateDynamicRules rejects THE WHOLE BATCH, so
+     * every shortcut dies together.
+     *
+     * A commentary that invokes a guard rail nobody built is worse than none: it
+     * argues the next reader out of writing one.
+     */
+    assertIdsAreDistinct() {
+      const seen = new Set();
+      for (const unit of this._units) {
+        for (const rule of unit) {
+          if (seen.has(rule.id)) {
+            throw new Error(`two rules share id ${rule.id}: the id bands have collided`);
           }
+          seen.add(rule.id);
         }
       }
       return this;

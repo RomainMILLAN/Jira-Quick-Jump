@@ -34,7 +34,7 @@
   // THEIR default, not OUR band. Both are 1 today, but by a COINCIDENCE OF TWO
   // INDEPENDENT SPECIFICATIONS -- ours, written in rule-ranking.js, and Chrome's. And
   // that coincidence is exactly what makes a v1.0.0 profile unreadable (see the
-  // reservation on isCatchAllRule): the airlock cannot tell "the foreign system said
+  // reservation on isCatchAllBand): the airlock cannot tell "the foreign system said
   // nothing" from "it said catch-all". Written under ONE name the collision hides;
   // under two names that happen to be equal it is EXPOSED.
   //
@@ -58,7 +58,6 @@
     code: match.rule.isCatchAll() ? "MATCHED_CATCH_ALL" : "MATCHED_SHORTCUT",
     destination: match.destination,
     ruleId: match.rule.id(),
-    subject: match.subject,
   });
 
   const evaluate = (url, rules) => {
@@ -82,15 +81,29 @@
       const flags = rule.caseSensitive() ? "" : "i";
       const found = new RegExp(rule.regexFilter(), flags).exec(url);
       if (!found) continue;
+      // NO `subject` ANY MORE. It was `found[1]` on an allow rule, and
+      // reservedPrefixGuards ASSERTS those carry no capture group -- so the field
+      // was a guaranteed `undefined`, the very meaningful absence this project
+      // bans. Nothing in production ever read it.
       if (rule.actionType() === "allow") {
-        matches.push({ rule, destination: undefined, subject: found[1] });
+        matches.push({ rule, destination: undefined });
         continue;
       }
+      // AN ACTION WE DO NOT KNOW IS SKIPPED, NOT DEREFERENCED.
+      //
+      // These rules come from the DNR store -- "a foreign system", says this
+      // file's own header. A block or upgradeScheme rule, from an older build or
+      // a future one, walked straight into `undefined.replace` and the whole
+      // preview died with "Could not read the installed rules". Skipping is the
+      // honest reading: a rule whose action we cannot simulate tells us nothing
+      // about where this reference goes, and staying silent about it beats
+      // blaming the store for an answer we never computed.
+      if (rule.actionType() !== "redirect" || rule.substitution() === undefined) continue;
       const destination = rule.substitution().replace(
         /\\([1-9])/g,
         (_, group) => found[Number(group)] ?? ""
       );
-      matches.push({ rule, destination, subject: found[0] });
+      matches.push({ rule, destination });
     }
 
     const outcome = RuleRanking.winner(matches);

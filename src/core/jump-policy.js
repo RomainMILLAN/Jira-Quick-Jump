@@ -51,7 +51,7 @@
     ruleId() { return this._ruleIndex + 1; }
     describe() {
       const key = this._shortcut.key();
-      const shown = key.isCatchAll() ? "the catch-all" : key.toString();
+      const shown = key.isCatchAll() ? key.nature() : key.toString();
       return `${shown} on ${this._engineId}`;
     }
   }
@@ -76,31 +76,44 @@
     disarm() { return new JumpPolicy(this._registry, this._engineIds, false, this._customEngines); }
 
     /**
-     * The keystone. Without it the rule factory would arbitrate the domain rule
-     * "disarmed => no rules" inside a DNR rule constructor. With it, buildRules
-     * is a .map(). Tell, don't ask.
+     * WHICH SHORTCUTS ARE LIVE, written ONCE.
      *
-     * It also excludes shortcuts with unacknowledged warnings, which closes a
-     * real hole: arm() guards the front door, but withBaseUrlFor clears
-     * acknowledgements WITHOUT disarming. Excluding them here makes the invariant
-     * true by construction rather than guarded at the entrance -- and it does not
-     * destroy the user's intent: the shortcut becomes active again on the
-     * acknowledgement click, with no need to press "arm" a second time.
+     * The same three conditions were spelled twice in this file, a hundred lines
+     * apart -- here and inside claimantFor -- so a fourth condition would have had
+     * to be noticed in two places. They are the same question, and it has one
+     * answer.
+     *
+     * A shadowed shortcut is EXCLUDED, not demoted: producing no rule at all
+     * saves rule budget, saves isRegexSupported round trips, and matches exactly
+     * what the UI says. Reversible -- removing the catch-all brings it back, since
+     * everything here is derived.
+     */
+    _isLive(shortcut) {
+      return (
+        shortcut.armed() &&
+        shortcut.unacknowledgedWarnings().length === 0 &&
+        !this._registry.isShadowed(shortcut.id())
+      );
+    }
+
+    /**
+     * The keystone. Without it the rule factory would arbitrate the domain rule
+     * "disarmed => no rules" inside a DNR rule constructor. With it, buildRules is
+     * a .map(). Tell, don't ask.
+     *
+     * It also excludes shortcuts with unacknowledged warnings, which closes a real
+     * hole: arm() guards the front door, but withBaseUrlFor clears acknowledgements
+     * WITHOUT disarming. Excluding them here makes the invariant true by
+     * construction rather than guarded at the entrance -- and it does not destroy
+     * the user's intent: the shortcut becomes active again on the acknowledgement
+     * click, with no need to press "arm" a second time.
      */
     activeBindings() {
       if (!this._armed) return [];
-      const shadowed = new Set(this._registry.shadowedIds());
       const bindings = [];
       let index = 0;
       for (const shortcut of this._registry.shortcuts()) {
-        if (!shortcut.armed()) continue;
-        if (shortcut.unacknowledgedWarnings().length > 0) continue;
-        // A shadowed shortcut produces NO RULE AT ALL rather than a low-priority
-        // one. Both express "dead", but excluding it saves rule budget, saves
-        // isRegexSupported round trips, and matches exactly what the UI says.
-        // Reversible: removing the catch-all brings it back, since everything is
-        // derived.
-        if (shadowed.has(shortcut.id())) continue;
+        if (!this._isLive(shortcut)) continue;
         for (const engineId of this._engineIds) {
           bindings.push(new Binding(shortcut, engineId, index));
           index += 1;
@@ -181,6 +194,22 @@
     /**
      * Who claims this reference, HERE AND NOW.
      *
+     * IT HAS NO PRODUCTION CALLER, AND THAT IS ITS JOB. An audit called it dead
+     * code -- a second matching engine maintained beside the live one -- and the
+     * grep is right: nothing in src/ calls it. Reading it as dead would be the
+     * mistake, so the status is written here rather than left to be rediscovered.
+     *
+     * This is the ORACLE. The rules actually delivered are a REGEX, produced by
+     * translating this domain rule into RE2; the agreement test walks a corpus
+     * through both and requires the same verdict. That comparison is a SECURITY
+     * CONTROL, not an elegance: a regex that claims MORE than the domain does is
+     * a universal redirector, and nothing else in this project could notice.
+     *
+     * Delete this and the domain can no longer state, in its own terms, what it
+     * intercepts -- only the regex would know, and a regex cannot be reviewed the
+     * way a sentence can. The right move if it ever becomes a burden is to make it
+     * the single engine, never to drop the oracle and keep the translation.
+     *
      * On the aggregate rather than the registry, because the answer depends on
      * arming, on pending acknowledgements and on the ticked engines -- three
      * things the registry knows nothing about, while JumpPreview answers from the
@@ -194,18 +223,14 @@
      */
     claimantFor(reference) {
       if (!this._armed || this._engineIds.length === 0) return { code: "NO_MATCH" };
-      const shadowed = new Set(this._registry.shadowedIds());
-      const eligible = (shortcut) =>
-        shortcut.armed() &&
-        shortcut.unacknowledgedWarnings().length === 0 &&
-        !shadowed.has(shortcut.id());
+      const eligible = (shortcut) => this._isLive(shortcut);
       const claimant = this._registry.claimantFor(reference, eligible);
       if (!claimant) {
         // A catch-all would have claimed it, but a reserved prefix holds it back.
         const catchAll = this._registry.catchAll();
         if (
           catchAll &&
-          eligible(catchAll) &&
+          this._isLive(catchAll) &&
           catchAll.key().separators().includes(reference.separator()) &&
           // ONE hop, and the verdict is the key's own. Recombining two facts in
           // the right order from here was a convention between two files: the
@@ -250,14 +275,7 @@
      * arbitrated twice differently.
      */
     diagnose(facts) {
-      // NO DEFAULT. A fact of installed reality that is ABSENT is not `true`:
-      // background.js's detector header says a detector must fail by over-signalling,
-      // never by under-signalling. Defaulting here would put the domain's thumb back on
-      // the scale behind whatever the caller failed to supply.
-      for (const { code, applies } of DIAGNOSES) {
-        if (applies(this, facts)) return code;
-      }
-      return "READY";
+      return global.Diagnosis.of(this, facts);
     }
 
     _rebuilt(registry) {
@@ -276,14 +294,24 @@
     _guarded(result) {
       if (!result.ok) return result;
       const policy = result.value;
-      const caps = [
-        [MAX_BINDINGS, () => policy.activeBindings().length, "BINDING_LIMIT",
-          `This would create more than ${MAX_BINDINGS} redirect rules.`],
-        [MAX_SHORTCUTS, () => policy.shortcuts().length, "SHORTCUT_LIMIT",
-          `This would create more than ${MAX_SHORTCUTS} shortcuts.`],
-      ];
-      for (const [limit, project, code, message] of caps) {
-        if (project() > limit) return MutationResult.refused(code, message);
+      // TWO IFS, and they read as what they are. A table of four-tuples
+      // destructured in a loop -- for two entries -- put the most expensive
+      // computation in the file behind a thunk nobody could see was being called,
+      // and cost a reader two passes to learn there were only two caps.
+      //
+      // The shortcut count first: it is O(1), and refusing on it avoids computing
+      // the bindings at all on the path that grows the registry.
+      if (policy.shortcuts().length > MAX_SHORTCUTS) {
+        return MutationResult.refused(
+          "SHORTCUT_LIMIT",
+          `This would create more than ${MAX_SHORTCUTS} shortcuts.`
+        );
+      }
+      if (policy.activeBindings().length > MAX_BINDINGS) {
+        return MutationResult.refused(
+          "BINDING_LIMIT",
+          `This would create more than ${MAX_BINDINGS} redirect rules.`
+        );
       }
       return result;
     }
@@ -397,6 +425,31 @@
       ));
     }
 
+    /**
+     * WHAT A CHANGE DETECTOR WOULD SEE, as one string.
+     *
+     * Everything PolicyDiff compares, and nothing else: which shortcut holds which
+     * key and which destination, whether it is armed, the evaluation order, the
+     * ticked engines and the global switch. Two policies with the same fingerprint
+     * produce no facts between them, by construction.
+     *
+     * IT CARRIES NOTHING OF THE STORAGE ENVELOPE -- no revision, no writer token.
+     * That is the whole point: a claim built on this cannot be forged by copying
+     * an envelope, because there is no envelope in it.
+     */
+    fingerprint() {
+      return JSON.stringify([
+        this._armed,
+        [...this._engineIds].sort(),
+        this._registry.shortcuts().map((s) => [
+          s.id(),
+          s.key().toString(),
+          s.instance().baseUrl(),
+          s.armed(),
+        ]),
+      ]);
+    }
+
     /** Projection for persistence: a faithful mirror. */
     toJSON() {
       return {
@@ -428,102 +481,12 @@
     }
   }
 
-  /**
-   * The order of priority, AS A CATALOGUE rather than a chain of ifs -- so that
-   * the order is DATA, exactly as it is for the shortcuts themselves. Read top
-   * to bottom, FIRST MATCH WINS, so the order written here IS the order of the
-   * code and no annotation may contradict it.
-   *
-   * The axis: a state meaning "no jump will happen at all" always outranks a
-   * state meaning "some jumps will not happen". Which is why MISSING_ORIGINS now
-   * sits ABOVE PARTIAL_POLICY -- a DELIBERATE INVERSION of the previous order,
-   * written as such so nobody "fixes" it back: telling someone that some rows are
-   * shadowed, while never telling them that nothing will fire at all, is the
-   * fourth product principle broken by a sort order.
-   *
-   * INSTALL_FAILED comes FIRST, and that is an EXCEPTION to the axis:
-   * DISARMED means "no jump" IN INTENTION, INSTALL_FAILED means "the installed
-   * reality contradicts the intention". The naive axis would call them equal; the
-   * second sense wins, because an emergency stop that reports "stopped" without
-   * having stopped is worse than no emergency stop.
-   */
-  const DIAGNOSES = [
-    // TWO codes, and the PARTITION is what makes them honest. `!== true` folded
-    // "it failed" and "I do not know" into one sentence: it over-signalled on a
-    // healthy profile whose receipt was merely absent, and it named the wrong
-    // cause. `=== false` alone would be the fail-open -- an ABSENT fact is
-    // indistinguishable from a true one -- so the pair must be DISJOINT and
-    // TOTAL, which is what the two predicates below are.
-    { code: "INSTALL_FAILED", applies: (p, f) => f.installed === false },
-    // `typeof !== "boolean"`, NOT `=== undefined`: null, "false" and 0 would fall
-    // through the hole and drop all the way to READY. diagnose() is PUBLIC and the
-    // tests call it directly, so InstallOutcome.read does not protect this hole.
-    //
-    // AND THE GUARD IS ON REALITY, NOT ON INTENTION. Three drafts got this wrong.
-    // `activeBindings().length > 0` excluded the DISARMED policy -- measured:
-    // armed()=false | activeBindings=0 | registry=1 -- so it fell to DISARMED, i.e.
-    // "no jump will fire" said without knowing whether the purge happened. Then
-    // `registry().size() > 0` alone opened a NEW fail-open -- measured:
-    // registry=0, quarantinedCount=2, fact absent  ->  PARTIAL_POLICY, a
-    // SUB-signalling, where the old `!== true` said INSTALL_FAILED.
-    //
-    // The name of the disjunction is "IS THERE ANYTHING TO LOSE?", not "are there
-    // rules installed?" -- that second wording justifies only ONE of the three
-    // terms (registry is intention, quarantinedCount a failed read), and someone
-    // would "simplify" towards it and reopen the fail-open. Disarming, deleting
-    // one's last shortcut, seeing everything quarantined: that is three ways of
-    // installing the void, and ignorance about the void is the kill switch's
-    // question. A blank profile (0/0/0) stays silent and falls to NO_SHORTCUTS.
-    //
-    // ABOVE DISARMED, or the measurement above falls back onto it.
-    {
-      code: "INSTALL_STATE_UNKNOWN",
-      applies: (p, f) =>
-        typeof f.installed !== "boolean" &&
-        (f.rulesInstalled === true || p.registry().size() > 0 || f.quarantinedCount > 0),
-    },
-    { code: "DISARMED", applies: (p) => !p.armed() },
-    // Before NO_SHORTCUTS: with everything quarantined there are not *no*
-    // shortcuts, there are UNREADABLE ones -- and saying "no shortcut yet" is the
-    // one answer that hides a partial read.
-    { code: "PARTIAL_POLICY", applies: (p, f) => p.registry().size() === 0 && f.quarantinedCount > 0 },
-    { code: "NO_SHORTCUTS", applies: (p) => p.registry().size() === 0 },
-    { code: "NO_ENGINES", applies: (p) => p.engineIds().length === 0 },
-    {
-      code: "ALL_SHORTCUTS_DISARMED",
-      applies: (p) => p.activeBindings().length === 0 && p.shortcuts().every((s) => !s.armed()),
-    },
-    {
-      code: "ALL_SHORTCUTS_AWAITING_ACKNOWLEDGEMENT",
-      applies: (p) =>
-        p.activeBindings().length === 0 &&
-        p.shortcuts().some((s) => s.armed()) &&
-        p.shortcuts().filter((s) => s.armed()).every((s) => s.unacknowledgedWarnings().length > 0),
-    },
-    { code: "ALL_SHORTCUTS_SHADOWED", applies: (p) => p.activeBindings().length === 0 },
-    // The FACT is named for what it asserts -- every engine that wanted a catch-all got
-    // one -- while the CODE stays the user's sentence. Renaming the reader without the
-    // writers, or the writers without this reader, makes the fact arrive ABSENT --
-    // which no longer fires THIS code, since it now tests `=== false`, but its twin
-    // below, guarded on wantsCatchAll(). The masking moved with the subject.
-    { code: "CATCH_ALL_NOT_INSTALLED", applies: (p, f) => f.coverageSatisfied === false },
-    // JUST AFTER ITS TWIN, therefore ABOVE MISSING_ORIGINS -- prescribed, not left
-    // to the implementation: slid below MISSING_ORIGINS, the wantsCatchAll() guard
-    // becomes an ornament and this code masks nothing it was meant to yield to.
-    //
-    // The GUARD is what keeps it quiet on the profiles that never wanted a
-    // catch-all: without it, COVERAGE_STATE_UNKNOWN would mask MISSING_ORIGINS,
-    // PARTIAL_POLICY and SOME_SHADOWED on EVERY profile with an absent receipt.
-    {
-      code: "COVERAGE_STATE_UNKNOWN",
-      applies: (p, f) => typeof f.coverageSatisfied !== "boolean" && p.wantsCatchAll(),
-    },
-    { code: "MISSING_ORIGINS", applies: (p, f) => !f.originsGranted },
-    { code: "PARTIAL_POLICY", applies: (p, f) => f.quarantinedCount > 0 },
-    { code: "SOME_SHADOWED", applies: (p) => p.shadowedShortcuts().length > 0 },
-  ];
-
-  JumpPolicy.DIAGNOSES = DIAGNOSES.map((d) => d.code);
+  // Still exported from here: it is the policy that callers hold, and the
+  // catalogue's owner is one module away.
+  Object.defineProperty(JumpPolicy, "DIAGNOSES", {
+    get: () => global.Diagnosis.CODES,
+    enumerable: true,
+  });
   JumpPolicy.SCHEMA_VERSION = SCHEMA_VERSION;
   JumpPolicy.MAX_BINDINGS = MAX_BINDINGS;
   JumpPolicy.MAX_SHORTCUTS = MAX_SHORTCUTS;

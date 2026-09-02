@@ -34,6 +34,8 @@
   "use strict";
 
   const { Platform, VersionedEntry } = global;
+  // Enough to name the causes without turning a receipt into a log.
+  const MAX_SKIPPED = 10;
   const ENTRY = "installOutcome";
 
   /**
@@ -85,13 +87,31 @@
     async read() {
       try {
         const { value } = await VersionedEntry.read(Platform.api.storage.local, ENTRY);
-        if (!value || typeof value !== "object") return {};
+        // `skipped` is ALWAYS an array, on every path: the page maps over it, and
+        // a shape that varies is exactly what this file is criticised for. The two
+        // BOOLEANS keep their variable presence, deliberately -- absent is the
+        // third term there, and collapsing it to false is the fail-open this whole
+        // module exists to avoid.
+        if (!value || typeof value !== "object") return { skipped: [] };
         const out = {};
         if (typeof value.installed === "boolean") out.installed = value.installed;
         if (typeof value.coverageSatisfied === "boolean") out.coverageSatisfied = value.coverageSatisfied;
+        // THE CAUSES TRAVEL WITH THE RECEIPT. They were produced by the worker,
+        // returned by _install, and then dropped on the floor -- so every named
+        // reason in Re2Budget.REASONS (RUN_OVER_BUDGET, GUARDS_NOT_A_PARTITION,
+        // PREFIX_NOT_KEY_SHAPED...) existed only in a value nobody kept, and the
+        // options page rendered `skipped.length` from an array it always built
+        // empty. Six named causes for a counter that read zero.
+        //
+        // ALWAYS AN ARRAY, never absent: the page maps over it.
+        out.skipped = Array.isArray(value.skipped)
+          ? value.skipped
+              .filter((s) => s && typeof s.code === "string" && typeof s.subject === "string")
+              .slice(0, MAX_SKIPPED)
+          : [];
         return out;
       } catch {
-        return {};
+        return { skipped: [] };
       }
     },
 
@@ -106,10 +126,13 @@
      * ABSOLUTE, non-accumulative and single-writer, unlike the journal whose
      * concatenation the CAS protects.
      */
-    async record({ installed, coverageSatisfied }) {
+    async record({ installed, coverageSatisfied, skipped }) {
       const value = {};
       if (typeof installed === "boolean") value.installed = installed;
       if (typeof coverageSatisfied === "boolean") value.coverageSatisfied = coverageSatisfied;
+      // Bounded: a receipt is a receipt, not a log. What matters to the reader is
+      // that something was refused and why, not the exhaustive list.
+      if (Array.isArray(skipped) && skipped.length > 0) value.skipped = skipped.slice(0, MAX_SKIPPED);
       await VersionedEntry.put(Platform.api.storage.local, ENTRY, value, nextRev());
     },
 

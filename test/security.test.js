@@ -297,7 +297,7 @@ test("a hostile shortcut id is refused, including through the quarantine door", 
   }
   // promote mints a fresh id rather than trusting the raw one.
   const stored = new g.StoredPolicy(g.JumpPolicy.empty(), [{ id: 'a"] , [x', key: "ABC", baseUrl: "https://example.atlassian.net" }]);
-  const promoted = stored.promote(0, key, instance);
+  const promoted = stored.promoteAs(stored.quarantined()[0].fingerprint, key, instance, crypto.randomUUID());
   assert.equal(promoted.ok, true);
   assert.equal(g.ShortcutId.isWellFormed(promoted.value.policy().shortcuts()[0].id()), true);
 });
@@ -309,7 +309,7 @@ test("a quarantined catch-all is repairable without the UI ever typing a star", 
   const stored = new g.StoredPolicy(g.JumpPolicy.empty(), [
     { id: "33333333-3333-4333-8333-333333333333", key: "*", baseUrl: "https://example.atlassian.net" },
   ]);
-  const promoted = stored.promote(0, undefined, instance);
+  const promoted = stored.readmit(stored.quarantined()[0].fingerprint, instance, crypto.randomUUID());
   assert.equal(promoted.ok, true);
   assert.equal(promoted.value.policy().shortcuts()[0].key().isCatchAll(), true);
   assert.equal(promoted.value.quarantined().length, 0);

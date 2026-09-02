@@ -66,20 +66,32 @@ without the same mechanism: the search request does not happen.
 - Vocabulary, used everywhere including the UI: *issue reference*, *shortcut*,
   *instance*, *armed / disarmed*, *destination* (the whole base URL, never just
   its origin), *engine*, *rule*, *origin*, *quarantine*, *consent*,
-  *catch-all* (the shortcut that claims every reference), *shadowed* (a shortcut
-  a catch-all placed above it claims first, so it never fires), *reserved prefix*
+  *catch-all* (the shortcut that claims every reference **within its reach** — a
+  key of at most six characters, outside the reserved list), *shadowed* (a
+  shortcut placed below the catch-all; it never fires, whether or not the
+  catch-all would claim its references), *reserved prefix*
   (a word a catch-all deliberately does not claim), *projection* (the last
-  installed policy, kept locally so a change can be detected across a restart).
-  One word per concept: not *wildcard*, not *unreachable*, not *deny-list*.
+  installed policy, kept locally so a change can be detected across a restart),
+  *journal* (the record of what changed), *claimed* / *unclaimed* (a change a
+  commit revendicates, versus one nobody does — only the second is an alarm),
+  *attribution* (which revision, written by whom: the identity of a commit, never
+  merely its height).
+  One word per concept: not *wildcard*, not *unreachable*, not *deny-list*, and
+  not *manual* / *unknown*, which named the same pair twice.
 
 ## Brand Commitments
 
 - Name: **Jira Quick Jump**. Author signature (the animated `RomainMILLAN`
   tag) sits in the options page footer, linking to `romainmillan.fr` with the
   domain visible.
-- The visual system is inherited from the author's sibling extension
-  `chrome-temporary-tab`: Space Grotesk / Hanken Grotesk / JetBrains Mono,
-  indigo `#5b4df5`, paper `#f6f5f2`, and the mint / amber / coral accent trio.
+- The visual system is defined by `src/ui/tokens.css`, which is the single
+  source of truth: teal `#0d7f74` carries the product, paper `#f5f4f0`, and the
+  state pair red `#b3372c` (refused) / amber `#8a6a1e` (accept once). **Teal
+  never means a state**, and no state is signalled by colour alone -- every one
+  of them also carries a word, which is what WCAG 2.2 AA requires here.
+  One bundled face, JetBrains Mono, for keys and URLs only; everything else is
+  the system UI face. A dark palette redefines the same tokens under
+  `prefers-color-scheme: dark`.
 
 ## Evidence on Hand
 

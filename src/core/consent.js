@@ -82,8 +82,15 @@
   };
 
   Consent.parse = function (raw) {
-    if (raw === undefined || raw === null) return { ok: true, value: Consent.fresh() };
-    if (typeof raw !== "object" || Array.isArray(raw)) {
+    // `undefined` ONLY. `null` was accepted here as a second spelling of absence,
+    // in a project that bans it and whose admission door refuses it for every
+    // other field -- two representations of the same nothing, admitted at the one
+    // gate whose job is to reduce them to one.
+    if (raw === undefined) return { ok: true, value: Consent.fresh() };
+    // `raw === null` FIRST, because typeof null is "object": without it, null
+    // walked past this guard and threw on `raw.armed` -- a TypeError instead of a
+    // refusal, on the storage read path.
+    if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
       return { ok: false, code: "CONSENT_NOT_AN_OBJECT", message: "Consent must be an object." };
     }
     if (typeof raw.armed !== "boolean") {
@@ -107,14 +114,30 @@
     //
     // Quarantine is for what we cannot READ. Here we read perfectly well; we
     // refuse to BELIEVE.
+    // Two sets, because they answer two questions: `declared` is what the
+    // document claimed (so a repeat is a malformed document), `seen` is what we
+    // agree to believe.
+    const declared = new Set();
     const seen = new Set();
     for (const kind of kinds) {
       if (!global.ShortcutWarning.has(kind)) {
         return { ok: false, code: "UNKNOWN_WARNING_KIND", message: `Unknown warning kind "${kind}".` };
       }
-      if (seen.has(kind)) {
+      // THE DUPLICATE CHECK COMES FIRST, over ALL kinds.
+      //
+      // The `continue` for key-scoped kinds sat ABOVE `seen.add`, so those kinds
+      // never entered the set and ["CATCH_ALL","CATCH_ALL","CATCH_ALL"] passed
+      // without a word -- the control was dead on the one scope that arms a
+      // universal redirector. Harmless in effect, since key-scoped
+      // acknowledgements are dropped anyway, and that is exactly why it had to be
+      // either repaired or removed: a named control that controls nothing teaches
+      // the next reader to trust the name.
+      if (declared.has(kind)) {
         return { ok: false, code: "DUPLICATE_ACKNOWLEDGEMENT", message: `"${kind}" acknowledged twice.` };
       }
+      declared.add(kind);
+      // Key-scoped acknowledgements are READ and then DROPPED: a document cannot
+      // pre-approve the warning that guards the catch-all. See the header.
       if (global.ShortcutWarning.scopeOf(kind) === "key") continue;
       seen.add(kind);
     }

@@ -5,6 +5,9 @@
   "accessAll": {
     "message": "Toutes les origines dont cette configuration a besoin sont accordées."
   },
+  "accessDeclined": {
+    "message": "L'accès n'a pas été accordé, donc rien ne sera redirigé vers ces hôtes."
+  },
   "accessMissing": {
     "message": "Certaines origines ne sont pas encore accordées."
   },
@@ -51,7 +54,19 @@
     "message": "N’importe quelle clé courte"
   },
   "catchAllNote": {
-    "message": "Toute clé de 2 à 6 caractères suivie d’un trait d’union et d’un nombre part vers cette destination, sur les moteurs que vous avez cochés. Une courte liste réservée est retenue."
+    "message": "Toute clé de {min} à {max} caractères suivie d'un tiret et d'un nombre part vers cette destination, sur les moteurs que vous avez cochés. Une courte liste réservée est laissée de côté."
+  },
+  "badgeOff": {
+    "message": "off"
+  },
+  "badgeReady": {
+    "message": "Quick Jump for Jira : les raccourcis sont actifs."
+  },
+  "badgeUnseen": {
+    "message": "Quick Jump for Jira : une destination a changé. Ouvrez les options pour la vérifier."
+  },
+  "badgeOffTitle": {
+    "message": "Quick Jump for Jira : rien ne redirige pour l'instant."
   },
   "changedAck": {
     "message": "Je l’ai vérifié"
@@ -61,6 +76,9 @@
   },
   "changedTitle": {
     "message": "Une destination a changé"
+  },
+  "changedTitleMany": {
+    "message": "Des destinations ont changé"
   },
   "changedWas": {
     "message": "Elle pointait vers"
@@ -82,6 +100,9 @@
   },
   "diagAllShadowed": {
     "message": "Tous les raccourcis sont sous l’attrape-tout : aucun ne se déclenche."
+  },
+  "diagNothingToInstall": {
+    "message": "Rien n'est actif pour l'instant, donc aucun raccourci ne se déclenche. Vérifiez les lignes ci-dessous."
   },
   "diagCatchAllNotInstalled": {
     "message": "L’attrape-tout n’a pas pu être installé : il ne capte rien."
@@ -149,8 +170,26 @@
   "factReplaced": {
     "message": "Toute la configuration a changé ailleurs. Vérifiez chaque destination."
   },
-  "factShadowed": {
-    "message": "Ces clés partent désormais vers l’attrape-tout :"
+  "factShadowedStopped": {
+    "message": "Ces clés ne se déclenchent plus, car l'attrape-tout est passé au-dessus d'elles :"
+  },
+  "factShadowedClaims": {
+    "message": "Ce que l'attrape-tout réclame part vers"
+  },
+  "factKeyChanged": {
+    "message": "n'intercepte plus la même chose ; la clé est maintenant"
+  },
+  "factArmed": {
+    "message": "a été armée et redirige désormais vers"
+  },
+  "factEnginesAdded": {
+    "message": "Davantage de moteurs de recherche sont interceptés. Vérifiez la section Accès."
+  },
+  "factPolicyArmed": {
+    "message": "L'extension a été réactivée ailleurs, et tous les raccourcis redirigent à nouveau."
+  },
+  "factUnreadable": {
+    "message": "Ce qui était enregistré est devenu illisible, donc rien n'est installé. Vérifiez chaque destination."
   },
   "fix": {
     "message": "Corriger"
@@ -178,6 +217,27 @@
   },
   "installDiffers": {
     "message": "La configuration installée diffère de celle que vous voyez."
+  },
+  "skipUnknownEngine": {
+    "message": "Un moteur de recherche coché n'est plus connu."
+  },
+  "skipRegexUnsupported": {
+    "message": "Le navigateur a refusé le motif de cette règle."
+  },
+  "skipUnitIncomplete": {
+    "message": "Cette règle a été écartée avec le groupe auquel elle appartient."
+  },
+  "skipConstructionRefused": {
+    "message": "Les règles n'ont pas pu être construites."
+  },
+  "skipRunOverBudget": {
+    "message": "La garde des préfixes réservés est trop longue pour le navigateur."
+  },
+  "skipEnvelopeOverBudget": {
+    "message": "L'adresse de ce moteur de recherche ne laisse pas de place pour une règle."
+  },
+  "skipKeyLengthOverBudget": {
+    "message": "L'attrape-tout revendique des clés plus longues que ce que le navigateur sait apparier."
   },
   "journalOverflowed": {
     "message": "Certains changements n’ont pas pu être enregistrés."
@@ -233,11 +293,107 @@
   "previewNoMatch": {
     "message": "Cette recherche passerait sans être modifiée."
   },
+  "previewEngineDisagreement": {
+    "message": "La réponse dépend du moteur de recherche utilisé par la barre d'adresse."
+  },
   "previewNotASearchUrl": {
     "message": "Ce n’est pas une URL de recherche."
   },
   "previewNotAUrl": {
     "message": "Ce n’est pas une URL."
+  },
+  "refuseDuplicateKey": {
+    "message": "Cette clé est déjà utilisée par un autre raccourci."
+  },
+  "refuseDuplicateCatchAll": {
+    "message": "Il y a déjà un raccourci attrape-tout."
+  },
+  "refuseDuplicateId": {
+    "message": "Deux entrées revendiquent le même identifiant."
+  },
+  "refuseDuplicateEngine": {
+    "message": "Ce domaine est déjà dans la liste."
+  },
+  "refuseUnknownShortcut": {
+    "message": "Ce raccourci n'existe plus."
+  },
+  "refuseUnknownQuarantined": {
+    "message": "Cette entrée n'est plus mise de côté."
+  },
+  "refuseKeyNature": {
+    "message": "Un attrape-tout ne peut pas être renommé, et un raccourci ne peut pas en devenir un."
+  },
+  "refuseMissingFreshId": {
+    "message": "Cette entrée a besoin d'un nouvel identifiant avant d'être rétablie."
+  },
+  "refuseKeyShape": {
+    "message": "Une clé ressemble à ABC : 2 à 20 lettres, chiffres ou tirets bas, commençant par une lettre."
+  },
+  "refuseKeyControl": {
+    "message": "Cette clé contient un caractère invisible ou de contrôle."
+  },
+  "refuseKeyLookalike": {
+    "message": "Cette clé contient des caractères sosies."
+  },
+  "refuseBaseEmpty": {
+    "message": "Saisissez une adresse Jira."
+  },
+  "refuseBaseScheme": {
+    "message": "Seules les adresses http et https sont acceptées."
+  },
+  "refuseBaseUserinfo": {
+    "message": "Une adresse ne peut pas porter d'identifiants."
+  },
+  "refuseBaseQuery": {
+    "message": "Une adresse ne peut pas porter de chaîne de requête."
+  },
+  "refuseBaseFragment": {
+    "message": "Une adresse ne peut pas porter de fragment."
+  },
+  "refuseBaseCanonical": {
+    "message": "Écrivez l'adresse sous sa forme simple, par exemple https://example.atlassian.net/jira."
+  },
+  "refuseBaseForbiddenHost": {
+    "message": "Cette adresse est un point de métadonnées cloud ou lien-local."
+  },
+  "refuseBaseUnsafePort": {
+    "message": "Les navigateurs refusent de se connecter à ce port."
+  },
+  "refuseBasePathDepth": {
+    "message": "Une adresse ne peut pas avoir plus de quatre segments de chemin."
+  },
+  "refuseBaseTooLong": {
+    "message": "Cette adresse est trop longue."
+  },
+  "refuseHostShape": {
+    "message": "Saisissez un simple nom de domaine, sans schéma ni chemin."
+  },
+  "refuseHostTooLong": {
+    "message": "Ce nom de domaine est trop long."
+  },
+  "refuseShortcutLimit": {
+    "message": "Cela créerait plus de raccourcis que cette extension n'en conserve."
+  },
+  "refuseBindingLimit": {
+    "message": "Cela créerait plus de règles de redirection que le navigateur n'en autorise."
+  },
+  "refuseOrderStale": {
+    "message": "L'ordre a changé dans une autre fenêtre. Réessayez."
+  },
+  "refuseConflict": {
+    "message": "Une autre fenêtre a modifié la configuration en même temps. Réessayez."
+  },
+  "refuseQuota": {
+    "message": "Il n'y a plus de place pour enregistrer ceci."
+  },
+  "refuseUnacknowledged": {
+    "message": "Lisez les avertissements de destination avant d'activer ce raccourci."
+  },
+  "refuseUnknownWarning": {
+    "message": "Cet accusé n'est pas connu de cette version."
+  },
+  "previewNoEngines": {
+    "message": "Cochez d'abord un moteur de recherche : rien n'est intercepté pour l'instant."
   },
   "previewReservedPrefix": {
     "message": "Retenu par un préfixe réservé : l’attrape-tout le laisse passer."
@@ -307,6 +463,9 @@
   },
   "tagAllShadowed": {
     "message": "Tous masqués"
+  },
+  "tagNothingToInstall": {
+    "message": "Rien d'actif"
   },
   "tagAwaitingAck": {
     "message": "Non accepté"

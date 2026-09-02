@@ -67,6 +67,15 @@
       sentence: () => t("diagAllShadowed", "Every shortcut sits below the catch-all, so none of them fires."),
       label: () => t("tagAllShadowed", "All shadowed"),
     },
+    // The honest "otherwise". ALL_SHORTCUTS_SHADOWED used to be the catalogue's
+    // catch-all clause under a name that asserted a precise cause; this is the one
+    // that says only what it knows.
+    NOTHING_TO_INSTALL: {
+      tone: "warn",
+      sentence: () => t("diagNothingToInstall",
+        "Nothing is active right now, so no shortcut fires. Check the rows below."),
+      label: () => t("tagNothingToInstall", "Nothing active"),
+    },
     CATCH_ALL_NOT_INSTALLED: {
       tone: "warn",
       sentence: () => t("diagCatchAllNotInstalled", "The catch-all could not be installed, so it claims nothing."),

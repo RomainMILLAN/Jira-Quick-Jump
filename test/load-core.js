@@ -6,9 +6,18 @@
  * files must run in a Chrome service worker, a Firefox event page and a <script
  * src> in an HTML page. Deciding how to load them for tests happens here, once,
  * rather than being copy-pasted into every test file.
+ *
+ * THE ORDER IS THE ONE THAT SHIPS. This was the FIFTH loading list and the only
+ * one no test read, so it was free to drift from the four that reach a browser --
+ * and it had: stored-policy.js sat before platform.js here and after it in both
+ * pages. A changelock resting on load order could therefore be green in the suite
+ * and broken in the browser, or the reverse. structure.test.js now compares the
+ * two, so this list is maintained by copying the manifest's, never by hand.
  */
 const ORDER = [
+  "platform.js",
   "core/mutation-result.js",
+  "core/engine-id.js",
   "core/reserved-prefix.js",
   "core/issue-reference.js",
   "core/shortcut-warning.js",
@@ -20,10 +29,12 @@ const ORDER = [
   "core/shortcut-registry.js",
   "core/custom-engine.js",
   "core/jump-policy.js",
+  "core/diagnosis.js",
   "core/policy-diff.js",
   "core/admission.js",
   "interception/search-engine-catalog.js",
   "interception/re2-budget.js",
+  "interception/not-installed.js",
   "interception/reference-pattern.js",
   "interception/rule-ranking.js",
   "interception/installed-rule.js",
@@ -31,28 +42,24 @@ const ORDER = [
   "interception/rule-factory.js",
   "interception/origin-requirements.js",
   "interception/jump-preview.js",
-  "stored-policy.js",
-  // The storage-facing modules the journal tests exercise. They need Platform,
-  // which the tests stand in for, so they load last.
-  "platform.js",
   "versioned-entry.js",
-  // It destructures VersionedEntry at load time, like installed-projection.js.
   "install-outcome.js",
+  "stored-policy.js",
   "key-acknowledgements.js",
-  // The two storage-facing modules background.js cannot run without. They were
-  // missing while nothing loaded background.js; the order mirrors its own
-  // importScripts, because that list is the one that ships.
   "installed-projection.js",
   "policy-repository.js",
   "destination-journal.js",
   "rule-installer.js",
-  // AFTER platform.js, because it calls t() -- and after core/jump-policy.js,
-  // whose DIAGNOSES it reads AT LOAD TIME to refuse an incomplete table. It
-  // touches neither document nor window, like row-reorder.js below.
+  // AFTER platform.js, because it calls t() -- and after core/diagnosis.js, whose
+  // catalogue it reads AT LOAD TIME to refuse an incomplete table. It touches
+  // neither document nor window, like row-reorder.js below, which is what makes
+  // both safe to load in a bare Node process.
+  //
+  // NOT in the manifest, and correctly so: background.scripts carries no ui/*.
+  // They sit at the END so the shared prefix above stays IDENTICAL to what ships,
+  // which is what the structure test compares.
   "ui/diagnosis-presentation.js",
-  // Pointer arithmetic that is three numbers and no DOM, so it belongs in
-  // the regression net like anything else. The file touches neither
-  // document nor window at load time, which is what makes this safe.
+  "ui/refusal-presentation.js",
   "ui/row-reorder.js",
 ];
 

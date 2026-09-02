@@ -29,15 +29,12 @@
 
   // Selections written before engines were split per domain. Without this, an
   // existing configuration silently loses every engine and stops jumping.
-  const LEGACY_IDS = {
-    google: "google.com",
-    bing: "bing.com",
-    duckduckgo: "duckduckgo.com",
-  };
-
   const build = ({ id, label, domain, shape }) => {
     const form = SHAPES[shape];
-    if (!form) return null;
+    // `undefined`, like find() two lines down. This file had BOTH spellings of
+    // absence, and the caller wrote `if (!entry) continue` to cover the pair --
+    // a presence test that exists only because the vocabulary was double.
+    if (!form) return undefined;
     const hostPattern = "(?:www\\.)?" + domain.replace(/\./g, "\\.");
     return {
       id,
@@ -62,15 +59,23 @@
        * (?:&|$) is what turns "the regex stops here" into "the typed text must be
        * EXACTLY an issue reference, nothing more" — the decision that bounds false
        * positives.
-       */
-      /**
+       *
        * The URL this engine would build for that text. The engine's FORMAT must
        * not have two homes, so the preview asks rather than assembling.
+       *
+       * THE FORM A BROWSER ACTUALLY EMITS.
+       *
+       * encodeURIComponent turns a space into %20, and a browser's address bar
+       * emits `+`. The rule matches both, so the preview still said "matched" --
+       * BUT THROUGH THE OTHER BRANCH OF THE ALTERNATION than the one reality
+       * takes. A screen that claims to simulate the delivered programme was
+       * validating a path no navigation ever walks, and the day one of the two
+       * forms is dropped the regression net would stay green.
        */
       searchUrlFor(text) {
         return (
           "https://" + domain + (form.pathPattern === "/" ? "/" : form.pathPattern) +
-          "?" + form.queryParam + "=" + encodeURIComponent(text)
+          "?" + form.queryParam + "=" + encodeURIComponent(text).replace(/%20/g, "+")
         );
       },
 
@@ -121,7 +126,7 @@
         });
         // An unknown shape is filtered here, exactly as an unknown engine id is:
         // translate AND filter is the airlock's job.
-        if (!entry) continue;
+        if (entry === undefined) continue;
         const signature = entry.hostPattern + "|" + entry.shape;
         if (seen.has(signature)) continue;
         seen.add(signature);
@@ -130,9 +135,11 @@
       return view(entries);
     },
 
-    /** Maps an id written before engines were split per domain. */
+    /** Kept as a convenience for callers already holding the catalogue; the
+     *  spelling itself is owned by core/engine-id.js, because the storage door
+     *  needs it and the storage door is core. */
     migrateId(id) {
-      return LEGACY_IDS[id] || id;
+      return global.EngineId.current(id);
     },
   };
 

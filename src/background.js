@@ -8,6 +8,7 @@
     importScripts(
       "platform.js",
       "core/mutation-result.js",
+    "core/engine-id.js",
       "core/reserved-prefix.js",
       "core/issue-reference.js",
       "core/shortcut-warning.js",
@@ -19,10 +20,12 @@
       "core/shortcut-registry.js",
       "core/custom-engine.js",
       "core/jump-policy.js",
+    "core/diagnosis.js",
       "core/policy-diff.js",
       "core/admission.js",
       "interception/search-engine-catalog.js",
       "interception/re2-budget.js",
+    "interception/not-installed.js",
       "interception/reference-pattern.js",
       "interception/rule-ranking.js",
       "interception/installed-rule.js",
@@ -42,7 +45,8 @@
   }
 
   const { Platform, PolicyRepository, DestinationJournal, RuleInstaller,
-          InstalledProjection, InstallOutcome, PolicyDiff } = global;
+          InstalledProjection, InstallOutcome, PolicyDiff,
+          OriginRequirements, SearchEngineCatalog } = global;
   const api = Platform.api;
 
   /**
@@ -90,6 +94,20 @@
         // policy.
         outcome = { installed: false, coverageSatisfied: false };
         await RuleInstaller.purge();
+        // AND IT IS SAID. This path was mute: purge, return, badge to `off`, and
+        // not one line in the journal -- on the channel SECURITY.md makes the
+        // pivot of detection, along the route a compromised sync reaches most
+        // easily. The badge says "nothing fires"; it does not say "what was
+        // saved stopped being readable", and those are different sentences.
+        //
+        // ITS OWN DOOR. There is no readable policy, hence no revision to
+        // attribute this to and no claim that could ever cover it. Pushing it
+        // through the unclaimed door with `rev: 0` silenced it on a fresh journal
+        // -- 0 >= 0 -- so the loudest path in the trust model was mute.
+        await DestinationJournal.recordUnclaimable(
+          [{ type: "PolicyUnreadable", code: loaded.code }],
+          Date.now()
+        );
         return;                          // this return TRAVERSES the finally
       }
       const policy = loaded.stored.policy();
@@ -103,7 +121,13 @@
         detectorIntact = false;
       }
       report = await RuleInstaller.install(policy, loaded.stored.quarantinedCount());
-      outcome = { installed: report.installed, coverageSatisfied: report.coverageSatisfied };
+      outcome = {
+        installed: report.installed,
+        coverageSatisfied: report.coverageSatisfied,
+        // The causes reach the page only through here: they are produced during an
+        // installation, which only this worker performs.
+        skipped: report.skipped,
+      };
       // AFTER reconciliation, and NOT AT ALL if the install failed or the detector
       // did -- a stale comparison base would re-diff the same gap at every wake-up
       // and fill a twenty-entry journal with duplicates.
@@ -111,8 +135,27 @@
       // The condition NAMES THE THING IT PROTECTS -- "this report comes from an
       // installation" -- instead of saying "a field is missing". And it reads the
       // LOCAL, not a shared mutable.
+      // `report.source === "INSTALL"` is DELIBERATELY KEPT, and it cannot open:
+      // _install is the only producer of a report on this path, and "PURGE" is
+      // unreachable because purge() produces none. It is a CHANGELOCK, not a
+      // guard -- the day a factorisation lets another source reach the projection,
+      // this is what has to be looked at. Written down so the next reader does not
+      // delete it as dead, nor trust it as a live check.
       if (detectorIntact && report.source === "INSTALL" && report.installed === true) {
-        await InstalledProjection.record(policy, await DestinationJournal.lastLoggedRev());
+        // THE RETURN IS DELIBERATELY NOT ACTED UPON, and that is a claim worth
+        // being precise about rather than a second omission.
+        //
+        // A failed write leaves the comparison base stale, which used to mean the
+        // next wake-up re-diffed the same gap and refilled the journal with
+        // duplicates. It no longer does: recordDivergence consults the journal's
+        // own waterline inside its mutation, so a gap the door has already
+        // claimed is a NON-DISCOVERY and nothing is written. The stale base costs
+        // a recomputation, not a false alarm.
+        //
+        // What it would cost is a MISSED divergence -- but only for a change that
+        // is itself below the waterline, i.e. one already attributed. There is
+        // nothing to detect there.
+        await InstalledProjection.record(policy);
       }
     } catch {
       outcome = { installed: false, coverageSatisfied: false };   // BEFORE purge, which can throw
@@ -154,11 +197,16 @@
    * of the five sources would have no producer at all, and the trust model would
    * promise a detection the code does not deliver.
    *
-   * An unattributed change is UNKNOWN, which is MORE alarming, and correctly so:
-   * a detector must fail by over-signalling, never by under-signalling.
+   * An unattributed change is a DIVERGENCE, which is more alarming than an
+   * attributed one, and correctly so: a detector must fail by over-signalling.
+   *
+   * But it must not signal on ordinary use. The door records its attribution
+   * right after its commit, and the same write wakes us; without the waterline
+   * every rename typed by the user produced a second line labelled UNKNOWN -- the
+   * code reserved for compromise -- and the banner cried on the act itself.
    */
   const reconcile = async (policy) => {
-    const { policy: previous, loggedRev } = await InstalledProjection.read();
+    const { policy: previous } = await InstalledProjection.read();
     if (!previous) {
       // ABSENT means the detector has no baseline -- a wiped storage.local, a
       // fresh profile, a new device. Returning here would move the in-memory hole
@@ -174,10 +222,9 @@
         //
         // The recorder does not break down: it politely answers "tape busy", and
         // nobody was listening to the answer.
-        const written = await DestinationJournal.record(
+        const written = await DestinationJournal.recordUnclaimed(
           [{ type: "PolicyReplaced", changedCount: policy.shortcuts().length }],
-          0,
-          "UNKNOWN",
+          policy.fingerprint(),
           Date.now()
         );
         return written.ok;
@@ -188,10 +235,29 @@
     // paths of the trust model covered -- the door and the window.
     const facts = PolicyDiff.between(previous, policy);
     if (facts.length > 0) {
-      const written = await DestinationJournal.record(facts, loggedRev, "UNKNOWN", Date.now());
+      // The waterline is compared INSIDE the mutation, against the freshly
+      // re-read journal -- so a commit the door claimed while we were waking up
+      // is seen, and nothing is written. See recordDivergence.
+      const written = await DestinationJournal.recordUnclaimed(facts, policy.fingerprint(), Date.now());
       return written.ok;
     }
     return true;
+  };
+
+  /** Whether the installed programme can actually fire: a redirect rule without
+   *  host access is inert. Its own failure reads as "granted", because the badge
+   *  must never print `off` on an ignorance -- `off` is the only one of the three
+   *  values that ASSERTS something. */
+  const hasEveryOrigin = async () => {
+    try {
+      const loaded = await PolicyRepository.load();
+      if (!loaded.ok) return true;
+      const policy = loaded.stored.policy();
+      const origins = OriginRequirements.requiredOrigins(policy, SearchEngineCatalog.forPolicy(policy));
+      return await Platform.grantedOrigins(origins);
+    } catch {
+      return true;
+    }
   };
 
   /**
@@ -215,6 +281,10 @@
    * one of the three values that ASSERTS something.
    */
   const refreshBadge = async () => {
+    // `!` stays a symbol on purpose -- it is punctuation, not a word -- but `off`
+    // was an ENGLISH WORD shown to every reader, with no key of its own. And the
+    // badge carried neither colour nor tooltip: the only permanently visible
+    // surface of this extension said "!" with no way to learn what it meant.
     let text = "!";
     try {
       let journal = { acknowledged: false };
@@ -224,12 +294,34 @@
         /* the proof is unreadable: NOT acknowledged, never the reassuring branch */
       }
       const applied = await RuleInstaller.installedRuleCount();
-      text = applied === 0 ? "off" : journal.acknowledged ? "" : "!";
+      // RULES WITHOUT ACCESS FIRE NOTHING, and the badge said nothing about it.
+      // Revoking a host relaunches sync(), which correctly REINSTALLS the rules --
+      // a DNR redirect without host access simply never fires, and becomes live
+      // again on its own the moment permission returns. But the badge counted
+      // those rules and printed the reassuring empty text, so the one surface
+      // that is always visible claimed everything was fine while not a single
+      // jump could happen.
+      const granted = await hasEveryOrigin();
+      text = applied === 0 || !granted ? Platform.t("badgeOff", "off") : journal.acknowledged ? "" : "!";
     } catch {
       /* the count is unknown: `text` keeps its initial "!" */
     }
     try {
       await api.action.setBadgeText({ text });
+      // The tooltip is what makes the badge readable at all, and the colour is a
+      // second signal beside it -- never the only one, since the text says it too.
+      if (api.action.setTitle) {
+        await api.action.setTitle({
+          title: text === ""
+            ? Platform.t("badgeReady", "Quick Jump for Jira: shortcuts are active.")
+            : text === "!"
+              ? Platform.t("badgeUnseen", "Quick Jump for Jira: a destination changed. Open the options to check it.")
+              : Platform.t("badgeOffTitle", "Quick Jump for Jira: nothing is redirecting right now."),
+        });
+      }
+      if (api.action.setBadgeBackgroundColor) {
+        await api.action.setBadgeBackgroundColor({ color: text === "!" ? "#b3372c" : "#6a7370" });
+      }
     } catch {
       /* no action in some contexts */
     }
@@ -267,9 +359,13 @@
     }
   };
 
+  // An update writes NOTHING here. It used to set `updatedBanner: true`, an entry
+  // with no reader anywhere in the project -- and the try inside onEvent was
+  // justified, in writing, by the risk of THAT write being rejected. A storage
+  // entry nobody reads is a claim nobody can check; the sync() that onEvent runs
+  // afterwards is what an update actually needs.
   api.runtime.onInstalled.addListener(onEvent(async (details) => {
     if (details.reason === "install") api.runtime.openOptionsPage();
-    if (details.reason === "update") await api.storage.local.set({ updatedBanner: true });
   }));
 
   api.runtime.onStartup.addListener(onEvent(async () => {}));

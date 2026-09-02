@@ -31,6 +31,13 @@
   // thousand engines would freeze the service worker. Fail-closed and no leak,
   // but free to close.
   const MAX_CUSTOM_ENGINES = 20;
+  // The built-in catalogue plus every custom domain that may exist, with room to
+  // spare: a selection cannot legitimately be longer than what can be selected.
+  const MAX_ENGINES = 64;
+  // What a configuration FILE may weigh. It was written as `64 * 1024` inside the
+  // options page -- a security bound living on the surface it protects, with no
+  // relation to the limits beside it here and nothing testing it.
+  const MAX_TRANSFER_BYTES = 64 * 1024;
 
   const refuse = (code, message) => ({ ok: false, code, message });
 
@@ -106,19 +113,37 @@
   };
 
   /**
-   * Puts the surviving shortcuts back into the document's order.
+   * THE DOCUMENT'S ORDER SURVIVES BY CONSTRUCTION -- this only says so out loud.
    *
-   * A no-op when nothing was quarantined, and never a repair: an id the policy
-   * does not hold is simply absent from the list.
+   * There used to be a reassertOrder() here that re-applied the order after the
+   * admission loop. It could never repair anything, and it is worth writing down
+   * why, because the next reader will want to bring it back:
+   *
+   *   register APPENDS, always (see ShortcutRegistry: _with leans on Map.set,
+   *   which keeps an existing key's position and puts a new one last). The loop
+   *   walks the document in order and appends what it admits, so orderedIds() IS
+   *   the admitted ids in document order before anyone reasserts anything.
+   *   withOrder on that list hit `ids.every((id, i) => id === current[i])` and
+   *   returned ok(this). A no-op, provably.
+   *
+   * And it was a HARMFUL no-op. Its `wanted.length !== held.size` guard opened on
+   * exactly one case -- a duplicate id, which the document's own quarantine now
+   * refuses -- and its answer there was `return policy`, silently abandoning the
+   * order. Skipping an entry SHIFTS NOTHING when insertion is append-only, so the
+   * comment that justified the whole function was wrong too.
+   *
+   * A post-condition, therefore, and it THROWS. The day register starts placing
+   * rows instead of appending them, this is what must fall -- loudly, at the
+   * door -- rather than the user's evaluation order going quiet. And the order is
+   * the destination: it decides who intercepts what.
    */
-  const reassertOrder = (policy, rawShortcuts) => {
-    const held = new Set(policy.registry().orderedIds());
-    const wanted = rawShortcuts
-      .map((entry) => (entry && typeof entry.id === "string" ? entry.id : undefined))
-      .filter((id) => id !== undefined && held.has(id));
-    if (wanted.length !== held.size) return policy;
-    const ordered = policy.withOrder(wanted);
-    return ordered.ok ? ordered.value : policy;
+  const assertAdmittedInDocumentOrder = (policy, admittedIds) => {
+    const held = policy.registry().orderedIds();
+    const same =
+      held.length === admittedIds.length && held.every((id, i) => id === admittedIds[i]);
+    if (!same) {
+      throw new Error("ADMISSION_ORDER_BROKEN: register no longer appends in document order");
+    }
   };
 
   const readDocument = (raw) => {
@@ -143,9 +168,27 @@
     if (!Array.isArray(rawEngines) || rawEngines.some((e) => typeof e !== "string")) {
       return refuse("ENGINES_NOT_A_LIST", "`engines` must be a list of engine ids.");
     }
+    // BOUNDED LIKE ITS NEIGHBOURS, and the omission was not benign.
+    //
+    // customEngines was capped at 20 and shortcuts at 200; the ticked selection
+    // was capped at nothing. Bindings are shortcuts x engines, so a document
+    // carrying five thousand ids pushes activeBindings() past MAX_BINDINGS --
+    // and _guarded then refuses EVERY register, so the WHOLE configuration lands
+    // in quarantine, on every device the sync reaches. A denial of service on
+    // the configuration, through the field nobody had counted.
+    //
+    // The cap is the number of engines that can exist: the built-in catalogue
+    // plus the custom domains, themselves capped. Anything beyond is not a
+    // selection, it is a payload.
+    if (rawEngines.length > MAX_ENGINES) {
+      return refuse("TOO_MANY_ENGINES", "This configuration ticks too many search engines.");
+    }
     // Selections written before engines were split per domain would otherwise
     // resolve to nothing, and an existing configuration would quietly stop working.
-    const engines = [...new Set(rawEngines.map((id) => global.SearchEngineCatalog.migrateId(id)))];
+    // core asking core. It used to call SearchEngineCatalog.migrateId, so the
+    // storage door depended on the airlock -- the exact inversion rule-factory.js
+    // forbids in the other direction, invisible because both meet on globalThis.
+    const engines = [...new Set(rawEngines.map((id) => global.EngineId.current(id)))];
     const customEngines = raw.customEngines === undefined ? [] : raw.customEngines;
     if (!Array.isArray(customEngines)) {
       return refuse("CUSTOM_ENGINES_NOT_A_LIST", "`customEngines` must be a list.");
@@ -153,16 +196,130 @@
     if (customEngines.length > MAX_CUSTOM_ENGINES) {
       return refuse("TOO_MANY_CUSTOM_ENGINES", "This configuration has too many domains.");
     }
+    // THE KILL SWITCH IS READ, NEVER COPIED.
+    //
+    // `armed: raw.armed` let "false", 0, null and {} through, and `restore` armed
+    // on anything that was not exactly `false`. A switch has two positions, and
+    // "I cannot read the position" is not a third one -- it is the ABSENCE of
+    // consent to be armed. Same words as key-acknowledgements.js: "ABSENT OR
+    // CORRUPT MEANS NOT ACKNOWLEDGED. Fail closed, never we-assume-so."
+    //
+    // A FIELD-SCOPED REFUSAL, never a refusal of the document. `shortcuts` not
+    // being a list makes the rest impossible -- there is nothing to iterate. A
+    // scalar switch is rebuilt by one click, while a refused configuration is not
+    // rebuilt at all; and refusing the whole document on one flipped byte would
+    // hand the very adversary this module models -- the compromised sync channel
+    // -- a one-byte denial of service.
+    //
+    // ABSENT means disarmed, and that is EXACT rather than merely safe: toJSON
+    // always writes `armed`, and the only shape that omits it is the export,
+    // which proposeImport disarms anyway. No document this model ever wrote can
+    // reach the absent branch.
+    // A DOCUMENT-SCOPED FACT, and it travels in its own list.
+    //
+    // It first went into `dropped`, and that was wrong twice. `dropped` is the
+    // register of REFUSED ENTRIES -- one entry, one reason -- so this fact had to
+    // forge `entry: { armed }`, a pseudo-shortcut that was never an entry: when a
+    // fact must borrow a foreign identity to fit a list, the list is the wrong
+    // one. And it lied on screen: the import surface renders "Some entries were
+    // refused" on `dropped.length > 0`, so a file carrying `armed: "yes"` -- a
+    // field that door does not even read -- announced refusals that never
+    // happened, on the one surface the whole batch says must be believed.
+    const unreadable = [];
+    let armed = false;
+    if (typeof raw.armed === "boolean") {
+      armed = raw.armed;
+    } else if (raw.armed !== undefined) {
+      // Named for the GESTURE, not the typeof. Its look-alikes
+      // (SHORTCUTS_NOT_A_LIST, ENGINES_NOT_A_LIST) are refusals of the whole
+      // document; this one is a degradation, and the name has to say so.
+      unreadable.push({
+        code: "ARMING_STATE_UNREADABLE",
+        message: "The saved arming state could not be read, so nothing is armed.",
+      });
+    }
     return {
       ok: true,
       value: {
         schemaVersion: raw.schemaVersion,
-        armed: raw.armed,
+        armed,
+        // ALWAYS AN ARRAY, empty when there is nothing to say. A field that shows
+        // up only sometimes is the meaningful absence mutation-result.js bans --
+        // and the whole point here is to stop being silent.
+        unreadable,
         engines,
         customEngines,
         shortcuts: raw.shortcuts,
       },
     };
+  };
+
+  /**
+   * THE WALK BOTH DOORS SHARE, written once.
+   *
+   * restore and proposeImport were ninety per cent identical: same read, same
+   * loop, same duplicate-id guard, same custom engines, same post-condition --
+   * with three lines of difference. The header defends "two named doors rather
+   * than one door with a trust flag", and that argument is right about the
+   * SIGNATURE; it never required duplicating the body. So the doors stay two, and
+   * what they do the same is here.
+   *
+   * A DOOR OBJECT, never a boolean. `keepRefused` decided TWO things under a
+   * one-axis name: whether a refused entry is quarantined, AND whether the
+   * entry's own consent is honoured. The second is the security-bearing axis --
+   * "a hostile import is MECHANICALLY unable to install a rule until the user
+   * arms each shortcut while looking at its destination" -- and a reader of the
+   * parameter had no way to know it was in there. That is the mode flag this
+   * file's own header condemns, one level down.
+   */
+  const admitAll = (document, policy, door) => {
+    const quarantine = [];
+    const dropped = [];
+    const admittedIds = [];
+    let admitted = admitCustomEngines(document.customEngines, policy, dropped);
+
+    // `rejectEntry`, NEVER `refuse`: the module already has a `refuse(code,
+    // message)` with a different arity and a different meaning, and shadowing it
+    // here meant a future two-argument call would silently build
+    // `{ entry: <code>, code: <message> }` -- in the file whose header is about
+    // not confusing two doors.
+    const rejectEntry = (entry, code, message) => {
+      if (door.quarantines) quarantine.push(entry);
+      dropped.push({ entry, code, message });
+    };
+
+    for (const entry of document.shortcuts) {
+      const parsed = ShortcutAdmission.admitEntry(entry);
+      if (!parsed.ok) {
+        rejectEntry(entry, parsed.code, parsed.message);
+        continue;
+      }
+      const { id, key, instance, consent } = parsed.value;
+      if (admittedIds.includes(id)) {
+        // THE DOOR CATCHES THIS, NOT register.
+        //
+        // register keeps a replay no-op for an identical (id, key, instance), and
+        // it must: VersionedEntry re-runs intentions against a policy that may
+        // already hold their effect. But that reasoning is about ONE intention
+        // retried; here we are reading a LIST, where a second identical line is a
+        // second line -- a corrupt document, not a retry. register cannot tell the
+        // two apart, because it does not know it is being walked through an array.
+        // The door does.
+        rejectEntry(entry, "DUPLICATE_ID", ShortcutRegistry.DUPLICATE_ID_MESSAGE);
+        continue;
+      }
+      const registered = admitted.register(id, key, instance, door.consentFor(consent));
+      if (!registered.ok) {
+        // Never a silent `continue`.
+        rejectEntry(entry, registered.code, registered.message);
+        continue;
+      }
+      admitted = registered.value;
+      admittedIds.push(id);
+    }
+
+    assertAdmittedInDocumentOrder(admitted, admittedIds);
+    return { policy: admitted, quarantine, dropped };
   };
 
   /**
@@ -179,46 +336,27 @@
     const document = readDocument(raw);
     if (!document.ok) return document;
 
-    const quarantine = [];
-    const dropped = [];
-    let policy = JumpPolicy.empty()
-      .withEngines(document.value.engines)
-      .value.disarm();
-    policy = admitCustomEngines(document.value.customEngines, policy, dropped);
-    if (document.value.armed !== false) policy = policy.arm();
+    const seeded = JumpPolicy.empty().withEngines(document.value.engines);
+    if (!seeded.ok) return seeded;
+    // Disarmed first, then armed only on an explicit `true`: see the kill switch
+    // note in readDocument.
+    const start = document.value.armed === true ? seeded.value.arm() : seeded.value.disarm();
 
-    for (const entry of document.value.shortcuts) {
-      const admitted = ShortcutAdmission.admitEntry(entry);
-      if (!admitted.ok) {
-        quarantine.push(entry);
-        dropped.push({ entry, code: admitted.code, message: admitted.message });
-        continue;
-      }
-      const { id, key, instance, consent } = admitted.value;
-      const registered = policy.register(id, key, instance, consent);
-      if (!registered.ok) {
-        // A register refused at restore time -- BINDING_LIMIT because the cap was
-        // higher when this was written, or DUPLICATE_KEY -- goes to quarantine.
-        // Never a silent `continue`.
-        quarantine.push(entry);
-        dropped.push({ entry, code: registered.code, message: registered.message });
-        continue;
-      }
-      policy = registered.value;
-    }
-
-    // The document's order IS the evaluation order, and it must survive the
-    // round trip. register appends, so replaying the array in sequence already
-    // preserves it -- but quarantine SHIFTS the positions of everything after a
-    // rejected entry, so the surviving order is reasserted explicitly.
-    policy = reassertOrder(policy, document.value.shortcuts);
-
-    if (quarantine.length > MAX_QUARANTINE) {
-      // Discarding would be exactly what quarantine exists to prevent, so we
-      // refuse to load instead, like SCHEMA_TOO_NEW.
-      return refuse("QUARANTINE_FULL", "Too many entries could not be read.");
-    }
-    return { ok: true, policy, quarantine, dropped };
+    const walked = admitAll(document.value, start, {
+      // QUARANTINE, NEVER DESTRUCTION: what we cannot read is moved aside.
+      quarantines: true,
+      // The saved consent is ours: it was written by this extension, on this
+      // machine, after the user read the warning.
+      consentFor: (consent) => consent,
+    });
+    return {
+      ok: true,
+      policy: walked.policy,
+      quarantine: walked.quarantine,
+      dropped: walked.dropped,
+      // Document-scoped facts, carried apart from refused entries.
+      unreadable: document.value.unreadable,
+    };
   };
 
   /**
@@ -238,32 +376,31 @@
     const document = readDocument(raw);
     if (!document.ok) return document;
 
-    const dropped = [];
-    // Disarmed, always: never read from the file.
-    let policy = JumpPolicy.empty().withEngines(document.value.engines).value.disarm();
-    policy = admitCustomEngines(document.value.customEngines, policy, dropped);
+    const seeded = JumpPolicy.empty().withEngines(document.value.engines);
+    if (!seeded.ok) return seeded;
+    // DISARMED, ALWAYS: never read from the file. Combined with fresh consent
+    // inside admitAll, a hostile import is MECHANICALLY unable to install a rule
+    // until the user arms each shortcut while looking at its destination.
+    const walked = admitAll(document.value, seeded.value.disarm(), {
+      // Nothing is set aside: the file is still on the user's disk, so a refused
+      // entry is reported and nothing is lost.
+      quarantines: false,
+      // FRESH CONSENT, ALWAYS. No acknowledgement is importable, so a file cannot
+      // pre-approve its own warnings -- this is the half of the old boolean that
+      // carried the security, and it now says so.
+      consentFor: () => global.Consent.fresh(),
+    });
 
-    for (const entry of document.value.shortcuts) {
-      const admitted = ShortcutAdmission.admitEntry(entry);
-      if (!admitted.ok) {
-        dropped.push({ entry, code: admitted.code, message: admitted.message });
-        continue;
-      }
-      const { id, key, instance } = admitted.value;
-      // Consent.fresh(): no acknowledgement is importable, so a file cannot
-      // pre-approve its own warnings.
-      const registered = policy.register(id, key, instance, global.Consent.fresh());
-      if (!registered.ok) {
-        dropped.push({ entry, code: registered.code, message: registered.message });
-        continue;
-      }
-      policy = registered.value;
-    }
-    policy = reassertOrder(policy, document.value.shortcuts);
-    return { ok: true, policy, dropped };
+    // No `unreadable` here, deliberately: this door disarms whatever it reads, so
+    // it never consults `armed`. Refusing to believe a field one was not going to
+    // read is a refusal without an object -- and it would render as "some entries
+    // were refused" over an import where none were.
+    return { ok: true, policy: walked.policy, dropped: walked.dropped };
   };
 
   ShortcutAdmission.MAX_CUSTOM_ENGINES = MAX_CUSTOM_ENGINES;
+  ShortcutAdmission.MAX_ENGINES = MAX_ENGINES;
+  ShortcutAdmission.MAX_TRANSFER_BYTES = MAX_TRANSFER_BYTES;
   ShortcutAdmission.MAX_QUARANTINE = MAX_QUARANTINE;
   global.ShortcutAdmission = ShortcutAdmission;
 })(globalThis);

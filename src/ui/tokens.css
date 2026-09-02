@@ -25,11 +25,22 @@
 
   --text: #16211f;
   --muted: #6a7370;
-  --faint: #9aa29f;
+  /* 5.05:1 on --card and 4.59:1 on --paper, where it was 2.6:1 on both. It is
+     used as TEXT -- a destination's path at 12.5px, an origin at 11.5px, a field
+     label at 10.5px -- so the AA floor of 4.5:1 applies, and this file claims
+     that floor four times. Measured against BOTH grounds, with margin: a value
+     landing exactly on 4.50 is one rendering rounding away from failing. */
+  --faint: #67716d;
 
   --paper: #f5f4f0;
   --card: #ffffff;
   --line: #e6e4dd;
+  /* A neutral with enough presence to read as a surface rather than an edge: the
+     switch's off state used a hexadecimal that belonged to no scale. */
+  --line-strong: #cfcdc5;
+  /* What reads on a teal fill. It follows the ground, because the dark palette
+     lightens --teal and white on it falls under 4.5:1. */
+  --on-teal: #ffffff;
   --line-soft: #efede7;
   --field: #fbfbf9;
 
@@ -55,11 +66,14 @@
 
     --text: #e4e9e7;
     --muted: #97a09d;
-    --faint: #6f7a77;
+    /* Same reasoning on the dark ground: 4.8:1 on --card. */
+    --faint: #98a29e;
 
     --paper: #121716;
     --card: #171c1b;
     --line: #2c3230;
+    --line-strong: #3d4643;
+    --on-teal: #06211e;
     --line-soft: #262b29;
     --field: #1e2422;
 

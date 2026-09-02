@@ -43,7 +43,11 @@ export const dnrFaults = {
 };
 
 /** Granted by default: the tests that care flip it. */
-export const permissionState = { granted: true };
+export const permissionState = { granted: true, asked: [] };
+
+/** Opt-in translations. Empty by default, so existing fixtures keep the English
+ *  fallback; a test that wants to walk a translated path fills it. */
+export const i18nCatalogue = {};
 
 const local = new Map();
 const badge = { text: undefined, calls: 0, reject: false };
@@ -79,8 +83,13 @@ const hub = (bucket) => ({
  * fail by timing. So the fake gives the test what the browser cannot: a point
  * where the wake-up is over.
  */
+/** THE LAST LISTENER'S ANSWER TRAVELS BACK. It was discarded, so a test could not
+ *  assert what a listener RETURNS -- and the command protocol's whole `return
+ *  false` contract was unobservable. */
 const fireAll = async (bucket, ...args) => {
-  for (const fn of [...bucket]) await fn(...args);
+  let answer;
+  for (const fn of [...bucket]) answer = await fn(...args);
+  return answer;
 };
 
 export const fire = {
@@ -149,9 +158,23 @@ const area = {
   async set(entry) {
     for (const name of Object.keys(entry)) await passGate("set", name);
     if (local.get("__rejectSet") === true) throw new Error("QUOTA_BYTES quota exceeded");
-    for (const [k, v] of Object.entries(entry)) local.set(k, v);
+    const changes = {};
+    for (const [k, v] of Object.entries(entry)) {
+      // THE BYTES DECIDE, as they do in the browser: storage.onChanged fires only
+      // when the stored value actually differs. Nothing fired at all here, so
+      // every test that cared about the notification had to RING THE BELL ITSELF
+      // -- simulating the one link worth proving.
+      const before = JSON.stringify(local.get(k));
+      local.set(k, v);
+      if (JSON.stringify(v) !== before) changes[k] = { newValue: v };
+    }
+    if (Object.keys(changes).length > 0) await fireAll(buckets.onChanged, changes, "local");
   },
   async remove(name) {
+    // A REMOVE CAN FAIL. It could not, so InstallOutcome.forget()'s try/catch --
+    // whose whole contract is "it never throws" -- was never entered, and the test
+    // that claimed to prove it passed because nothing could throw.
+    if (local.get("__rejectRemove")) throw new Error("remove rejected");
     local.delete(name);
   },
 };
@@ -174,10 +197,17 @@ const chrome = {
     onRemoved: hub(buckets.onRemoved),
     // Answering here rather than replacing Platform.grantedOrigins keeps the
     // real façade in the path: the test exercises the code that ships.
-    async contains() {
+    //
+    // THE ARGUMENT IS RECORDED, and it was ignored. Both calls threw away
+    // `origins`, so nothing could ever detect that the extension asks for the
+    // WRONG origin, a TOO BROAD one, or the origin of an instance the user never
+    // configured -- the whole Access section was unverifiable by construction.
+    async contains({ origins } = {}) {
+      permissionState.asked.push({ call: "contains", origins: [...(origins ?? [])] });
       return permissionState.granted;
     },
-    async request() {
+    async request({ origins } = {}) {
+      permissionState.asked.push({ call: "request", origins: [...(origins ?? [])] });
       return permissionState.granted;
     },
   },
@@ -192,7 +222,11 @@ const chrome = {
     },
   },
   i18n: {
-    getMessage: () => "",
+    // NOT ALWAYS EMPTY. Returning "" made every t() fall back to its English
+    // literal, so no test ever walked a translated path and the French build was
+    // validated by nothing executable -- only by comparing key SETS. The catalogue
+    // is opt-in per test, and empty by default so existing fixtures are unchanged.
+    getMessage: (key) => i18nCatalogue[key] ?? "",
   },
   declarativeNetRequest: {
     async isRegexSupported(options) {
@@ -238,6 +272,8 @@ export function reset() {
   dnrFaults.stripPriority = false;
   dnrFaults.rejectGet = false;
   permissionState.granted = true;
+  permissionState.asked.length = 0;
+  for (const key of Object.keys(i18nCatalogue)) delete i18nCatalogue[key];
 }
 
 export const store = {
@@ -256,5 +292,6 @@ export const store = {
   /** storage.local itself dying, which is not the same as a quota refusal. */
   failReads: (yes = true) => local.set("__rejectGet", yes),
   failWrites: (yes = true) => local.set("__rejectSet", yes),
+  failRemoves: (yes = true) => local.set("__rejectRemove", yes),
   openedOptions: () => chrome._openedOptions,
 };
