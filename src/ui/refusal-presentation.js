@@ -51,6 +51,28 @@
     BASE_UNSAFE_PORT: t("refuseBaseUnsafePort", "Browsers refuse to connect to that port."),
     BASE_PATH_DEPTH: t("refuseBasePathDepth", "An address cannot have more than four path segments."),
     BASE_TOO_LONG: t("refuseBaseTooLong", "That address is too long."),
+    // THE ONES REACHED BY TYPING, which is to say the likeliest of all. They were
+    // missing while the header above claimed the French build no longer showed
+    // English "on EVERY validation error" -- a comment asserting a coverage the
+    // table did not have, in the file written to end exactly that.
+    BASE_NOT_A_URL: t("refuseBaseNotAUrl", "That is not a valid address."),
+    BASE_NOT_A_STRING: t("refuseBaseNotText", "A Jira address must be text."),
+    BASE_CONTROL_CHARS: t("refuseBaseControl", "That address contains an invisible or control character."),
+    BASE_PERCENT: t("refuseBasePercent", "Percent-encoded characters are not accepted in an address."),
+    BASE_BACKSLASH: t("refuseBaseBackslash", "An address cannot contain a backslash."),
+    BASE_TRAVERSAL: t("refuseBaseTraversal", "An address cannot contain . or .. path segments."),
+    BASE_PORT: t("refuseBasePort", "The port must be a number between 1 and 65535."),
+    BASE_NOT_ASCII: t("refuseBaseNotAscii", "That address contains non-ASCII characters."),
+    KEY_NOT_A_STRING: t("refuseKeyNotText", "A project key must be text."),
+    HOST_NOT_A_STRING: t("refuseHostNotText", "A domain name must be text."),
+    SHAPE_SHAPE: t("refuseShapeShape", "That is not a search-engine shape this version knows."),
+    ENGINE_NOT_AN_OBJECT: t("refuseEngineShape", "That search engine could not be read."),
+    ENTRY_BAD_ID: t("refuseEntryBadId", "That entry has no usable identifier."),
+    CONSENT_NOT_AN_OBJECT: t("refuseConsentShape", "The saved consent could not be read."),
+    CONSENT_NOT_A_LIST: t("refuseConsentList", "The saved acknowledgements could not be read."),
+    CONSENT_ARMED_NOT_BOOLEAN: t("refuseConsentArmed", "The saved on/off state could not be read."),
+    DUPLICATE_ACKNOWLEDGEMENT: t("refuseDuplicateAck", "That acknowledgement is listed twice."),
+    UNKNOWN_FIELD: t("refuseUnknownField", "That file contains a field this version does not know."),
     HOST_SHAPE: t("refuseHostShape", "Enter a plain domain name, with no scheme and no path."),
     HOST_TOO_LONG: t("refuseHostTooLong", "That domain name is too long."),
 
@@ -72,8 +94,15 @@
      *
      * A code with no entry here falls back to the message the domain wrote, and
      * that is the honest failure: an untranslated sentence beats a code the user
-     * cannot act on. It is also why this table needs no completeness test -- an
-     * omission degrades, it does not break.
+     * cannot act on.
+     *
+     * IT DOES NEED A COMPLETENESS TEST, and the first version of this file said
+     * otherwise. "An omission degrades, it does not break" is true of the
+     * MECHANISM and false of the RESULT: nine codes were missing -- all of them
+     * reachable by typing in the destination field, which makes them the likeliest
+     * of all -- while this header claimed the French build no longer showed English
+     * on every validation error. test/ui.test.js now walks what the three
+     * typed-input parsers can refuse and requires a sentence for each.
      */
     sentence(result) {
       if (!result || result.ok) return "";

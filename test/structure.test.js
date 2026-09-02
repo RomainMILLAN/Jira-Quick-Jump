@@ -21,6 +21,22 @@ const read = (p) => readFileSync(join(ROOT, p), "utf8");
  * literal would be stripped too. No rule here depends on such a line, and a
  * cruder-but-legible filter beats a parser nobody maintains.
  */
+/**
+ * ALL the section code, as one string.
+ *
+ * These rules are about what the sections DO, not about which file they sit in --
+ * and options-sections.js has stopped being a file that does anything: it is the
+ * assembly. Reading it alone would leave every rule below green over an empty
+ * list, which is the worst way for a structural test to pass.
+ */
+const sectionsSource = () =>
+  ["src/options-sections.js", ...readdirSync(join(ROOT, "src/ui/sections"))
+    .filter((f) => f.endsWith(".js"))
+    .sort()
+    .map((f) => join("src/ui/sections", f))]
+    .map((f) => read(f))
+    .join("\n");
+
 const codeOf = (source) =>
   source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/[^\n]*/g, "$1");
 const manifest = JSON.parse(read("src/manifest.json"));
@@ -291,7 +307,7 @@ test("the preview never fails silently", () => {
   // we cannot parse leaves the PREVIOUS verdict on screen -- a stale "Matched a named
   // shortcut" is worse than no answer, and is indistinguishable from the empty state.
   // This is the ear that lets rule-ranking.js keep its canary throw.
-  const ui = read("src/options-sections.js");
+  const ui = sectionsSource();
   assert.match(ui, /async preview\(ctx\) \{\s*(?:\/\/[^\n]*\n\s*)*try \{/,
     "preview() no longer wraps its work: a throw would leave a stale verdict on screen");
   assert.ok(ui.includes("previewUnavailable"),
@@ -318,7 +334,7 @@ test("the rules reach the platform through the one counter, and only through it"
 
 test("the single writer of the rules is STRUCTURAL, and the receipt is one-way", () => {
   const bg = codeOf(read("src/background.js"));
-  const ui = codeOf(read("src/options-sections.js") + read("src/ui/section-host.js"));
+  const ui = codeOf(sectionsSource() + read("src/ui/section-host.js"));
 
   // The lot-2 pin only ever read rule-installer.js, which is why the violation was
   // GREEN FOREVER: background.js held its own purge, copied from _install.
@@ -573,7 +589,7 @@ test("the options page never calls the storage door's key parser", () => {
   // (registerCatchAll) and the core forges the key.
   // The CODE, not the prose: forbidding a call and then explaining the ban in a
   // comment must not make this test red.
-  const ui = codeOf(read("src/options-sections.js"));
+  const ui = codeOf(sectionsSource());
   assert.equal(/ShortcutKey\.parse/.test(ui), false, "options-sections.js must not parse a shortcut key");
   assert.equal(/CatchAllKey\.only/.test(ui), false, "options-sections.js must not mint a catch-all key");
 });
@@ -631,7 +647,7 @@ test("a drag handle never ships without the arrows beside it", () => {
   //
   // Written as an implication rather than a count, so it cannot go vacuous the day
   // the handle moves file.
-  const ui = read("src/options-sections.js");
+  const ui = sectionsSource();
   const handles = ui.match(/Dom\.dragHandle\(/g) || [];
   assert.equal(handles.length, 1, "exactly one drag handle is built");
   assert.match(ui, /"move-up"/);
@@ -673,7 +689,7 @@ test("whatever accepts a drop cancels the default first", () => {
   assert.match(over, /event\.preventDefault\(\)/, "dragover prevents on a valid target");
   // The host's own drop listener is what resumes its deferred render.
   assert.equal(/stopPropagation/.test(reorder), false);
-  assert.equal(/stopPropagation/.test(read("src/options-sections.js")), false);
+  assert.equal(/stopPropagation/.test(sectionsSource()), false);
 });
 
 test("the host defers a render for whatever the user is holding, and still knows nothing about a shortcut", () => {
@@ -701,8 +717,14 @@ test("every section declares its own reconcile, none is grafted by the host", ()
   // force every caller to write a presence test, which is the mistake". A signed
   // empty body is an implementation; an empty body filled in by the neighbour is a
   // patch -- and a typo would disable the compensation in silence.
-  const ui = read("src/options-sections.js");
-  const listed = /OptionsSections = \[([^\]]*)\]/.exec(ui)[1].split(",").length;
+  const ui = sectionsSource();
+  // The list now names Section* constants across files, and a trailing comma
+  // makes `split(",")` count one phantom entry -- so the count comes from the
+  // names, not from the separators.
+  const listed = /OptionsSections = \[([^\]]*)\]/.exec(ui)[1]
+    .split(",")
+    .map((name) => name.trim())
+    .filter(Boolean).length;
   const declared = (ui.match(/^\s{4}reconcile\(/gm) || []).length;
   assert.equal(declared, listed, "as many reconcile() as there are sections");
   assert.equal(/section\.reconcile\s*=/.test(read("src/ui/section-host.js")), false);
@@ -719,7 +741,7 @@ test("every section declares its own reconcile, none is grafted by the host", ()
 test("reconcile never redraws, and only ever speaks constants", () => {
   // It runs while the view is frozen, so it is the one path the tests cannot see
   // through a render -- the best place for a future string from storage.
-  const ui = read("src/options-sections.js");
+  const ui = sectionsSource();
   const bodies = [...ui.matchAll(/^\s{4}reconcile\([^)]*\)\s*\{([\s\S]*?)^\s{4}\},/gm)].map((m) => m[1]);
   assert.ok(bodies.length > 0);
   for (const body of bodies) {
@@ -753,8 +775,8 @@ test("the section that can be frozen never owns the trust banner", () => {
     const sections = markup.indexOf('id="sections"');
     assert.ok(banner > 0 && sections > banner, `${page}: the banner precedes #sections as a sibling`);
   }
-  const ui = read("src/options-sections.js");
-  assert.match(ui, /OptionsSections = \[Status,/, "Status is the first section");
+  const ui = sectionsSource();
+  assert.match(ui, /OptionsSections = \[\s*SectionStatus,/, "Status is the first section");
 });
 
 test("a spacing class is never silently outranked on the same element", () => {
@@ -768,7 +790,7 @@ test("a spacing class is never silently outranked on the same element", () => {
   //
   // So the class sets come from the JS, where co-occurrence actually lives.
   const css = read("src/ui/sections.css");
-  const ui = read("src/options-sections.js");
+  const ui = sectionsSource();
 
   const rules = [...css.matchAll(/^([^@{}\n][^{}\n]*)\{([^}]*)\}/gm)].map(([, selector, body]) => ({
     selector: selector.trim(),
@@ -967,4 +989,35 @@ test("no doc block is orphaned from the subject it documents", () => {
     }
   }
   assert.deepEqual(offenders, [], "these doc blocks sit above another doc block, not above code");
+});
+
+test("no section file grows back into a file that does everything", () => {
+  // options-sections.js reached 1667 lines holding eight sections, four sentence
+  // catalogues, two policy comparators, the validation, the persistence and the
+  // SVG rendering -- and it kept GROWING under the corrections meant to fix it.
+  // Nothing could be loaded alone, nothing reused, and every merge on that screen
+  // was a merge on all of it.
+  //
+  // The bound is deliberately generous: this is a ratchet against the file that
+  // eats its neighbours, not a style rule about length.
+  const LIMIT = 600;
+  const offenders = [];
+  for (const file of readdirSync(join(ROOT, "src/ui/sections")).filter((f) => f.endsWith(".js"))) {
+    const lines = read(join("src/ui/sections", file)).split("\n").length;
+    if (lines > LIMIT) offenders.push(`${file} (${lines})`);
+  }
+  const assembly = read("src/options-sections.js").split("\n").length;
+  if (assembly > 120) offenders.push(`options-sections.js (${assembly}) is the ASSEMBLY, not a section`);
+  assert.deepEqual(offenders, [], `over ${LIMIT} lines: split it before it eats its neighbours`);
+});
+
+test("the assembly decides the order and nothing else", () => {
+  // Its one job is the order on screen. If it starts holding rendering, sentences
+  // or validation again, the split has begun to undo itself.
+  const assembly = codeOf(read("src/options-sections.js"));
+  for (const forbidden of ["Dom.el", "Platform.t(", "document.", "addEventListener", "classList"]) {
+    assert.equal(assembly.includes(forbidden), false,
+      `options-sections.js is the assembly: ${forbidden} belongs in a section`);
+  }
+  assert.match(assembly, /global\.OptionsSections = \[/);
 });

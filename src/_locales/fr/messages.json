@@ -365,6 +365,60 @@
   "refuseBaseTooLong": {
     "message": "Cette adresse est trop longue."
   },
+  "refuseBaseNotAUrl": {
+    "message": "Ce n'est pas une adresse valide."
+  },
+  "refuseBaseNotText": {
+    "message": "Une adresse Jira doit être du texte."
+  },
+  "refuseBaseControl": {
+    "message": "Cette adresse contient un caractère invisible ou de contrôle."
+  },
+  "refuseBasePercent": {
+    "message": "Les caractères encodés en pourcentage ne sont pas acceptés dans une adresse."
+  },
+  "refuseBaseBackslash": {
+    "message": "Une adresse ne peut pas contenir de barre oblique inverse."
+  },
+  "refuseBaseTraversal": {
+    "message": "Une adresse ne peut pas contenir de segment . ou .."
+  },
+  "refuseBasePort": {
+    "message": "Le port doit être un nombre entre 1 et 65535."
+  },
+  "refuseBaseNotAscii": {
+    "message": "Cette adresse contient des caractères non ASCII."
+  },
+  "refuseKeyNotText": {
+    "message": "Une clé de projet doit être du texte."
+  },
+  "refuseHostNotText": {
+    "message": "Un nom de domaine doit être du texte."
+  },
+  "refuseShapeShape": {
+    "message": "Ce n'est pas une forme de moteur de recherche connue de cette version."
+  },
+  "refuseEngineShape": {
+    "message": "Ce moteur de recherche n'a pas pu être lu."
+  },
+  "refuseEntryBadId": {
+    "message": "Cette entrée n'a pas d'identifiant utilisable."
+  },
+  "refuseConsentShape": {
+    "message": "Le consentement enregistré n'a pas pu être lu."
+  },
+  "refuseConsentList": {
+    "message": "Les accusés enregistrés n'ont pas pu être lus."
+  },
+  "refuseConsentArmed": {
+    "message": "L'état activé/désactivé enregistré n'a pas pu être lu."
+  },
+  "refuseDuplicateAck": {
+    "message": "Cet accusé est indiqué deux fois."
+  },
+  "refuseUnknownField": {
+    "message": "Ce fichier contient un champ inconnu de cette version."
+  },
   "refuseHostShape": {
     "message": "Saisissez un simple nom de domaine, sans schéma ni chemin."
   },

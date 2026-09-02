@@ -113,6 +113,13 @@ const loadSections = async () => {
     // NOT swallowed: if the module under test throws at load, the suite must say
     // so rather than continue silently.
     await import("../src/ui/section-host.js");
+    for (const file of [
+      "sections/parts", "sections/sentences", "sections/status", "sections/shortcuts",
+      "sections/engines", "sections/access", "sections/preview", "sections/transfer",
+      "sections/quarantine", "sections/storage",
+    ]) {
+      await import(`../src/ui/${file}.js`);
+    }
     await import("../src/options-sections.js");
     sections = g.OptionsSections;
   }
@@ -324,4 +331,41 @@ test("with no engine ticked the preview blames the configuration, not the input"
     assert.ok(section.out.textContent.toLowerCase().includes("search engine"),
       `it must point at the configuration, got ${JSON.stringify(section.out.textContent)}`);
   });
+});
+
+test("every refusal a user can provoke BY TYPING has a sentence of its own", () => {
+  // Nine were missing -- BASE_NOT_A_URL, BASE_PERCENT, BASE_TRAVERSAL, BASE_PORT,
+  // KEY_NOT_A_STRING among them -- and those are the LIKELIEST of all: they are
+  // what you get from typing in the destination field. Meanwhile the file's own
+  // header claimed the French build no longer showed English "on EVERY validation
+  // error". A comment asserting a coverage the table did not have, in the file
+  // written to end exactly that.
+  //
+  // The source of truth is the DOMAIN, not a hand-kept list: every code the three
+  // typed-input parsers can produce must be presentable.
+  const keys = ["", "  ", "a", "1AB", "A-B", "ABCDEFGHIJKLMNOPQRSTU", " AB", 42, null];
+  const urls = ["", "   ", "ftp://x.example.org", "http://user:pw@x.example.org",
+    "https://x.example.org?q=1", "https://x.example.org#f", "https://x.example.org/a/../b",
+    "https://x.example.org:99999", "https://x.example.org:22", "https://x.example.org/a/b/c/d/e",
+    "x".repeat(300), "https://x.example.org/%41", "not a url at all", 42, null];
+  const engines = [{ host: 42 }, { host: "" }, { host: "x".repeat(200) },
+    { host: "ok.example.org", shape: "nope" }, null];
+
+  const refused = [
+    ...keys.map((raw) => g.ProjectKey.parse(raw)),
+    ...urls.map((raw) => g.JiraInstance.parse(raw)),
+    ...engines.map((raw) => g.CustomEngine.parse(raw)),
+  ].filter((result) => result && result.ok === false);
+
+  assert.ok(refused.length > 20, "the corpus really provokes refusals");
+
+  const bare = new Set();
+  for (const refusal of refused) {
+    const sentence = g.RefusalPresentation.sentence(refusal);
+    // A code leaking through AS the sentence is the failure: the table had no
+    // entry and the domain's message was empty.
+    if (sentence === refusal.code) bare.add(refusal.code);
+    assert.ok(sentence.length > 0, refusal.code + " says nothing at all");
+  }
+  assert.deepEqual([...bare], [], "these codes reach the user as a bare identifier");
 });

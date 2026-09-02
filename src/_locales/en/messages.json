@@ -365,6 +365,60 @@
   "refuseBaseTooLong": {
     "message": "That address is too long."
   },
+  "refuseBaseNotAUrl": {
+    "message": "That is not a valid address."
+  },
+  "refuseBaseNotText": {
+    "message": "A Jira address must be text."
+  },
+  "refuseBaseControl": {
+    "message": "That address contains an invisible or control character."
+  },
+  "refuseBasePercent": {
+    "message": "Percent-encoded characters are not accepted in an address."
+  },
+  "refuseBaseBackslash": {
+    "message": "An address cannot contain a backslash."
+  },
+  "refuseBaseTraversal": {
+    "message": "An address cannot contain . or .. path segments."
+  },
+  "refuseBasePort": {
+    "message": "The port must be a number between 1 and 65535."
+  },
+  "refuseBaseNotAscii": {
+    "message": "That address contains non-ASCII characters."
+  },
+  "refuseKeyNotText": {
+    "message": "A project key must be text."
+  },
+  "refuseHostNotText": {
+    "message": "A domain name must be text."
+  },
+  "refuseShapeShape": {
+    "message": "That is not a search-engine shape this version knows."
+  },
+  "refuseEngineShape": {
+    "message": "That search engine could not be read."
+  },
+  "refuseEntryBadId": {
+    "message": "That entry has no usable identifier."
+  },
+  "refuseConsentShape": {
+    "message": "The saved consent could not be read."
+  },
+  "refuseConsentList": {
+    "message": "The saved acknowledgements could not be read."
+  },
+  "refuseConsentArmed": {
+    "message": "The saved on/off state could not be read."
+  },
+  "refuseDuplicateAck": {
+    "message": "That acknowledgement is listed twice."
+  },
+  "refuseUnknownField": {
+    "message": "That file contains a field this version does not know."
+  },
   "refuseHostShape": {
     "message": "Enter a plain domain name, with no scheme and no path."
   },
