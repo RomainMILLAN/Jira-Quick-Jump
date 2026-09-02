@@ -55,10 +55,12 @@
   const label = (text, note) =>
     el("div", { class: "lbl" }, [text, note ? el("span", { class: "note", text: note }) : null]);
 
-  const toggle = (checked, onToggle, ariaLabel, disabled) =>
+  /** `field` names the control so the focus can be put back on it after a
+   *  repaint: the node the user was on no longer exists. */
+  const toggle = (checked, onToggle, ariaLabel, disabled, field) =>
     el("button", {
       class: "sw", role: "switch", "aria-checked": String(checked),
-      "aria-label": ariaLabel, disabled, onClick: onToggle,
+      "aria-label": ariaLabel, disabled, "data-field": field, onClick: onToggle,
     });
 
   global.SectionParts = {

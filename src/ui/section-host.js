@@ -13,14 +13,21 @@
 (function (global) {
   "use strict";
 
-  const { Platform, PolicyRepository, DestinationJournal, RuleInstaller, InstallOutcome,
-          MutationResult, Dom } = global;
+  const { WriteQueue, HoldWatch, Platform, PolicyRepository, DestinationJournal, RuleInstaller, InstallOutcome, MutationResult, Dom, RefusalPresentation } = global;
 
   const DEBOUNCE_MS = 500;
 
   const SectionHost = {
     async start({ root, sections }) {
-      const pending = new Map();
+      /**
+       * THE QUEUE IS AN OBJECT NOW. It was a Map plus three inner functions inside
+       * a 442-line closure -- unbuildable twice, unreachable from outside,
+       * untestable. See ui/write-queue.js.
+       */
+      const writes = new WriteQueue((intention) => commit(intention), DEBOUNCE_MS);
+      const apply = (intention, coalesceKey) => writes.apply(intention, coalesceKey);
+      const cancel = (coalesceKey) => writes.cancel(coalesceKey);
+      const flush = () => writes.flush();
       let stored = null;
       let disposed = false;
 
@@ -69,7 +76,12 @@
         // under the code reserved for compromise. Claiming the content we are
         // about to write means the window can never see a state whose claim is not
         // already on tape.
-        const proposed = intention(stored());
+        // `stored`, NOT `stored()`. In this scope it is the captured VALUE -- the
+        // function is ctx.stored, which sections call. Written the other way it
+        // threw "stored is not a function" on the first commit, which is to say on
+        // the first gesture the user made: an error no unit test reached, because
+        // no test ever ran SectionHost.start itself.
+        const proposed = intention(stored);
         if (proposed.ok) await DestinationJournal.claimAhead(proposed.value.policy().fingerprint());
         const result = await PolicyRepository.apply(intention);
         // `result.events` without a presence test: every result carries it. The
@@ -111,39 +123,16 @@
       }
 
       /**
-       * Memoised per render, refreshed on every reload and after each install --
-       * NEVER per keystroke. The preview consumes the rules AS INSTALLED, and
-       * asking the platform on each character would make it asynchronous and
-       * collide head-on with the ReDoS budget.
-       *
-       * The section whose subtree the user is physically holding, or null.
-       *
-       * Same family as isEditing, and a re-render there does not merely look
-       * wrong -- it DESTROYS the gesture: removing the source node can suppress
-       * dragend entirely. Held here and derived from the DOM, so no section owns a
-       * flag and this host still knows nothing about what any section contains.
+       * WHO IS HOLDING THE SCREEN. Five inner functions, a captured variable and
+       * six listeners used to sit here, tangled among the render loop -- so the
+       * rule "never repaint under someone's fingers" could not be read in one
+       * place. See ui/hold-watch.js.
        */
-      let heldSection = null;
-
-      const sectionAt = (node) =>
-        sections.find((section) => section.root && section.root.contains(node)) ?? null;
-
-      const isHeldByUser = (section) =>
-        Boolean(section.root) && (section === heldSection || isEditing(section.root));
-
-      /**
-       * Releases the latch and replays whatever was deferred.
-       *
-       * onBlur used to do the second half alone. It cannot any more: pointerdown
-       * PRECEDES the focus change it causes, so a replay there would redraw the
-       * subtree between the press and dragstart, detach the node under the
-       * pointer, and -- because sectionAt tests contains() -- leave the latch
-       * unarmed for the whole gesture.
-       */
-      function resume() {
-        heldSection = null;
+      const holds = new HoldWatch(sections, () => {
         if (sections.some((s) => s.dirty)) render();
-      }
+      });
+      const isHeldByUser = (section) => holds.holding(section);
+      const isEditing = (root) => holds.editing(root);
 
       let lastReport = null;
       async function report() {
@@ -165,75 +154,6 @@
           });
         }
         return lastReport;
-      }
-
-      /**
-       * Cancels a pending coalesced write.
-       *
-       * Needed when a foreign change alters the SET of ids: the queued write
-       * still carries the now-stale absolute order and would leave only to
-       * collect ORDER_STALE.
-       */
-      function cancel(coalesceKey) {
-        const existing = pending.get(coalesceKey);
-        if (!existing) return;
-        clearTimeout(existing.timer);
-        pending.delete(coalesceKey);
-      }
-
-      /**
-       * A DEBOUNCED apply RESOLVES WITH ITS REAL OUTCOME, not with a fabricated ok.
-       *
-       * It used to `return Promise.resolve({ ok: true, events: [] })` before any
-       * write had been attempted -- a success invented for a commit that had not
-       * happened. Nobody awaited it yet, which made it a trap rather than a bug:
-       * the first caller to believe that value would believe a lie. Now the
-       * promise settles when the coalesced commit settles, so awaiting it means
-       * what it says.
-       */
-      function apply(intention, coalesceKey) {
-        if (!coalesceKey) return commit(intention);
-        const existing = pending.get(coalesceKey);
-        if (existing) {
-          clearTimeout(existing.timer);
-          // The keystroke this one replaces never reaches storage. Its waiters are
-          // told so rather than left hanging for the life of the page.
-          existing.settle({ ok: false, code: "SUPERSEDED", message: "", events: [] });
-        }
-        let settle;
-        const settled = new Promise((resolve) => { settle = resolve; });
-        // Coalescing by field: a keystroke replaces the previous keystroke in the
-        // SAME field, and never the toggle next to it.
-        pending.set(coalesceKey, {
-          intention,
-          settle,
-          timer: setTimeout(() => {
-            pending.delete(coalesceKey);
-            commit(intention).then(settle, settle);
-          }, DEBOUNCE_MS),
-        });
-        return settled;
-      }
-
-      /**
-       * IT RETURNS ITS WORK, so a caller that can wait does.
-       *
-       * `pagehide` cannot be held open, and that limit is real -- but it was not
-       * the only caller: stop() flushed too, and dropped the promises on the
-       * floor. Handing the work back lets the one caller that CAN await it do so,
-       * and makes the remaining loss the browser's rather than ours.
-       */
-      function flush() {
-        const queued = [...pending.values()];
-        pending.clear();
-        return Promise.allSettled(queued.map((entry) => {
-          clearTimeout(entry.timer);
-          // The same verified path: on a conflict this keystroke is lost rather
-          // than overwriting what the other surface just saved.
-          const done = commit(entry.intention);
-          done.then(entry.settle, entry.settle);
-          return done;
-        }));
       }
 
       /**
@@ -353,13 +273,6 @@
         }
       }
 
-      function isEditing(root) {
-        const active = document.activeElement;
-        if (!active || !root.contains(active)) return false;
-        const tag = active.tagName;
-        return tag === "INPUT" || tag === "TEXTAREA" || active.isContentEditable;
-      }
-
       /**
        * The banner carries a CAUSE, and only its own cause closes it.
        *
@@ -455,26 +368,14 @@
        * press heals it. Strictly shorter than the isEditing freeze already in
        * production, which lasts as long as a caret sleeps in a field.
        */
-      const onPointerDown = (event) => { heldSection = sectionAt(event.target); };
-      const onPointerUp = () => resume();
-      const onDragStart = (event) => { heldSection = sectionAt(event.target); };
-      const onDragEnd = () => resume();
       // focusin covers the keyboard user, who emits no pointer event and would
       // otherwise have no floor at all if a dragend went missing. It also fires
       // when a field is clicked, in which case renderOnce simply skips that
       // section again through isEditing and leaves it dirty -- harmless.
-      const onFocusIn = () => resume();
       // Replaces the former onBlur, and must respect the latch: a debounced write
       // very often leaves the section dirty, so an unconditional replay here is
       // what used to destroy the row under the pointer.
-      const onFocusOut = () => { if (!heldSection) resume(); };
 
-      document.addEventListener("pointerdown", onPointerDown);
-      document.addEventListener("pointerup", onPointerUp);
-      document.addEventListener("dragstart", onDragStart);
-      document.addEventListener("dragend", onDragEnd);
-      root.addEventListener("focusin", onFocusIn);
-      root.addEventListener("focusout", onFocusOut);
 
       // The one refusal of a navigating drop, per surface. Not in the HTML: an
       // inline script there is killed by script-src 'self', in silence, so the
@@ -486,6 +387,10 @@
       };
       document.addEventListener("visibilitychange", onHide);
       window.addEventListener("pagehide", flush);
+      // ARMED BEFORE THE FIRST PAINT, and for the reason below: mount() attaches
+      // its handlers already, so a pointerdown during the first load must find the
+      // latch listening, or the drag hold is never set.
+      holds.watch(root);
 
       /**
        * THE READ AND THE FIRST PAINT COME LAST, after the host's listeners.
@@ -519,12 +424,7 @@
           if (disposed) return;
           disposed = true;
           const flushed = flush();
-          document.removeEventListener("pointerdown", onPointerDown);
-          document.removeEventListener("pointerup", onPointerUp);
-          document.removeEventListener("dragstart", onDragStart);
-          document.removeEventListener("dragend", onDragEnd);
-          root.removeEventListener("focusin", onFocusIn);
-          root.removeEventListener("focusout", onFocusOut);
+          holds.stop();
           await flushed;
           stopRefusingFileDrops();
           document.removeEventListener("visibilitychange", onHide);

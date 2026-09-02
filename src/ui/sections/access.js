@@ -8,8 +8,8 @@
 (function (global) {
   "use strict";
 
-  const { Dom, Platform, OriginRequirements, SearchEngineCatalog } = global;
-  const { el, t, label } = global.SectionParts;
+  const { Dom, Platform, OriginRequirements, SearchEngineCatalog, RefusalPresentation } = global;
+  const { el, t, label, destination } = global.SectionParts;
 
   const Access = {
     /**

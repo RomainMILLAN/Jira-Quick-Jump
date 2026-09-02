@@ -1,9 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { loadCore } from "./load-core.js";
+import * as IDENTITIES from "./fixtures/identities.js";
 
 const g = await loadCore();
-const ID = "11111111-1111-4111-8111-111111111111";
+// The identifiers live in one file now: the same UUID was spelled in five,
+// and the catch-all builder in three, with bodies that had already drifted.
+const { ID } = IDENTITIES;
 const key = (k) => g.ProjectKey.parse(k).value;
 const instance = (u) => g.JiraInstance.parse(u).value;
 
@@ -309,7 +312,7 @@ test("a shadowed shortcut produces no binding at all, and comes back when the ca
   let p = ordered().withOrder([STAR, ORDER_A, ORDER_B]).value;
   p = p.acknowledge(STAR, "CATCH_ALL").value;
   p = p.armShortcut(ORDER_A).value.armShortcut(ORDER_B).value.armShortcut(STAR).value;
-  assert.deepEqual(p.activeBindings().map((b) => b.describe()), ["catch-all on google.com"]);
+  assert.deepEqual(p.activeBindings().map((b) => b.describe()), ["the catch-all on google.com"]);
   const without = p.remove(STAR).value;
   assert.deepEqual(without.activeBindings().map((b) => b.describe()).sort(), ["ECR on google.com", "JUL on google.com"]);
 });

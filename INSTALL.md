@@ -8,6 +8,15 @@ self-hosted route, which is the right one for a team.
 > signed `.xpi` from a release — an unsigned folder only survives until you close
 > the browser.
 
+> **Load a build, never `src/`.** The source tree carries ONE manifest for both
+> browsers: it declares `background.service_worker` for Chrome *and*
+> `background.scripts` for Firefox, because a single file has to serve both. Each
+> browser ignores what it does not know — Chrome warns about the key it does not
+> recognise, Firefox's linter rejects the other one — so `src/` loaded directly is
+> a build neither of them was given. `npm run build:chrome` and
+> `npm run build:firefox` derive a clean manifest per browser; that is what a
+> release contains, and what these instructions assume.
+
 ---
 
 ## Google Chrome, Edge, Brave, Opera

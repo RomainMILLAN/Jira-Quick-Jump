@@ -29,6 +29,9 @@
   "addDomainNote": {
     "message": "Le domaine seulement. La forme de son URL de recherche se choisit ci-dessous, elle ne se tape jamais."
   },
+  "addDomainShape": {
+    "message": "Comment ce moteur construit son adresse de recherche"
+  },
   "addShortcut": {
     "message": "Ajouter un raccourci"
   },
@@ -322,9 +325,6 @@
   },
   "refuseKeyNature": {
     "message": "Un attrape-tout ne peut pas être renommé, et un raccourci ne peut pas en devenir un."
-  },
-  "refuseMissingFreshId": {
-    "message": "Cette entrée a besoin d'un nouvel identifiant avant d'être rétablie."
   },
   "refuseKeyShape": {
     "message": "Une clé ressemble à ABC : 2 à 20 lettres, chiffres ou tirets bas, commençant par une lettre."

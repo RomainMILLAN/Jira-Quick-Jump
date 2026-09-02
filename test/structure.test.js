@@ -94,7 +94,14 @@ test("the content security policy is declared, with connect-src none", () => {
 });
 
 test("the static ruleset is literally empty, and named for what it is", () => {
-  // It exists only to work around Firefox bug 1921353. A rule slipped in here
+  // WHY IT EXISTS, in words rather than a number: Firefox bug 1921353 -- an
+  // extension declaring declarativeNetRequestWithHostAccess but NO static
+  // rule_resources can fail to register its dynamic rules on that engine. An
+  // empty ruleset is the documented workaround, and the day the bug is fixed this
+  // whole block goes. A bug number alone sends the next reader, or a store
+  // reviewer, outside the repository to understand a file on the security surface.
+  //
+  // A rule slipped in here
   // would apply with no configuration at all, on every profile, from install --
   // and neither purge() nor installedRuleCount() would see it, since both ask
   // only about DYNAMIC rules.
@@ -693,19 +700,37 @@ test("whatever accepts a drop cancels the default first", () => {
 });
 
 test("the host defers a render for whatever the user is holding, and still knows nothing about a shortcut", () => {
-  const host = read("src/ui/section-host.js");
+  // THE RULE MOVED WITH THE CODE. The latch left section-host.js for
+  // ui/hold-watch.js, so the ignorance this test protects has to be checked on
+  // BOTH -- otherwise extracting a mechanism is a way of escaping the rule that
+  // governs it.
+  //
+  // `grip` stays forbidden because it is what a row's DRAG HANDLE is called, and
+  // neither file may learn that rows have handles: that is why the extracted
+  // object is a HoldWatch and not a UserGrip.
+  // THE CODE, not the prose. This rule is about structural IGNORANCE -- neither
+  // file may reach for a row's internals -- and a comment explaining why a name
+  // was avoided creates no coupling. Reading the prose made the test forbid its
+  // own explanation, which is the third time in this batch a scanner has taught
+  // the code not to explain itself.
+  const host = codeOf(read("src/ui/section-host.js"));
+  const latch = codeOf(read("src/ui/hold-watch.js"));
   for (const word of ["shortcut", "grip", "data-id", "closest", "dataTransfer"]) {
-    assert.equal(new RegExp(word, "i").test(host), false, `section-host.js must not mention ${word}`);
+    for (const [name, source] of [["section-host.js", host], ["hold-watch.js", latch]]) {
+      assert.equal(new RegExp(word, "i").test(source), false, `${name} must not mention ${word}`);
+    }
   }
-  assert.match(host, /dragstart/, "it does learn that a gesture exists");
+  assert.match(latch, /dragstart/, "the latch does learn that a gesture exists");
   // onBlur is GONE: it replayed the render without consulting the latch, which is
   // what destroyed the row under the pointer between pointerdown and dragstart.
-  const handlers = host.match(/addEventListener\("focusout"/g) || [];
+  const handlers = latch.match(/"focusout"/g) || [];
   assert.equal(handlers.length, 1, "exactly one focusout handler");
 });
 
 test("the host removes every listener it adds", () => {
-  const host = read("src/ui/section-host.js");
+  // The latch counts too: it now owns six of them, and a host torn down while its
+  // listeners survive repaints a detached tree.
+  const host = read("src/ui/section-host.js") + read("src/ui/hold-watch.js");
   assert.equal(
     (host.match(/\.addEventListener\(/g) || []).length,
     (host.match(/\.removeEventListener\(/g) || []).length
@@ -1020,4 +1045,79 @@ test("the assembly decides the order and nothing else", () => {
       `options-sections.js is the assembly: ${forbidden} belongs in a section`);
   }
   assert.match(assembly, /global\.OptionsSections = \[/);
+});
+
+test("INSTALL.md says not to load the source tree directly", () => {
+  // src/ carries ONE manifest for both browsers -- service_worker for Chrome AND
+  // background.scripts for Firefox -- because a single file has to serve both. Each
+  // engine ignores what it does not know, so the source tree loaded directly is a
+  // build neither of them was given, and the failure is a warning nobody reads.
+  const install = read("INSTALL.md");
+  assert.match(install, /never `src\/`|not `src\/`/i, "the warning must be there");
+  assert.match(install, /build:chrome/, "and it must point at the build that replaces it");
+
+  // The two keys really do cohabit, which is what makes the warning necessary.
+  assert.ok(manifest.background.service_worker, "Chrome's key");
+  assert.ok(Array.isArray(manifest.background.scripts), "Firefox's key");
+});
+
+test("every section declares every collaborator it uses", () => {
+  // THE BUG THIS EXISTS FOR, found by loading the extension in a browser and not
+  // by 306 green tests: status.js called `toggle(...)` without destructuring it,
+  // so the whole page died on `toggle is not defined` -- and five other files had
+  // the same hole.
+  //
+  // The cause is worth naming: when options-sections.js was split, the dependency
+  // list of each new file was GUESSED from reading the code rather than measured.
+  // A guess that compiles is a guess that ships. This measures.
+  //
+  // It cannot catch everything -- a name used only inside a branch no test walks
+  // still reaches a browser first -- but it catches the whole class of "the split
+  // forgot one".
+  const PARTS = ["t", "el", "icon", "gripIcon", "destination", "label", "toggle",
+                 "TRASH", "CHEVRON_UP", "CHEVRON_DOWN"];
+  const SENTENCES = ["FACT_SENTENCE", "WARNING_MESSAGE", "sentenceFor",
+                     "SKIPPED_SENTENCE", "catchAllNote", "PREVIEW_MISS"];
+  const GLOBALS = ["Dom", "Platform", "MutationResult", "ProjectKey", "JiraInstance",
+                   "SearchEngineCatalog", "OriginRequirements", "JumpPreview",
+                   "ShortcutWarning", "RowReorder", "DiagnosisPresentation",
+                   "CatchAllKey", "FocusMemory", "RefusalPresentation"];
+
+  const offenders = [];
+  const files = [
+    ...readdirSync(join(ROOT, "src/ui/sections")).filter((f) => f.endsWith(".js"))
+      .map((f) => join("src/ui/sections", f)),
+    // The rest of ui/ too: section-host.js had the same hole, on
+    // RefusalPresentation, and it is the file every surface starts from.
+    ...readdirSync(join(ROOT, "src/ui")).filter((f) => f.endsWith(".js"))
+      .map((f) => join("src/ui", f)),
+  ];
+  for (const path of files) {
+    const file = path.split("/").pop();
+    // parts.js and sentences.js DEFINE these names rather than borrowing them.
+    if (file === "parts.js" || file === "sentences.js") continue;
+    const code = codeOf(read(path));
+    const declared = new Set();
+    for (const m of code.matchAll(/const \{([^}]*)\}\s*=/g)) {
+      for (const name of m[1].split(",")) declared.add(name.trim());
+    }
+    for (const name of [...PARTS, ...SENTENCES, ...GLOBALS]) {
+      // A call or a member access is a real use; a bare mention is not. The
+      // lookbehind matters: without it `Platform.t(` reads as a free `t`, and the
+      // test cries over every file that reaches a helper through its owner.
+      const used = new RegExp(`(?<![.\\w])${name}\\s*[(.]`).test(code);
+      // Defined LOCALLY -- `const t = …`, a method `label(…) {`, or an object
+      // property `label:` -- is not borrowed. dom.js and the two presentations
+      // each spell their own `t`, and reading those as missing imports would make
+      // this test cry over the files that own the names.
+      const defines =
+        new RegExp(`global\\.${name}\\s*=`).test(code) ||
+        new RegExp(`(const|let|function)\\s+${name}\\b`).test(code) ||
+        new RegExp(`^\\s*${name}\\s*[(:]`, "m").test(code);
+      if (used && !declared.has(name) && !defines && !code.includes(`global.${name}`)) {
+        offenders.push(`${path} uses ${name} without declaring it`);
+      }
+    }
+  }
+  assert.deepEqual(offenders, [], "a section that borrows a name must say so at the top");
 });

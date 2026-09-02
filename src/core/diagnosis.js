@@ -68,14 +68,14 @@ const DIAGNOSES = [
     code: "INSTALL_STATE_UNKNOWN",
     applies: (p, f) =>
       typeof f.installed !== "boolean" &&
-      (f.rulesInstalled === true || p.registry().size() > 0 || f.quarantinedCount > 0),
+      (f.rulesInstalled === true || p.hasShortcuts() || f.quarantinedCount > 0),
   },
   { code: "DISARMED", applies: (p) => !p.armed() },
   // Before NO_SHORTCUTS: with everything quarantined there are not *no*
   // shortcuts, there are UNREADABLE ones -- and saying "no shortcut yet" is the
   // one answer that hides a partial read.
-  { code: "PARTIAL_POLICY", applies: (p, f) => p.registry().size() === 0 && f.quarantinedCount > 0 },
-  { code: "NO_SHORTCUTS", applies: (p) => p.registry().size() === 0 },
+  { code: "PARTIAL_POLICY", applies: (p, f) => !p.hasShortcuts() && f.quarantinedCount > 0 },
+  { code: "NO_SHORTCUTS", applies: (p) => !p.hasShortcuts() },
   { code: "NO_ENGINES", applies: (p) => p.engineIds().length === 0 },
   {
     code: "ALL_SHORTCUTS_DISARMED",

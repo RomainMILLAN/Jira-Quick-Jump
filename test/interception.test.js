@@ -1,10 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { loadCore } from "./load-core.js";
+import * as IDENTITIES from "./fixtures/identities.js";
 import { POSITIVE, NEGATIVE, NEGATIVE_WITH_CATCH_ALL } from "./fixtures/search-urls.js";
 
 const g = await loadCore();
-const ID = "11111111-1111-4111-8111-111111111111";
+// The identifiers live in one file now: the same UUID was spelled in five,
+// and the catch-all builder in three, with bodies that had already drifted.
+const { ID } = IDENTITIES;
 
 const policy = (() => {
   let p = g.JumpPolicy.empty().withEngines(["google.com", "bing.com", "duckduckgo.com"]).value;

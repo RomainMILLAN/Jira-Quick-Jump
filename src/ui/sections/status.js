@@ -8,8 +8,8 @@
 (function (global) {
   "use strict";
 
-  const { DiagnosisPresentation } = global;
-  const { el, t, label, destination } = global.SectionParts;
+  const { DiagnosisPresentation, Dom, MutationResult } = global;
+  const { el, t, label, destination, toggle } = global.SectionParts;
   const { FACT_SENTENCE } = global.SectionSentences;
 
   const Status = {
@@ -93,7 +93,15 @@
             ? t("statusArmed", "Jumping is armed")
             : t("statusDisarmed", "Jumping is off"),
         }),
-        el("div", { class: "status-s", text: t("statusCounting", "Checking rules…") }),
+        // A LIVE REGION, because this line CHANGES ASYNCHRONOUSLY. It paints
+        // "Checking rules…" and is replaced by a verdict once the platform has
+        // answered -- so a screen-reader user never learned that the install had
+        // failed, or that everything was ready. They read the placeholder and
+        // moved on. `polite`, not `assertive`: it is a status, not an alarm.
+        el("div", {
+          class: "status-s", role: "status", "aria-live": "polite",
+          text: t("statusCounting", "Checking rules…"),
+        }),
       ]));
       this.node.appendChild(el("span", { class: "tag off", text: "…" }));
       this.node.appendChild(toggle(

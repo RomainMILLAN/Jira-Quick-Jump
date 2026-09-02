@@ -9,7 +9,7 @@
 (function (global) {
   "use strict";
 
-  const { Dom, MutationResult, ProjectKey, JiraInstance, ShortcutWarning, RowReorder, CatchAllKey } = global;
+  const { FocusMemory, Dom, MutationResult, ProjectKey, JiraInstance, ShortcutWarning, RowReorder, CatchAllKey, RefusalPresentation } = global;
   const { el, t, icon, gripIcon, destination, label, toggle, TRASH, CHEVRON_UP, CHEVRON_DOWN } = global.SectionParts;
   const { WARNING_MESSAGE, sentenceFor, catchAllNote } = global.SectionSentences;
 
@@ -51,8 +51,27 @@
       root.appendChild(this.hint);
     },
 
+    /**
+     * SAYING THE SAME THING TWICE MUST BE HEARD TWICE.
+     *
+     * A live region announces a MUTATION, not a value: writing the identical
+     * string changes nothing in the DOM, so the reader stays silent. Press "move
+     * up" twice at the top of the list and the second press produced no feedback
+     * at all -- on the one path a keyboard user has, and precisely when they need
+     * to be told nothing happened.
+     *
+     * The region is cleared first, then filled on the next frame: two mutations,
+     * so two announcements, with no visible text either way (.sr-only).
+     */
     announce(sentence) {
-      if (this.announcer) this.announcer.textContent = sentence;
+      if (!this.announcer) return;
+      this.announcer.textContent = "";
+      const announcer = this.announcer;
+      // A macrotask, not a microtask: assistive technology needs the empty state
+      // to reach the accessibility tree before the next value does.
+      setTimeout(() => {
+        if (announcer === this.announcer) announcer.textContent = sentence;
+      }, 0);
     },
 
     /**
@@ -161,6 +180,20 @@
       return true;
     },
 
+    /**
+     * MOVING TO AN END, in one gesture.
+     *
+     * The arrows were the ONLY keyboard path, and they move by one: taking a row
+     * from position 20 to the top cost nineteen presses and nineteen
+     * announcements. WCAG 2.5.7 is satisfied by having a keyboard path at all;
+     * this is about it being usable. Home and End are what a list has meant for
+     * thirty years, and the pointer path already offers the equivalent by drag.
+     */
+    moveToEnd(id, toStart, stored, ctx) {
+      const shown = this.orderToShow(stored);
+      this.moveTo(id, toStart ? 0 : shown.length - 1, ctx, { id, delta: toStart ? -1 : 1 });
+    },
+
     move(id, delta, stored, ctx) {
       const shown = this.orderToShow(stored);
       // "Is this row at the edge of what is displayed" is a question about the
@@ -172,6 +205,15 @@
     render(stored, ctx, options = {}) {
       const policy = stored.policy();
       const ordered = this.orderToShow(stored);
+      // WHERE THE FOCUS WAS, before the list is destroyed.
+      //
+      // Dom.clear removes every node, so the focus falls to <body>. Only the
+      // arrows were restored -- so a change arriving from the other surface while
+      // the user was on the arm switch, the bin or an acknowledgement checkbox
+      // dropped them out of the list entirely, mid-task, with no way back but the
+      // Tab key. The host already defers a repaint under a CARET; this is the same
+      // rule for everything that is not a text field.
+      const held = FocusMemory.capture(this.rows);
       Dom.clear(this.rows);
       let toFocus = undefined;
       ordered.forEach((id, index) => {
@@ -182,6 +224,7 @@
           index,
           total: ordered.length,
           onMove: (delta) => this.move(id, delta, ctx.stored(), ctx),
+          onMoveToEnd: (toStart) => this.moveToEnd(id, toStart, ctx.stored(), ctx),
         });
         this.rows.appendChild(row.node);
         if (options.focus && options.focus.id === id) {
@@ -194,6 +237,9 @@
       for (const draft of this.drafts) {
         this.rows.appendChild(this.draftRow(draft, ctx));
       }
+      // Restored by (row, control), never by a stored node reference: the node the
+      // user was on no longer exists.
+      if (!toFocus && held) toFocus = () => FocusMemory.restore(this.rows, held);
       this.renderActions(policy, ctx);
       if (toFocus) toFocus();
     },
@@ -245,7 +291,7 @@
       });
     },
 
-    savedRow(shortcut, ctx, { policy, index, total, onMove }) {
+    savedRow(shortcut, ctx, { policy, index, total, onMove, onMoveToEnd }) {
       const id = shortcut.id();
       const pending = shortcut.unacknowledgedWarnings();
       // statusOf is the SOLE judge of a row, so the row's vocabulary is the one
@@ -261,6 +307,13 @@
           "aria-disabled": atEdge,
           "data-field": delta < 0 ? "move-up" : "move-down",
           onClick: () => onMove(delta),
+          // Home and End on either arrow: the row goes to the end it points at,
+          // in one press instead of one per position.
+          onKeyDown: (event) => {
+            if (event.key !== "Home" && event.key !== "End") return;
+            event.preventDefault();
+            onMoveToEnd(event.key === "Home");
+          },
         }, [icon(path, 12)]);
 
       const moveUp = isCatchAll ? null : orderArrow(CHEVRON_UP, -1, t("moveUp", "Move up"), index === 0);
@@ -294,21 +347,28 @@
       }, [
         el("div", { class: "f-grip-cell" }, grip ? [grip] : []),
         el("div", { class: "f-ord" }, moveUp ? [moveUp, moveDown] : []),
-        el("div", { class: "f-key" }, [el("div", { class: "field-label", text: t("key", "Key") }),
+        el("div", { class: "f-key" }, [el("label", { class: "field-label", "for": `key-${shortcut.id()}`, text: t("key", "Key") }),
           isCatchAll
             ? el("div", { class: "f key is-static" }, [
                 el("span", { text: t("catchAllKey", "Any short key") }),
                 el("code", { text: shortcut.key().toString() }),
               ])
             : el("input", {
+                // A REAL `label for`, so clicking the word focuses the field and a
+                // screen reader announces it as this field's name. The aria-label
+                // stays as the fallback for the compact surface, where the label is
+                // hidden by CSS: an aria-label wins over a <label>, and both saying
+                // the same thing is what makes that safe.
+                id: `key-${id}`, "data-field": "key",
                 class: "f key", value: shortcut.key().toString(),
                 "aria-label": t("key", "Key"),
                 onInput: (event) => this.editKey(event.target, id, ctx),
               }),
         ]),
         el("div", { class: "f-url" }, [
-          el("div", { class: "field-label", text: t("destination", "Destination") }),
+          el("label", { class: "field-label", "for": `url-${shortcut.id()}`, text: t("destination", "Destination") }),
           el("input", {
+            id: `url-${id}`, "data-field": "url",
             class: "f", value: shortcut.instance().baseUrl(),
             "aria-label": t("destination", "Destination"),
             "aria-describedby": status === "SHADOWED" ? reasonId : undefined,
@@ -321,9 +381,10 @@
           () => this.setArmed(id, !shortcut.armed(), ctx),
           t("armThis", "Arm this shortcut"),
           pending.length > 0,
+          "arm",
         )]),
         el("div", { class: "f-del" }, [el("button", {
-          class: "btn icon", "aria-label": t("remove", "Remove this shortcut"),
+          class: "btn icon", "data-field": "remove", "aria-label": t("remove", "Remove this shortcut"),
           onClick: () => ctx.applyToPolicy((p) => p.remove(id)),
         }, [icon(TRASH)])]),
       ]);
@@ -390,6 +451,7 @@
             el("span", { text: t("catchAllKey", "Any short key") }),
           ])
         : el("input", {
+            id: `key-${draft.rowId}`,
             class: "f key", placeholder: "ABC", value: draft.key, "aria-label": t("key", "Key"),
             onInput: (event) => { draft.key = event.target.value; this.tryRegister(draft, row, message, ctx); },
           });
@@ -403,12 +465,13 @@
         el("div", { class: "f-grip-cell" }),
         el("div", { class: "f-ord" }),
         el("div", { class: "f-key" }, [
-          el("div", { class: "field-label", text: t("key", "Key") }),
+          el("label", { class: "field-label", "for": `key-${draft.rowId}`, text: t("key", "Key") }),
           keyCell,
         ]),
         el("div", { class: "f-url" }, [
-          el("div", { class: "field-label", text: t("destination", "Destination") }),
+          el("label", { class: "field-label", "for": `url-${draft.rowId}`, text: t("destination", "Destination") }),
           el("input", {
+            id: `url-${draft.rowId}`,
             class: "f", placeholder: "example.atlassian.net", value: draft.url,
             "aria-label": t("destination", "Destination"),
             "aria-describedby": draft.catchAll ? "catch-all-note" : undefined,
@@ -417,7 +480,7 @@
         ]),
         el("div", { class: "f-arm" }, [toggle(false, () => {}, t("armThis", "Arm this shortcut"), true)]),
         el("div", { class: "f-del" }, [el("button", {
-          class: "btn icon", "aria-label": t("remove", "Remove this shortcut"),
+          class: "btn icon", "data-field": "remove", "aria-label": t("remove", "Remove this shortcut"),
           onClick: () => {
             this.drafts = this.drafts.filter((d) => d !== draft);
             this.render(ctx.stored(), ctx);

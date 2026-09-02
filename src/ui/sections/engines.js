@@ -7,8 +7,8 @@
 (function (global) {
   "use strict";
 
-  const { Dom, MutationResult, SearchEngineCatalog } = global;
-  const { el, t, label, toggle } = global.SectionParts;
+  const { Dom, MutationResult, SearchEngineCatalog, RefusalPresentation } = global;
+  const { el, t, label, toggle, icon } = global.SectionParts;
 
   const Engines = {
     /**
@@ -65,6 +65,10 @@
       }
       this.chips.appendChild(el("button", {
         class: "chip", text: t("addDomain", "Add a domain"),
+        // A DISCLOSURE SAYS WHETHER IT IS OPEN. It toggles a form into existence
+        // and announced nothing: a screen-reader user pressed a button, a panel
+        // appeared somewhere, and nothing said so.
+        "aria-expanded": String(this.adding),
         onClick: () => { this.adding = !this.adding; this.render(ctx.stored(), ctx); },
       }));
 
@@ -83,16 +87,31 @@
       const message = el("div", { class: "row-msg refused", hidden: true });
       let shape = SearchEngineCatalog.SHAPES[0];
 
-      const shapes = el("div", { class: "chips" }, SearchEngineCatalog.SHAPES.map((candidate) =>
+      /**
+       * A NAMED GROUP OF EXCLUSIVE CHOICES, and it was neither.
+       *
+       * Three unlabelled toggle buttons in a bare div: a screen reader announced
+       * "pressed" or "not pressed" with no idea what the choice was about, and no
+       * hint that picking one unpicks the others. `role="group"` plus a name says
+       * what the set is; aria-pressed on each says which one holds.
+       *
+       * And the update walks the BUTTONS, not `children`: an element added to this
+       * container that is not a chip used to reach setAttribute and throw.
+       */
+      const chips = SearchEngineCatalog.SHAPES.map((candidate) =>
         el("button", {
           class: "chip", "aria-pressed": String(candidate === shape),
           text: SearchEngineCatalog.shapeLabel(candidate),
           onClick: (event) => {
             shape = candidate;
-            for (const chip of shapes.children) chip.setAttribute("aria-pressed", "false");
+            for (const chip of chips) chip.setAttribute("aria-pressed", "false");
             event.currentTarget.setAttribute("aria-pressed", "true");
           },
-        })));
+        }));
+      const shapes = el("div", {
+        class: "chips", role: "group",
+        "aria-label": t("addDomainShape", "How this engine builds its search address"),
+      }, chips);
 
       return el("div", { class: "add-domain" }, [
         el("p", { class: "hint", text: t("addDomainNote",

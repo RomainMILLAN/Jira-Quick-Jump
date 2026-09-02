@@ -49,9 +49,22 @@
      *  There is deliberately NO second positional number here: priority comes
      *  from three constant bands, not from the shortcut's position. */
     ruleId() { return this._ruleIndex + 1; }
+    /**
+     * A LABEL FOR A LOG LINE, and deliberately not `nature()`.
+     *
+     * `nature()` is a PERSISTED DISCRIMINANT: it is one third of the row key under
+     * which an attestation is filed, so renaming the word to read better on screen
+     * would silently revoke every acknowledgement ever given. Fail-closed -- the
+     * catch-all disarms and the user is asked again -- but silent, and for a
+     * cosmetic edit.
+     *
+     * Two contracts under one word is what this project spends a protocol
+     * avoiding. The discriminant stays a value; what a human reads is written
+     * here, where nothing is filed under it.
+     */
     describe() {
       const key = this._shortcut.key();
-      const shown = key.isCatchAll() ? key.nature() : key.toString();
+      const shown = key.isCatchAll() ? "the catch-all" : key.toString();
       return `${shown} on ${this._engineId}`;
     }
   }
@@ -65,6 +78,18 @@
     }
 
     shortcuts() { return this._registry.shortcuts(); }
+
+    /**
+     * HOW MANY, and WHETHER ANY -- asked of the root rather than through it.
+     *
+     * Diagnosis reached `policy.registry().size()` four times, which is the
+     * traversal this file argues against a hundred lines below ("reading it meant
+     * leaving through registry()"). Moving the catalogue into its own module made
+     * that traversal cross a file boundary, which is where it stops being a habit
+     * and becomes a coupling.
+     */
+    shortcutCount() { return this._registry.size(); }
+    hasShortcuts() { return this._registry.size() > 0; }
     registry() { return this._registry; }
     engineIds() { return [...this._engineIds]; }
     customEngines() { return [...this._customEngines]; }

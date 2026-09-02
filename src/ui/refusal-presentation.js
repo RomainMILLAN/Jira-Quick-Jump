@@ -26,7 +26,18 @@
 
   const t = (key, fallback) => global.Platform.t(key, fallback);
 
-  const SENTENCES = () => ({
+  /**
+   * BUILT ONCE PER LANGUAGE, not once per refusal.
+   *
+   * It was a function rebuilding ~35 Platform.t() calls on every render of every
+   * refusal. Lazy because Platform.t needs the platform, memoised because the
+   * catalogue cannot change under a running page: i18n.getMessage reads a bundle
+   * fixed at load.
+   */
+  let cached;
+  const SENTENCES = () => (cached ??= build());
+
+  const build = () => new Map(Object.entries({
     // Identity and uniqueness
     DUPLICATE_KEY: t("refuseDuplicateKey", "That key is already used by another shortcut."),
     DUPLICATE_CATCH_ALL: t("refuseDuplicateCatchAll", "There is already a catch-all shortcut."),
@@ -35,7 +46,6 @@
     UNKNOWN_SHORTCUT: t("refuseUnknownShortcut", "This shortcut no longer exists."),
     UNKNOWN_QUARANTINED: t("refuseUnknownQuarantined", "This entry is no longer set aside."),
     KEY_NATURE_IMMUTABLE: t("refuseKeyNature", "A catch-all cannot be renamed, and a shortcut cannot become a catch-all."),
-    MISSING_FRESH_ID: t("refuseMissingFreshId", "This entry needs a new identifier before it can be restored."),
 
     // What the user typed
     KEY_SHAPE: t("refuseKeyShape", "A key looks like ABC: 2 to 20 letters, digits or underscores, starting with a letter."),
@@ -86,11 +96,18 @@
     // Consent
     UNACKNOWLEDGED_WARNING: t("refuseUnacknowledged", "Read the destination warnings before switching this shortcut on."),
     UNKNOWN_WARNING_KIND: t("refuseUnknownWarning", "That acknowledgement is not one this version knows."),
-  });
+  }));
 
   const RefusalPresentation = {
     /**
      * The sentence to show, with the domain's English as the last resort.
+     *
+     * MISSING_FRESH_ID IS DELIBERATELY ABSENT. It is a developer pre-condition,
+     * not a refusal a user can act on: the only production caller always strikes a
+     * fresh UUID, so the branch is unreachable from the screen. Giving it a
+     * sentence promised the reader an action they cannot take -- the "refusal
+     * without an object" admission.js condemns elsewhere. The guard stays; its
+     * English reaches a console, which is who it is for.
      *
      * A code with no entry here falls back to the message the domain wrote, and
      * that is the honest failure: an untranslated sentence beats a code the user
@@ -106,7 +123,12 @@
      */
     sentence(result) {
       if (!result || result.ok) return "";
-      return SENTENCES()[result.code] || result.message || String(result.code || "");
+      // A Map, never `obj[code]`. ShortcutRegistry spends a paragraph on why a
+      // string-keyed object literal is unsafe as a dictionary -- CONSTRUCTOR,
+      // PROTO -- and a refusal code travels from storage through the domain to
+      // here. The codes are ours today; the rule holds whether or not this
+      // particular set is trusted, or it is not a rule.
+      return SENTENCES().get(result.code) || result.message || String(result.code || "");
     },
   };
 

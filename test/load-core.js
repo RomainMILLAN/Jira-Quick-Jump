@@ -60,6 +60,9 @@ const ORDER = [
   // which is what the structure test compares.
   "ui/diagnosis-presentation.js",
   "ui/refusal-presentation.js",
+  "ui/write-queue.js",
+  "ui/hold-watch.js",
+  "ui/focus-memory.js",
   "ui/row-reorder.js",
 ];
 

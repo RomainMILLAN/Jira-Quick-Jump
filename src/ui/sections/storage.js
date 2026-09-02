@@ -7,7 +7,7 @@
 (function (global) {
   "use strict";
 
-  const { Platform } = global;
+  const { Platform, Dom } = global;
   const { el, t, label } = global.SectionParts;
   const Storage = {
     /**

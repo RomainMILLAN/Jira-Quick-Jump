@@ -7,7 +7,7 @@
 (function (global) {
   "use strict";
 
-  const { Dom, ProjectKey, JiraInstance } = global;
+  const { Dom, ProjectKey, JiraInstance, RefusalPresentation } = global;
   const { el, t, label } = global.SectionParts;
 
   const Quarantine = {

@@ -415,6 +415,24 @@
       return global.IssueReference.of(this._key.exampleKey(), "1").value;
     }
 
+    /**
+     * WHAT A CONSENT IS GIVEN TO, as one value.
+     *
+     * The attestation store used to build its row key by reading three accessors
+     * off this entity -- `id()`, `instance().baseUrl()`, `key().nature()`. That is
+     * a neighbouring context knowing this one's internal shape, and it put the
+     * rule "a consent is never recycled" in the hands of the side that does not
+     * state it.
+     *
+     * The rule lives here, where it is stated: consent is given to THIS shortcut,
+     * pointing THERE, of THAT nature. Change any of the three and the consent no
+     * longer applies -- which is why all three travel, and why the store only has
+     * to file what it is handed.
+     */
+    consentSubject() {
+      return { id: this._id, baseUrl: this._instance.baseUrl(), nature: this._key.nature() };
+    }
+
     withConsent(consent) {
       return new ProjectShortcut(this._id, this._key, this._instance, consent);
     }

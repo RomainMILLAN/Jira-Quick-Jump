@@ -58,12 +58,14 @@
    * JSON, because it escapes what it contains: the round trip is total, and the
    * shape is legible to whoever reads the stored entry.
    */
-  const rowKey = (shortcut) =>
-    JSON.stringify([
-      shortcut.id(),
-      shortcut.instance().baseUrl(),
-      shortcut.key().nature(),
-    ]);
+  const rowKey = (shortcut) => {
+    // THE AGGREGATE HANDS OVER THE SUBJECT. This used to read three accessors off
+    // the entity -- id, baseUrl, nature -- so a neighbouring context knew this
+    // one's internal shape, and the rule "a consent is never recycled" was
+    // enforced by the side that does not state it.
+    const subject = shortcut.consentSubject();
+    return JSON.stringify([subject.id, subject.baseUrl, subject.nature]);
+  };
 
   /**
    * The attestations, as a value rather than a bag of rows.

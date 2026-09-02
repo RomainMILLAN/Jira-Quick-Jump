@@ -1,9 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { loadCore } from "./load-core.js";
+import * as IDENTITIES from "./fixtures/identities.js";
 
 const g = await loadCore();
-const ID = "11111111-1111-4111-8111-111111111111";
+// The identifiers live in one file now: the same UUID was spelled in five,
+// and the catch-all builder in three, with bodies that had already drifted.
+const { ID } = IDENTITIES;
 
 const policy = (() => {
   let p = g.JumpPolicy.empty().withEngines(["google.com"]).value;
@@ -392,4 +395,61 @@ test("engines seeded at the door never dereference a refusal", () => {
   const restored = g.JumpPolicy.restore({ schemaVersion: 1, engines: ["google.com"], shortcuts: [] });
   assert.equal(restored.ok, true);
   assert.deepEqual(restored.policy.engineIds(), ["google.com"]);
+});
+
+test("a policy written before the catch-all existed reads back, entry by entry", () => {
+  // jump-policy.js spends thirteen lines explaining what a v1 reader does when it
+  // meets a catch-all key -- quarantine THAT ONE entry, keep the quarantine,
+  // diagnose PARTIAL_POLICY -- and nothing tested it. The reasoning behind
+  // SCHEMA_VERSION staying at 1 rested on a behaviour no witness held.
+  const OLD = {
+    schemaVersion: 1,
+    armed: true,
+    engines: ["google"],
+    shortcuts: [
+      { id: "aaaaaaaa-1111-4111-8111-111111111111", key: "ABC", baseUrl: "https://a.atlassian.net",
+        consent: { armed: true, acknowledged: [] } },
+      { id: "bbbbbbbb-1111-4111-8111-111111111111", key: "OPS", baseUrl: "https://b.atlassian.net",
+        consent: { armed: false, acknowledged: [] } },
+    ],
+  };
+  const restored = g.JumpPolicy.restore(OLD);
+  assert.equal(restored.ok, true);
+  assert.equal(restored.policy.shortcuts().length, 2, "both entries survive");
+  assert.equal(restored.quarantine.length, 0, "and nothing is set aside");
+  // The engine spelling of that era still resolves.
+  assert.deepEqual(restored.policy.engineIds(), ["google.com"]);
+  // The order is the document's, which is what the whole feature rests on.
+  assert.deepEqual(restored.policy.orderedIds(), OLD.shortcuts.map((s) => s.id));
+});
+
+test("a v1 reader meeting a catch-all quarantines THAT entry and keeps the rest", () => {
+  // The scenario SCHEMA_VERSION's comment is built on: a device on an older build
+  // meets a key it cannot parse. Losing one entry loudly beats losing everything,
+  // and PARTIAL_POLICY is what the screen says.
+  const withStar = {
+    schemaVersion: 1,
+    armed: true,
+    engines: ["google.com"],
+    shortcuts: [
+      // Armed, so the reading reaches PARTIAL_POLICY rather than stopping at
+      // ALL_SHORTCUTS_DISARMED -- which outranks it, and correctly so: "nothing
+      // will fire at all" is a stronger fact than "some entries were lost".
+      { id: "aaaaaaaa-1111-4111-8111-111111111111", key: "ABC", baseUrl: "https://a.atlassian.net",
+        consent: { armed: true, acknowledged: [] } },
+      { id: "cccccccc-1111-4111-8111-111111111111", key: "!!", baseUrl: "https://c.atlassian.net" },
+    ],
+  };
+  const restored = g.JumpPolicy.restore(withStar);
+  assert.equal(restored.ok, true, "the document is NOT refused as a whole");
+  assert.equal(restored.policy.shortcuts().length, 1, "the readable entry survives");
+  assert.equal(restored.quarantine.length, 1, "the unreadable one is set aside, never destroyed");
+
+  const stored = new g.StoredPolicy(restored.policy, restored.quarantine);
+  assert.equal(
+    stored.policy().diagnose({ originsGranted: true, installed: true, coverageSatisfied: true,
+                               quarantinedCount: stored.quarantinedCount() }),
+    "PARTIAL_POLICY",
+    "and the screen says a partial read happened"
+  );
 });

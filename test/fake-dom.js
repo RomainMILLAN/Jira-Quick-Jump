@@ -178,6 +178,22 @@ class FakeNode {
     this._doc.activeElement = this;
   }
 
+  /**
+   * Is this node inside that subtree? Self included, as in a browser.
+   *
+   * The production code calls it on every pointer and focus event -- it is how the
+   * host answers "which section is the user holding" -- and this fake did not
+   * implement it at all. Nothing noticed, because no test exercised that path:
+   * an omission in a fake is invisible until the first witness walks into it.
+   */
+  contains(node) {
+    if (node === this) return true;
+    for (const child of this.children) {
+      if (child.contains(node)) return true;
+    }
+    return false;
+  }
+
   closest(selector) {
     let node = this;
     while (node) {

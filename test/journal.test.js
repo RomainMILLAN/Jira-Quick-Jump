@@ -866,3 +866,47 @@ test("an install the purge primed over is TOLD SO, never handed the purge's resu
   await Promise.allSettled([first, purged]);
   assert.ok(ran.includes("PURGE"), "and the purge still runs");
 });
+
+test("a run RE2 refuses is skipped alone, and says why -- the whole batch survives", async () => {
+  // The budget exists to avoid a refusal by alternation cost, and that refusal was
+  // NEVER SIMULATED: the fake always answered isSupported, so the six named reasons
+  // and the per-unit skipping were asserted structurally and never exercised.
+  //
+  // What must hold: rules are replaced wholesale, so one over-budget regex must
+  // take down its own unit and nothing else -- otherwise every shortcut dies with it.
+  const dnr = fakeDnr({ refuseCapturing: true });
+  await withPlatform(dnr, async () => {
+    let policy = g.JumpPolicy.empty().withEngines(["google.com"]).value;
+    policy = policy.register("named", g.ProjectKey.parse("ABC").value,
+      g.JiraInstance.parse("https://a.atlassian.net").value).value;
+    policy = policy.armShortcut("named").value;
+
+    const report = await g.RuleInstaller.install(policy);
+
+    // refuseCapturing refuses every redirect rule (they all carry a substitution),
+    // so nothing installs -- but the call SUCCEEDS and names its causes.
+    assert.equal(report.skipped.length > 0, true, "the refusal is reported, not swallowed");
+    for (const cause of report.skipped) {
+      assert.equal(typeof cause.code, "string");
+      assert.equal(typeof cause.subject, "string", "and it says WHICH one");
+    }
+    assert.equal(report.installed, true, "the batch itself did not fail: rules were replaced");
+  });
+});
+
+test("the platform refusing the whole update is a named failure, never a silent one", async () => {
+  const dnr = fakeDnr({ rejectUpdate: true });
+  await withPlatform(dnr, async () => {
+    let policy = g.JumpPolicy.empty().withEngines(["google.com"]).value;
+    policy = policy.register("named", g.ProjectKey.parse("ABC").value,
+      g.JiraInstance.parse("https://a.atlassian.net").value).value;
+    policy = policy.armShortcut("named").value;
+
+    const report = await g.RuleInstaller.install(policy);
+    assert.equal(report.installed, false, "a rejected batch is learned, not assumed");
+    assert.ok(report.skipped.some((c) => c.code === "CONSTRUCTION_REFUSED"),
+      "and the cause travels: " + JSON.stringify(report.skipped));
+    // FAIL CLOSED: the previous programme must not be left running.
+    assert.equal(dnr.rules().length, 0, "nothing is left firing under a policy that failed");
+  });
+});

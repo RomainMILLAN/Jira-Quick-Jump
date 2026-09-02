@@ -29,6 +29,9 @@
   "addDomainNote": {
     "message": "Only the domain. How it builds its search URL is picked below, never typed."
   },
+  "addDomainShape": {
+    "message": "How this engine builds its search address"
+  },
   "addShortcut": {
     "message": "Add shortcut"
   },
@@ -322,9 +325,6 @@
   },
   "refuseKeyNature": {
     "message": "A catch-all cannot be renamed, and a shortcut cannot become a catch-all."
-  },
-  "refuseMissingFreshId": {
-    "message": "This entry needs a new identifier before it can be restored."
   },
   "refuseKeyShape": {
     "message": "A key looks like ABC: 2 to 20 letters, digits or underscores, starting with a letter."
