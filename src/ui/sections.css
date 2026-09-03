@@ -800,3 +800,14 @@ input.f[aria-invalid="true"] {
 .add-domain .hint {
   margin: 0;
 }
+
+/* The reasons behind a verdict, listed under it. They only appear when the
+   receipt carries causes, so the empty case costs no space at all. */
+.causes {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}

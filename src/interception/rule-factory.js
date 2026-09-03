@@ -63,6 +63,21 @@
       // uniformity invariant asserted nowhere.
       let catchAll = undefined;
 
+      /**
+       * ONE RULE PER (SHORTCUT, ENGINE ENTRY) -- not per ticked id.
+       *
+       * A user who ticks `google.fr` AND adds it as a custom domain holds two ids
+       * for one engine. The catalogue now resolves both to the SAME entry (an alias
+       * rather than a silent drop, so the ticked id stops reading as UNKNOWN_ENGINE)
+       * -- which means the second binding would emit a rule with the same
+       * regexFilter, the same priority and the same action as the first, and reach
+       * DNR's unspecified tie-break through a perfectly legitimate configuration.
+       *
+       * Deduplicating HERE rather than in the catalogue keeps both properties: the
+       * ticked id resolves, and exactly one rule ships.
+       */
+      const emitted = new Set();
+
       for (const binding of policy.activeBindings()) {
         const engine = catalog.find(binding.engineId());
         if (!engine) {
@@ -72,6 +87,11 @@
           continue;
         }
         const shortcut = binding.shortcut();
+        // Two ids for one engine is a duplicate, not a refusal: nothing is lost and
+        // nothing is worth telling the user, so it does not join `skipped`.
+        const pair = `${shortcut.id()}|${engine.id}`;
+        if (emitted.has(pair)) continue;
+        emitted.add(pair);
         const key = shortcut.key();
         const shape = ReferencePattern.forKey(key);
         const rule = {
@@ -124,7 +144,10 @@
           id: nextGuardId++,
           priority: RuleRanking.forReservedPrefixes(),
           action: { type: "allow" },
-          condition: condition(engine.searchUrlPattern(guard.pattern)),
+          // WIDE ON PURPOSE: a guard stops a redirect, so matching more can only
+          // stop more. The strict prefix belongs to the redirect rules, and paying
+          // for it here is what made Chrome refuse these very guards.
+          condition: condition(engine.searchUrlPattern(guard.pattern, { exactParameter: false })),
           engineId,
           isCatchAll: false,
           // WHY THIS LABEL ESCAPES THE OBJECTION MADE TO CARRYING A KEY HERE: it

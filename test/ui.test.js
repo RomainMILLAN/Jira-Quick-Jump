@@ -819,3 +819,47 @@ test("a stale order reloads the screen, unlike every other refusal", async () =>
     }
   });
 });
+
+/**
+ * THE VERDICT AND ITS REASON STAND TOGETHER.
+ *
+ * "The catch-all could not be installed" was printed by Status while the reasons --
+ * RUN_OVER_BUDGET, REGEX_UNSUPPORTED, UNKNOWN_ENGINE -- were rendered only in the
+ * preview, three sections further down, and only once the user had typed something
+ * into it. Nobody reading a failure goes and types a URL to find out why.
+ */
+test("the status section names the causes behind a failed verdict", async () => {
+  await withDocument(async (doc) => {
+    const section = (await loadSections())[0];
+    const root = doc.createElement("div");
+    const stored = new g.StoredPolicy(g.JumpPolicy.empty().withEngines(["google.com"]).value, []);
+
+    const ctx = {
+      ...contextFor(stored, []),
+      report: async () => ({
+        diagnosis: "CATCH_ALL_NOT_INSTALLED",
+        skipped: [
+          { code: "REGEX_UNSUPPORTED", subject: "rule 42" },
+          { code: "UNKNOWN_ENGINE", subject: "the catch-all on custom:google.fr" },
+        ],
+        rules: [], installed: true, coverageSatisfied: false, missingOrigins: [],
+      }),
+    };
+    section.mount(root, ctx);
+    await section.render(stored, ctx);
+
+    const shown = root.querySelector(".causes");
+    assert.ok(shown, "the status section must have somewhere to put the reasons");
+    assert.equal(shown.hidden, false, "with causes in the receipt, they must be visible");
+    assert.equal(shown.children.length, 2, "one line per cause");
+    assert.ok((shown.textContent || "").includes("custom:google.fr"),
+      `the subject must be named: ${shown.textContent}`);
+
+    // And a healthy receipt costs no space at all.
+    const healthy = { ...ctx, report: async () => ({
+      diagnosis: "READY", skipped: [], rules: [], installed: true,
+      coverageSatisfied: true, missingOrigins: [] }) };
+    await section.render(stored, healthy);
+    assert.equal(root.querySelector(".causes").hidden, true);
+  });
+});

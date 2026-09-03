@@ -112,13 +112,31 @@
         );
       },
 
-      searchUrlPattern(typedTextFragment) {
+      /**
+       * `exactParameter` DECIDES HOW STRICT THE QUERY PREFIX IS, and the two
+       * answers are not a matter of taste -- they are the two directions of failure.
+       *
+       *   REDIRECT rules  -> strict. The rule must fire on the parameter the engine
+       *                      READS, i.e. the FIRST of its name. Firing on a later
+       *                      one lets any page navigate a visitor to their Jira.
+       *                      Matching too WIDE here is a real outbound flow.
+       *   ALLOW guards    -> wide. A guard exists to STOP a redirect. Matching too
+       *                      wide only ever stops more, which is the safe direction;
+       *                      matching too NARROW is what would let ISO-9001 leave.
+       *
+       * And the width is what pays for itself: the strict prefix costs thirty-odd
+       * characters on EVERY rule, and it was those characters -- multiplied by four
+       * engines and five guard runs -- that pushed the reserved-prefix guards past
+       * what Chrome accepts, so the browser refused them and the catch-all fell with
+       * its unit. Spending them only where they buy something is not an optimisation.
+       */
+      searchUrlPattern(typedTextFragment, { exactParameter = true } = {}) {
         return (
           "^https://" +
           hostPattern +
           form.pathPattern +
           "\\?" +
-          noEarlier(form.queryParam) +
+          (exactParameter ? noEarlier(form.queryParam) : "(?:.*&)?") +
           form.queryParam +
           "=" +
           typedTextFragment +
@@ -162,7 +180,29 @@
         // translate AND filter is the airlock's job.
         if (entry === undefined) continue;
         const signature = entry.hostPattern + "|" + entry.shape;
-        if (seen.has(signature)) continue;
+        if (seen.has(signature)) {
+          /**
+           * A DUPLICATE IS ALIASED, NEVER DROPPED -- and this was a real fault, not
+           * a tidiness question.
+           *
+           * `google.fr` ships as a built-in. A user who ALSO adds it as a custom
+           * domain gets an entry with the same hostPattern and shape, so it was
+           * skipped here to avoid emitting two identical rules at the same priority
+           * (which reaches DNR's unspecified tie-break). But the id `custom:google.fr`
+           * stayed ticked in the policy, and `catalog.find()` then answered nothing:
+           * every binding on that engine became UNKNOWN_ENGINE -- INCLUDING THE
+           * CATCH-ALL'S, which is why the page said "the catch-all could not be
+           * installed" while listing google.fr as a chosen engine.
+           *
+           * Deduplication is still what ships: the same entry is registered under
+           * BOTH ids, so exactly one rule is emitted and the ticked id resolves.
+           */
+          const twin = [...entries.values()].find(
+            (e) => e.hostPattern + "|" + e.shape === signature
+          );
+          if (twin) entries.set(entry.id, twin);
+          continue;
+        }
         seen.add(signature);
         entries.set(entry.id, entry);
       }

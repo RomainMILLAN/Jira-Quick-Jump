@@ -40,7 +40,30 @@
 (function (global) {
   "use strict";
 
-  const MAX_ALTERNATION_COST = 60;
+  /**
+   * FIFTY, AND THE REASON IS MEASURED RATHER THAN GUESSED.
+   *
+   * It was 60, with eleven units of margin against an envelope this file admits it
+   * never measured -- "A DATED BET, not a proof", with the remedy written beside it:
+   * "IF GOOGLE REFUSES AT 60: drop to 50 (five runs). Do NOT raise the key bound."
+   *
+   * The bet came due. Closing the query-parameter hole (the rule must fire on the
+   * FIRST `q=`, not any of them) added one alternation of two to every engine's
+   * envelope, and Chrome then refused the reserved-prefix guards outright:
+   * REGEX_UNSUPPORTED on three of them, the rest falling with their units, and the
+   * catch-all going down with the group -- reported from a real profile with four
+   * engines, one of them a custom domain.
+   *
+   * So this is the documented remedy, applied for the documented reason. Five runs
+   * instead of four; the longest alternation goes from 58 characters to 49. The
+   * cost is one extra `allow` rule per engine, which is cheap: the alternative is a
+   * catch-all that claims nothing.
+   *
+   * WHAT NOT TO DO INSTEAD, and the file said this first: do not widen the query
+   * pattern back, which would reopen an outbound flow any page could aim, and do
+   * not raise the key bound, which is a domain decision and not this file's.
+   */
+  const MAX_ALTERNATION_COST = 50;
   // The quantity that was MEASURED, not a bound offset by one. {1,9} was accepted,
   // and {1,9} claims ten characters.
   const LONGEST_MEASURED_KEY = 10;

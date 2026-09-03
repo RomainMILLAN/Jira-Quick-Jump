@@ -10,15 +10,18 @@
 
   const { DiagnosisPresentation, Dom, MutationResult } = global;
   const { el, t, label, destination, toggle } = global.SectionParts;
-  const { FACT_SENTENCE } = global.SectionSentences;
+  const { FACT_SENTENCE, SKIPPED_SENTENCE } = global.SectionSentences;
 
   const Status = {
 
     mount(root, ctx) {
       this.node = el("div", { class: "status" });
       this.banner = el("div", { class: "alert", hidden: true });
+      // The reasons behind the verdict, beside the verdict.
+      this.causes = el("ul", { class: "causes", hidden: true });
       root.appendChild(this.banner);
       root.appendChild(this.node);
+      root.appendChild(this.causes);
     },
 
     /**
@@ -150,6 +153,28 @@
         tag.textContent = DiagnosisPresentation.label(report.diagnosis);
         tag.className = `tag ${DiagnosisPresentation.tone(report.diagnosis)}`;
       }
+
+      /**
+       * AND WHY, WHERE THE VERDICT IS ANNOUNCED.
+       *
+       * "The catch-all could not be installed" was said HERE while the reasons --
+       * RUN_OVER_BUDGET, REGEX_UNSUPPORTED, UNKNOWN_ENGINE -- were rendered only in
+       * the preview, three sections down, and only once the user had typed
+       * something into it. A user reading a failure has no reason to go and type a
+       * URL to find out what happened.
+       *
+       * The receipt carries the causes on both surfaces (install-outcome.js), so
+       * the sentence and its reason can finally stand together.
+       */
+      Dom.clear(this.causes);
+      for (const cause of report.skipped) {
+        this.causes.appendChild(el("li", {
+          class: "row-msg pending",
+          text: [SKIPPED_SENTENCE()[cause.code] || cause.code,
+                 SKIPPED_SENTENCE()[cause.subject] || cause.subject].join(" "),
+        }));
+      }
+      this.causes.hidden = report.skipped.length === 0;
     },
 
     async renderBanner(ctx) {

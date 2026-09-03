@@ -379,7 +379,10 @@ test("the whole rule set is locked against a literal expectation", () => {
         id: 1001 + i, priority: 2,
         action: { type: "allow" },
         condition: {
-          regexFilter: "^https://(?:www\\.)?google\\.com/search\\?(?:(?:[^=&q][^=&]*|q[^=&]+)?=[^&]*&)*q=(?:" +
+          // WIDE, unlike the redirect rules above: a guard stops a redirect, so
+          // matching more can only stop more -- and the strict prefix, multiplied by
+          // every engine and every run, is what made Chrome refuse these outright.
+          regexFilter: "^https://(?:www\\.)?google\\.com/search\\?(?:.*&)?q=(?:" +
             run.join("|") + ")-\\d+(?:&|$)",
           isUrlFilterCaseSensitive: false, resourceTypes: ["main_frame"],
         },
@@ -632,10 +635,16 @@ test("changelock 2026-09-01: the claimed bound fits the measured RE2 budget", ()
   // The measured ceiling itself, so raising LONGEST_MEASURED_KEY without
   // re-measuring goes red.
   assert.equal(g.Re2Budget.LONGEST_MEASURED_KEY, 10);
-  assert.equal(g.Re2Budget.MAX_ALTERNATION_COST, 60);
-  // 60 rather than 70: the last measured-good point costs exactly 70 and the real
-  // limit lies in (70, 107] -- unknown. Sitting on 70 would ship a run of
-  // SEVENTEEN words, more alternatives than anything ever measured good.
+  assert.equal(g.Re2Budget.MAX_ALTERNATION_COST, 50);
+  // FIFTY, and the bet that justified 60 came due. The margin above 60 was eleven
+  // units against an envelope this repository never measured -- "A DATED BET, not a
+  // proof" -- with the remedy written beside it: "IF GOOGLE REFUSES AT 60: drop to
+  // 50 (five runs)."
+  //
+  // Chrome then refused, on a real profile: closing the query-parameter hole added
+  // one alternation of two per engine, and the reserved-prefix guards came back
+  // REGEX_UNSUPPORTED, taking the catch-all down with their units. This is that
+  // remedy, applied for that reason.
   assert.ok(g.Re2Budget.MAX_ALTERNATION_COST < 70, "the margin pays for the unmeasured envelope");
 });
 
@@ -956,4 +965,87 @@ test("the arbitration matches the documented algorithm, priority before action",
   assert.throws(() => g.RuleRanking.rankOfAction("upgradeScheme"), /unknown action type/);
 
   assert.deepEqual(g.RuleRanking.winner([]), { code: "NO_MATCH" });
+});
+
+/**
+ * A BUILT-IN ADDED AGAIN AS A CUSTOM DOMAIN MUST NOT KILL THE CATCH-ALL.
+ *
+ * Reported from a real profile: google.fr ships as a built-in, the user had ALSO
+ * added it as a custom domain, and the options page said "the catch-all could not
+ * be installed" while listing google.fr among the chosen engines.
+ *
+ * The chain: the catalogue skipped the duplicate to avoid emitting two rules with
+ * the same regexFilter, priority and action (DNR's unspecified tie-break). But the
+ * id `custom:google.fr` stayed ticked, so `catalog.find()` answered nothing and
+ * EVERY binding on that engine became UNKNOWN_ENGINE -- the catch-all's included.
+ *
+ * Both properties must hold at once, which is what this pins:
+ *   - the ticked id RESOLVES (no UNKNOWN_ENGINE), and
+ *   - exactly ONE rule ships for the pair (no indistinguishable rules).
+ */
+test("a built-in ticked twice resolves once, and the catch-all survives it", () => {
+  const custom = g.CustomEngine.parse({ host: "google.com", shape: "search-q" });
+  assert.equal(custom.ok, true);
+
+  let p = withCatchAll().withCustomEngine(custom.value).value;
+  p = p.withEngines(["google.com", custom.value.id()]).value;
+
+  const catalog = g.SearchEngineCatalog.forPolicy(p);
+  assert.ok(catalog.find(custom.value.id()),
+    "the ticked id must resolve: unresolved, every binding on it reads UNKNOWN_ENGINE");
+  assert.equal(catalog.find(custom.value.id()).hostPattern,
+    catalog.find("google.com").hostPattern, "and it resolves to the very same entry");
+
+  const set = g.RuleFactory.buildRules(p, catalog, g.Re2Budget.conservative());
+  assert.deepEqual(set.skipped(), [],
+    "a duplicate is not a refusal -- nothing is lost, so nothing is reported");
+  assert.equal(set.coverageSatisfied(), true,
+    "and the catch-all is installed: this is the bug as the user saw it");
+
+  const signatures = set.rules().map(
+    (r) => r.condition.regexFilter + "|" + r.priority + "|" + r.action.type);
+  assert.equal(new Set(signatures).size, signatures.length,
+    "exactly one rule per pair: two identical rules reach DNR's unspecified tie-break");
+});
+
+/**
+ * THE STRICT QUERY PREFIX BELONGS TO REDIRECTS, AND ITS COST IS BOUNDED.
+ *
+ * Reported from a real profile: Chrome answered REGEX_UNSUPPORTED on the
+ * reserved-prefix guards, the rest of each unit fell with them, and the catch-all
+ * went down -- "the catch-all could not be installed" with four engines ticked.
+ *
+ * The cause was this repository's own fix for query-parameter pollution: making the
+ * rule fire on the FIRST `q=` rather than any of them adds thirty-odd characters to
+ * every pattern, and multiplied by four engines and five guard runs it pushed the
+ * guards past what the browser accepts.
+ *
+ * The two rule kinds fail in OPPOSITE directions, which is what makes the split
+ * safe rather than a shortcut:
+ *   redirect -> matching too WIDE is an outbound flow any page can aim. Strict.
+ *   allow    -> matching too wide only ever STOPS more redirects. Wide is safe;
+ *               matching too NARROW is what would let ISO-9001 leave.
+ */
+test("guards pay no strictness they cannot use, and stay well inside the budget", () => {
+  const engine = g.SearchEngineCatalog
+    .forPolicy(g.JumpPolicy.empty().withEngines(["google.com"]).value)
+    .find("google.com");
+
+  const strict = engine.searchUrlPattern("FRAGMENT");
+  const wide = engine.searchUrlPattern("FRAGMENT", { exactParameter: false });
+  assert.ok(strict.includes("[^=&q]"), "a redirect must still pin the FIRST parameter");
+  assert.equal(wide.includes("[^=&q]"), false, "a guard must not pay for that pin");
+  assert.ok(wide.length < strict.length - 20, "and the saving is what buys the budget back");
+
+  // The delivered guards, at the shipped budget, with margin against the length
+  // the browser was measured to refuse.
+  const guards = g.ReferencePattern.reservedPrefixGuards(
+    g.CatchAllKey.only(), g.Re2Budget.conservative());
+  assert.ok(guards.length >= 5, `${guards.length} runs: the budget got looser, not tighter`);
+  for (const guard of guards) {
+    const emitted = engine.searchUrlPattern(guard.pattern, { exactParameter: false });
+    assert.ok(emitted.length < 130,
+      `a guard of ${emitted.length} characters ships: Chrome refused at roughly 150, ` +
+      `and a refused guard takes the catch-all down with its unit`);
+  }
 });

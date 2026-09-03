@@ -1412,3 +1412,55 @@ test("the vocabulary of what we did not take stays at four words", () => {
   assert.ok(read("src/core/mutation-result.js").includes("THE VOCABULARY OF WHAT WE DID NOT TAKE"),
     "the map is what makes this pin explicable rather than arbitrary");
 });
+
+/**
+ * A COLLABORATOR DESTRUCTURED AT LOAD MUST BE LOADED FIRST.
+ *
+ * These files are classic scripts sharing globalThis, and most of them open with
+ * `const { A, B } = global;` -- which reads the value AT LOAD TIME, not at call
+ * time. Load the consumer first and the name is `undefined` for ever, with no error
+ * until the one line that uses it runs.
+ *
+ * That is exactly how `RefusalPresentation` came to be undefined in section-host.js:
+ * options.html loaded it three lines AFTER its consumer, so every refusal banner
+ * threw "Cannot read properties of undefined (reading 'sentence')" -- on the one
+ * path whose job is to explain that something went wrong.
+ *
+ * The existing pins compare the lists to EACH OTHER (manifest vs importScripts, the
+ * two pages' shared prefix). None of them read what a file actually needs. This one
+ * does, which is why it catches a class of bug no green suite could.
+ */
+test("every destructured collaborator is loaded before the file that destructures it", () => {
+  const published = new Map();
+  for (const file of srcFiles()) {
+    const body = read(file);
+    for (const [, name] of body.matchAll(/^\s*global\.([A-Z][A-Za-z0-9]*)\s*=/gm)) {
+      published.set(name, file.replace(/^src\//, ""));
+    }
+  }
+
+  for (const page of SURFACES) {
+    const order = scriptsOf(read(page));
+    const positionOf = new Map(order.map((script, at) => [script, at]));
+
+    for (const [at, script] of order.entries()) {
+      // Only the load-time form. `const { X } = global;` at module scope reads the
+      // value once, when the file runs; `global.X` inside a function resolves late
+      // and is this repository's documented way to break a cycle.
+      const body = codeOf(read(`src/${script}`));
+      for (const block of body.matchAll(/^  const \{([^}]*)\} = global;/gm)) {
+        for (const raw of block[1].split(",")) {
+          const name = raw.trim();
+          if (!name || !published.has(name)) continue;
+          const provider = published.get(name);
+          if (provider === script) continue;
+          const providerAt = positionOf.get(provider);
+          if (providerAt === undefined) continue;
+          assert.ok(providerAt < at,
+            `${page}: ${script} destructures ${name} at load, but ${provider} is loaded ` +
+            `after it (${providerAt} > ${at}) -- the name will be undefined for ever`);
+        }
+      }
+    }
+  }
+});
