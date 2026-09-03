@@ -138,9 +138,25 @@
     }
   }
 
-  /** What may travel: never the user's destination or key, only shipped words and
-   *  numbers. The constraint is written rather than assumed, because refusals land
-   *  in the service worker console. */
+  /**
+   * What may travel IN THIS `detail`: never the user's destination or key, only
+   * shipped words and numbers. The constraint is written rather than assumed,
+   * because THESE refusals land in the service worker console, where nobody asked
+   * to see a customer name.
+   *
+   * THE SCOPE IS THIS CHANNEL, NOT THE PROJECT -- and the sentence used to read as
+   * if it governed both. `NotInstalled.of(code, subject)` sits one file away and
+   * carries `binding.describe()`, i.e. THE PROJECT KEY, into installOutcome and
+   * then onto the screen. That is not a violation of this rule, it is a different
+   * channel with a different audience: the user is owed WHICH shortcut was not
+   * installed, and "the catch-all could not be installed" without its subject is a
+   * sentence that helps nobody. jump-policy.js says as much where describe() is
+   * defined -- "A LABEL FOR A LOG LINE", deliberately distinct from the persisted
+   * discriminant.
+   *
+   * So do not "harmonise" the two by stripping NotInstalled.subject. The asymmetry
+   * is the design.
+   */
   const detailOf = (detail) => {
     if (!detail || typeof detail !== "object") return undefined;
     const kept = {};

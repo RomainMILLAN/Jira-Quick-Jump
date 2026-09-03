@@ -550,6 +550,32 @@
   JumpPolicy.MAX_BINDINGS = MAX_BINDINGS;
   JumpPolicy.MAX_SHORTCUTS = MAX_SHORTCUTS;
 
+  /**
+   * THE FACTORY IS BORN ARMED, AND THAT IS ARGUED RATHER THAN LEFT ASYMMETRIC.
+   *
+   * readDocument spends twenty lines establishing that "a switch has two positions
+   * and 'I cannot read the position' is not a third one", then defaults `armed` to
+   * FALSE. This factory defaults to TRUE, three files away, with no word -- and an
+   * unexplained asymmetry in a repository where everything else is explained is an
+   * invitation to "fix" it by reflex. So: it is a decision, here is the decision.
+   *
+   * WHY IT IS SAFE, and note that the safety is NOT carried by this flag. An empty
+   * policy holds no shortcut, so activeBindings() is empty and no rule can exist.
+   * Every shortcut then arrives through register() with Consent.fresh(), i.e.
+   * DISARMED, and _isLive() excludes anything unarmed, unacknowledged or shadowed.
+   * Three independent gates, none of them this one.
+   *
+   * WHY IT IS NOT FLIPPED. Measured on the callers: admission.js:377 and :417 both
+   * chain an EXPLICIT .arm()/.disarm() immediately, so neither observes this value;
+   * the only path that does is StoredPolicy.empty() -- a fresh profile. Flipping it
+   * would therefore cost every new installation one extra gesture (two switches to
+   * arm instead of one) and buy nothing the three gates above do not already hold.
+   *
+   * THE DIRECTION THAT MATTERS IS THE OTHER ONE, and it is already right: a
+   * document we cannot read comes back DISARMED (readDocument), and an import comes
+   * back DISARMED whatever the file says (proposeImport). Ignorance fails closed;
+   * an empty policy is not an ignorance.
+   */
   JumpPolicy.empty = function () {
     return new JumpPolicy(ShortcutRegistry.empty(), [], true, []);
   };

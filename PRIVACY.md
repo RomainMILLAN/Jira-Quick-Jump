@@ -73,6 +73,18 @@ may survive.
 The destination journal is **always local**, never synced and never exported. A
 journal that travelled by the channel it is meant to watch would be worthless.
 
+**Why the Firefox manifest declares no data collection**, given the paragraph
+above. `browser_specific_settings.gecko.data_collection_permissions` is
+`["none"]`, and that is deliberate rather than an omission: nothing is collected
+by, or transmitted to, this extension's author or any third party of its choosing
+— there is no endpoint to send it to (`connect-src 'none'`, and no request API in
+the background script). Turning on sync does send your configuration somewhere,
+but it goes to **your own browser account**, through the browser's own sync, under
+Google's or Mozilla's terms rather than anyone's here; the schema has no value
+describing that, and the setting states the consequence in the interface where it
+is turned on. If a store reviewer reads this differently, the declaration is what
+should change — not this page.
+
 ## What it does not protect you from
 
 **Search suggestions.** As you type in the address bar, your browser sends

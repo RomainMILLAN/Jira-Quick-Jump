@@ -32,9 +32,30 @@
         // Fixing means EDITING what could not be read, then sending it back
         // through the one door — re-submitting the same rejected bytes would just
         // reproduce the same refusal, which is honest and useless.
-        const key = el("input", { class: "f key", value: String((raw && raw.key) ?? ""),
+        //
+        // `ltr-isolate` IS NOT DECORATION HERE, IT IS THE CONTROL.
+        //
+        // These two fields are THE ONLY SURFACE IN THE PROJECT that displays a
+        // string the parser REFUSED. Everywhere else a host on screen has survived
+        // JiraInstance.parse, hence /^[\x21-\x7e]+$/, so no bidi override can be
+        // in it. Here the entry is in quarantine BECAUSE the parser refused it, and
+        // BASE_CONTROL_CHARS is precisely the code that refuses those overrides —
+        // so an RTL override arrives, unopposed, on the screen where the user reads
+        // the value to decide whether to readmit it. structure.test.js already says
+        // why that matters: "what the user checks is not where the traffic goes".
+        //
+        // The class was the FIRST selector of the shared rule in sections.css and
+        // had NO reader at all — an opt-in hook nobody had ever plugged in, the
+        // "trap that reads as an offer" this project reproaches elsewhere. It has
+        // one now, and it is the surface the rule was cut for.
+        //
+        // Deliberately NOT `input.f` added to the CSS rule: the five other
+        // selectors are there for a DIFFERENT reason ("this selector prints a
+        // validated host"), and widening the rule to every field in the extension
+        // would blur what it means.
+        const key = el("input", { class: "f key ltr-isolate", value: String((raw && raw.key) ?? ""),
           "aria-label": t("key", "Key") });
-        const url = el("input", { class: "f", value: String((raw && raw.baseUrl) ?? ""),
+        const url = el("input", { class: "f ltr-isolate", value: String((raw && raw.baseUrl) ?? ""),
           "aria-label": t("destination", "Destination") });
         this.body.appendChild(el("div", { class: "row is-pending" }, [
           el("div", { class: "f-key" }, [key]),

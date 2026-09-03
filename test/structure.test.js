@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync, existsSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { loadCore } from "./load-core.js";
 
@@ -266,6 +267,45 @@ test("the vendored signature declares its provenance", () => {
   }
 });
 
+test("the vendored signature is byte-for-byte the file that was reviewed", () => {
+  // PROVENANCE IS NOT INTEGRITY, and the test above only checks provenance.
+  //
+  // This stylesheet SHIPS inside both packages and comes from a separate
+  // repository. The only drift check was `make sync-signature` -- a LOCAL target
+  // (`npm run sync:signature && git diff --exit-code`) that no CI job runs -- and
+  // the test next door merely asserts that a provenance header is present. So a
+  // hand edit of this file, or a `git submodule update --remote` onto a hostile
+  // upstream HEAD followed by a resync, passed CI green.
+  //
+  // WHAT THE RISK IS, exactly, and it is not exfiltration: the CSP ships
+  // `default-src 'none'` with `connect-src 'none'` and `img/font/style-src 'self'`,
+  // which closes every network channel a stylesheet has. It is INTERFACE
+  // REDIRECTION -- covering the Access section, hiding the origin list, disguising
+  // the disarm control -- on the very page where the user checks where ABC-1 goes.
+  // scripts/sync-signature.mjs states that risk and accepts it; what was missing is
+  // a control that notices when the accepted file changes.
+  //
+  // The HEADER is excluded on purpose: sync-signature.mjs rewrites the pinned sha
+  // in it on every resync, so hashing it would make this test fail for the one
+  // legitimate reason. What is pinned is the CSS itself.
+  //
+  // TO UPDATE, and the middle step is the whole point:
+  //   1. git submodule update --remote vendor/rm-tag
+  //   2. git -C vendor/rm-tag log <old sha>..<new sha>   <-- READ THIS
+  //   3. make sync-signature
+  //   4. update the digest below, in the same commit as the file
+  const css = read("src/ui/author-signature.css");
+  const at = css.indexOf("*/");
+  assert.ok(at > 0, "the provenance header is gone, so there is nothing to exclude");
+  const body = css.slice(at + 2);
+  const digest = createHash("sha256").update(body).digest("hex");
+  assert.equal(
+    digest,
+    "448ef3ce9e52de6049970ef8546fb8bad9d9859801b01ecbaa37ab5d3e039b28",
+    "author-signature.css changed: read the upstream log, then update this digest",
+  );
+});
+
 test("no workflow exposes secrets to pull request code", () => {
   // This guard used to live in ci.yml as a grep over ci.yml itself, so it
   // matched its own pattern and failed on every run -- the kind of always-red
@@ -274,6 +314,52 @@ test("no workflow exposes secrets to pull request code", () => {
   const ci = read(".github/workflows/ci.yml");
   assert.equal(/pull_request_target/.test(ci), false, "a fork PR must never run with secrets in scope");
   assert.equal(/secrets\./.test(ci), false, "ci.yml must not reference any secret");
+});
+
+test("the artefact that is published is the artefact that was attested", () => {
+  // AN ATTESTATION THAT COVERS NOTHING PUBLISHED IS NOT A CONTROL, IT IS A CLAIM.
+  //
+  // release.yml used to build in `build`, attest THOSE zips, then rebuild in
+  // `publish` and release the second set. The archives record file mtimes from the
+  // compilation, so the two builds have different digests, and
+  // `gh attestation verify <published zip>` fails -- on the command SECURITY.md
+  // invites people to run. The fix is that `publish` downloads instead of
+  // compiling, and this is what keeps it that way: an attestation cannot be
+  // retrofitted, so a regression here is permanent for that release.
+  const wf = read(".github/workflows/release.yml");
+  const at = wf.indexOf("\n  publish:");
+  assert.ok(at > 0, "release.yml no longer has a publish job");
+  // THE COMMENTS ARE STRIPPED FIRST, and that is not tidiness: the paragraph
+  // explaining WHY publish must not rebuild contains the very string this test
+  // forbids. refusal-presentation.js hit the same trap from the other side -- a
+  // scanner reading a comment as a call site -- and paid for it with a rewritten
+  // sentence. What is asserted here is what the runner EXECUTES.
+  const steps = wf
+    .slice(at)
+    .split("\n")
+    .filter((line) => !/^\s*#/.test(line))
+    .join("\n");
+
+  assert.equal(
+    /npm run build:(chrome|firefox)/.test(steps),
+    false,
+    "publish compiles again instead of consuming the attested artefact",
+  );
+  assert.match(steps, /download-artifact/, "publish must download what build attested");
+  // The one script that signs WITHOUT rebuilding. `sign:firefox` chains
+  // build:firefox-src, which would hand AMO bytes nobody attested.
+  assert.equal(
+    /npm run sign:firefox\s*$/m.test(steps),
+    false,
+    "publish signs from a rebuild rather than from the attested package",
+  );
+  assert.match(steps, /npm run sign:firefox-packaged/, "the signature must consume the attested package");
+
+  // And the sums SECURITY.md promises actually reach the Release. They were
+  // written by `build` and uploaded as a run artifact only, so nothing published
+  // carried them.
+  assert.match(steps, /web-ext-artifacts\/SHA256SUMS/, "SHA256SUMS is not attached to the release");
+  assert.match(wf, /attest-build-provenance/, "the build job no longer attests anything");
 });
 
 test("every resource the pages reference actually exists", () => {
@@ -484,20 +570,53 @@ test("every origin we could request is inside optional_host_permissions", async 
   }
 });
 
-test("a rule never matches a host we did not ask permission for", async () => {
-  // The host pattern and the permission origins are derived from one list, so a
-  // rule cannot match google.fr while permission was only sought for google.com —
-  // which installs a rule that can never fire.
+test("the permission asked for is exactly the hosts the rule can match", async () => {
+  // BOTH DIRECTIONS, and only one of them used to be checked.
+  //
+  // SUFFICIENCY (rule ⊆ permission) keeps a rule from being installed for a host
+  // nobody granted, where it can never fire. That was the original assertion, and
+  // it stays.
+  //
+  // MINIMALITY (permission ⊆ rule) is the direction that matters for the user: the
+  // origins here become the browser's own prompt. `https://*.google.com/*` asked
+  // for accounts.google.com and mail.google.com, which no rule of this catalogue
+  // can ever match — and a permission already granted is not revoked by a later,
+  // narrower request.
+  //
+  // The two facts are DELIBERATELY spelled independently in the catalogue. Made to
+  // descend from one list, this test would compare the union to the union and go
+  // green forever; see the note on permissionOrigins.
   const { loadCore } = await import("./load-core.js");
   const g = await loadCore();
 
+  const hostOf = (origin) => {
+    const match = /^https:\/\/([^/]+)\/\*$/.exec(origin);
+    assert.ok(match, `${origin} is not a plain https://<host>/* pattern`);
+    // No wildcard host, ever: it is what made the permission wider than the rule.
+    assert.equal(match[1].includes("*"), false, `${origin} still carries a wildcard host`);
+    return match[1];
+  };
+
   for (const engine of g.SearchEngineCatalog.all()) {
-    const hosts = engine.permissionOrigins.map((o) => o.replace("https://*.", "").replace("/*", ""));
-    for (const host of hosts) {
-      const pattern = new RegExp("^" + engine.hostPattern + "$");
-      assert.ok(pattern.test(host), `${engine.id}: pattern does not match granted host ${host}`);
-      assert.ok(pattern.test("www." + host), `${engine.id}: pattern does not match www.${host}`);
+    const pattern = new RegExp("^" + engine.hostPattern + "$");
+    const granted = engine.permissionOrigins.map(hostOf);
+
+    // SUFFICIENCY: every host the rule can match is covered by a granted origin.
+    for (const host of [engine.domain, `www.${engine.domain}`]) {
+      assert.ok(pattern.test(host), `${engine.id}: hostPattern does not match ${host}`);
+      assert.ok(granted.includes(host), `${engine.id}: no permission asked for ${host}`);
     }
+
+    // MINIMALITY: nothing is granted that the rule could not match.
+    for (const host of granted) {
+      assert.ok(pattern.test(host), `${engine.id}: asks for ${host}, which no rule can match`);
+    }
+    assert.equal(granted.length, 2, `${engine.id}: expected exactly the two matchable hosts`);
+
+    // And the subdomain the wildcard used to hand over stays out, on both axes.
+    const subdomain = `accounts.${engine.domain}`;
+    assert.equal(pattern.test(subdomain), false, `${engine.id}: hostPattern reaches ${subdomain}`);
+    assert.equal(granted.includes(subdomain), false, `${engine.id}: still asks for ${subdomain}`);
   }
 });
 
@@ -916,10 +1035,29 @@ test("the bidi isolation covers every surface that prints a host, and is written
 
   const rule = /((?:^|\n)(?:\.[\w-]+,\n)*\.[\w-]+\s*\{[^}]*unicode-bidi:\s*isolate[^}]*\})/.exec(css);
   assert.ok(rule, "the shared rule exists");
-  for (const selector of [".dest", ".origin", ".preview", ".signature-domain"]) {
+  for (const selector of [".dest", ".origin", ".preview", ".signature-domain", ".ltr-isolate"]) {
     assert.ok(rule[1].includes(selector), `${selector} prints a host and must be isolated`);
   }
   assert.ok(rule[1].includes("direction: ltr"), "isolation without a direction is half the control");
+
+  // AND THE OPT-IN HOOK HAS A READER. `.ltr-isolate` sat first in that rule with
+  // no user anywhere in src/ -- a hook nobody had plugged in. Its one client is
+  // the quarantine repair screen, which is THE ONLY surface that displays a string
+  // the parser REFUSED: everywhere else a host on screen has passed
+  // JiraInstance.parse and its ASCII-printable post-condition, so no bidi override
+  // can be in it. There, the entry is in quarantine precisely BECAUSE the override
+  // was refused.
+  //
+  // Asserted on the section rather than by widening the CSS rule to every
+  // `input.f`: the risk exists only where a refused string is shown, and the five
+  // other selectors are in that rule for a different reason.
+  const quarantine = read("src/ui/sections/quarantine.js");
+  const isolated = quarantine.match(/class: "f[^"]*ltr-isolate[^"]*"/g) || [];
+  assert.equal(
+    isolated.length,
+    2,
+    "the two quarantine fields display a REFUSED string and must carry ltr-isolate",
+  );
 });
 
 test("no state is signalled by colour alone at a ratio nobody can see", () => {

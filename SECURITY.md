@@ -3,7 +3,7 @@
 ## Reporting a vulnerability
 
 Report privately through
-[GitHub's advisory form](https://github.com/RomainMILLAN/Jira-Quick-Jump/security/advisories/new).
+[GitHub's advisory form](https://github.com/RomainMILLAN/jira-quick-jump/security/advisories/new).
 Please do not open a public issue for anything exploitable.
 
 Expect an acknowledgement within **five working days** and an assessment within
@@ -48,6 +48,20 @@ trade rather than leave stale rules firing under a badge that says `off`.
   user grants that origin in a browser prompt naming it. This is the control that
   neutralises a hostile import, a compromised sync account and a malicious update
   alike — and why the extension never requests access to all sites.
+- **The permission asked for is exactly the hosts a rule can match.** A search
+  engine's rule fires on `<domain>` and `www.<domain>` and nothing else, so those
+  are the two origins requested — `https://google.com/*` and
+  `https://www.google.com/*`. It used to ask for `https://*.google.com/*`, which
+  covered `accounts.google.com`, `mail.google.com` and every other subdomain that
+  no rule of this build can ever match. A test now asserts **both** directions:
+  no rule outside the permission (a rule that could never fire), and no permission
+  outside the rules (an octroi nobody needs).
+  **If you granted access under version 1.1.0 or earlier, that wildcard is still
+  granted**: a browser does not revoke a permission because a later version asks
+  for less. Narrowing it is done by hand — Chrome: *Extensions → Quick Jump for
+  Jira → Site access*; Firefox: *Add-ons → Quick Jump for Jira → Permissions*.
+  Removing it and re-granting through the Access section leaves you with the two
+  narrow origins.
 - **Project keys and base URLs are the two security functions.** A key is
   concatenated literally into a regex filter, so it is held to a closed character
   set; a base URL becomes a redirect target, so it is refused rather than cleaned
@@ -165,13 +179,53 @@ trade rather than leave stale rules firing under a badge that says `off`.
 
 ## Supply chain
 
-The extension ships **no third-party code**: no runtime dependency, no bundler,
-no CDN. A test fails the build if one appears.
+The extension ships **no third-party JavaScript**: no runtime dependency, no
+bundler, no CDN, no remote code of any kind. `package.json` has an empty
+`dependencies`, and a test fails the build if that changes.
+
+It does ship **one third-party stylesheet**, and the earlier wording ("no
+third-party code") was stronger than the control behind it, so here it is
+plainly: `src/ui/author-signature.css` is a byte-for-byte mirror of
+[Romain-MILLAN-Tag](https://github.com/RomainMILLAN/Romain-MILLAN-Tag) (MIT),
+pinned by commit through a submodule that CI never clones. Two controls cover it,
+both hermetic: its provenance header is asserted, and **its content is pinned by
+SHA-256** — a hand edit, or a resync onto a different upstream, goes red.
+
+What that stylesheet cannot do is exfiltrate: the CSP ships `default-src 'none'`
+with `connect-src 'none'` and `img/font/style-src 'self'`, which closes every
+network channel CSS has. What it *could* do, if it were ever replaced by something
+hostile, is redirect the interface — cover the Access section, hide the origin
+list, disguise the disarm control. That risk is **accepted**, and reading the
+upstream log before a resync is what keeps it accepted rather than ignored.
 
 CI never clones an external repository, runs with least-privilege tokens, pins
 every action by commit SHA, installs with `--ignore-scripts`, and never exposes a
-secret to pull-request code. Releases attest their provenance and publish SHA-256
-sums; publication waits behind a protected environment with a human reviewer.
+secret to pull-request code. It also audits **what actually ships**
+(`npm audit --omit=dev`, expected to stay at zero for ever since nothing ships).
+The development toolchain is another matter and is not gated: `addons-linter`
+pulls `image-size`, which carries two denial-of-service advisories
+(GHSA-w3rx-r6r6-pgpr, GHSA-5p2g-fcmc-qvqq); it is reachable only through the lint
+step, which parses this repository's own icons, so the worst case is a hung CI job
+and never a user. Downgrading `web-ext` to close it would cost more than it buys.
+Dependabot is the fix path, and this paragraph is the exception, in the open.
+
+**Releases attest their provenance, and the attested file is the published one.**
+That was not always true: the release workflow used to build twice — attesting one
+set of archives and publishing a second, freshly compiled set. Archives record
+file timestamps from the compilation, so the two never had the same digests, and
+`gh attestation verify` on a published asset failed. The publish job now
+*downloads* what the build job attested instead of recompiling, signs the Firefox
+xpi from that same archive, and attaches the SHA-256 sums to the release. A test
+reads the workflow and refuses a return to compiling in the publish job.
+
+Anyone can therefore check what they downloaded:
+
+```sh
+gh attestation verify jira-quick-jump-chrome-<version>.zip -R RomainMILLAN/jira-quick-jump
+sha256sum -c SHA256SUMS
+```
+
+Publication waits behind a protected environment with a human reviewer.
 
 The release workflow also **denies every outbound connection it did not declare**
 (`egress-policy: block`), with a separate allowlist per job: the build job can

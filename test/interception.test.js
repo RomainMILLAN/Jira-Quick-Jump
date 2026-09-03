@@ -131,11 +131,18 @@ test("the preview never returns null", () => {
 test("required origins cover engines and every shortcut, disarmed ones included", () => {
   const disarmed = policy.disarmShortcut(ID).value;
   const origins = g.OriginRequirements.requiredOrigins(disarmed, g.SearchEngineCatalog);
-  assert.ok(origins.includes("https://*.google.com/*"));
-  assert.ok(origins.includes("https://*.bing.com/*"));
-  assert.ok(origins.includes("https://*.duckduckgo.com/*"));
+  // EXACTLY the two hosts each rule can match -- no subdomain wildcard. See the
+  // note on permissionOrigins: a wildcard asked for accounts.google.com, which no
+  // rule of this catalogue can ever match.
+  for (const domain of ["google.com", "bing.com", "duckduckgo.com"]) {
+    assert.ok(origins.includes(`https://${domain}/*`), `missing https://${domain}/*`);
+    assert.ok(origins.includes(`https://www.${domain}/*`), `missing https://www.${domain}/*`);
+    assert.equal(origins.includes(`https://*.${domain}/*`), false, "the wildcard is back");
+    assert.equal(origins.includes(`https://accounts.${domain}/*`), false);
+  }
   // Only what was ticked: google.fr is its own entry and was not selected.
-  assert.equal(origins.includes("https://*.google.fr/*"), false);
+  assert.equal(origins.includes("https://google.fr/*"), false);
+  assert.equal(origins.includes("https://www.google.fr/*"), false);
   assert.ok(origins.includes("https://example.atlassian.net/*"), "a disarmed shortcut still needs its origin");
   // Never a wildcard scheme: Chrome refuses what the manifest does not declare.
   assert.ok(origins.every((o) => o.startsWith("https://") || o.startsWith("http://")));
@@ -168,7 +175,8 @@ test("a domain the user adds becomes a working engine", () => {
 
   // And it asks for exactly that origin, nothing wider.
   assert.deepEqual(g.OriginRequirements.requiredOrigins(p, catalog), [
-    "https://*.google.it/*",
+    "https://google.it/*",
+    "https://www.google.it/*",
     "https://example.atlassian.net/*",
   ]);
 });

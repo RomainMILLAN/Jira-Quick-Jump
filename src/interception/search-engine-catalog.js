@@ -77,11 +77,39 @@
       hostPattern,
       pathPattern: form.pathPattern,
       queryParam: form.queryParam,
-      // Explicit https, and derived from the very domain the pattern matches:
-      // Chrome refuses a request that falls outside the manifest's optional
-      // patterns, and a rule matching a host we never asked for installs and then
-      // never fires.
-      permissionOrigins: [`https://*.${domain}/*`],
+      /**
+       * EXACTLY THE TWO HOSTS THE RULE CAN MATCH, and not one subdomain more.
+       *
+       * Explicit https, and derived from the very domain the pattern matches:
+       * Chrome refuses a request that falls outside the manifest's optional
+       * patterns, and a rule matching a host we never asked for installs and then
+       * never fires.
+       *
+       * IT WAS `https://*.${domain}/*`, AND THAT WAS TOO WIDE. hostPattern above
+       * is `(?:www\\.)?<domain>` followed IMMEDIATELY by the path, so a rule can
+       * only ever fire on `<domain>` and `www.<domain>`. The wildcard asked for
+       * accounts.google.com, mail.google.com and every other subdomain -- for an
+       * extension whose whole argument is that it never requests broad access,
+       * and on the one screen where the browser names what it is granting.
+       *
+       * The old test only checked SUFFICIENCY (rule inside permission). It is now
+       * an assertion of MINIMALITY as well, because the direction that matters is
+       * the other one.
+       *
+       * WHAT IT DOES NOT UNDO, said plainly: a permission already granted is not
+       * revoked by an update. A profile that accepted `https://*.google.com/*`
+       * under an earlier build keeps it, and permissions.contains() goes on
+       * answering yes for every subdomain until the user revokes it by hand. That
+       * is why this is a before-publication fix and not an after: SECURITY.md
+       * carries the sentence for the users who are already there.
+       *
+       * DO NOT DERIVE THIS FROM hostPattern, or hostPattern from this. They are
+       * two independent spellings of one fact on purpose: made to descend from a
+       * single list, the minimality test compares the union to the union and goes
+       * green on day one and forever -- the tautology rule-set.js spends a
+       * paragraph refusing about assertGuardsCover.
+       */
+      permissionOrigins: [`https://${domain}/*`, `https://www.${domain}/*`],
       exampleUrl: `https://${domain}${form.pathPattern === "/" ? "/" : form.pathPattern}?${form.queryParam}=ABC-1234`,
 
       /**

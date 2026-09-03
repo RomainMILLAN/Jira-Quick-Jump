@@ -44,16 +44,51 @@
    * is the guarantee the dead copy pretended to give.
    */
 
+  // `0.` and `192.0.2.` JOINED THE LIST, and they were the two gaps that mattered
+  // on this axis: 0.0.0.0/8 is "this network" (and 0.0.0.0 itself is a hard
+  // refusal in JiraInstance.parse, but 0.1.2.3 was not even warned about), and
+  // 192.0.2.0/24 is TEST-NET-1. The rest was already here: RFC 1918, loopback and
+  // the carrier-grade NAT range.
   const PRIVATE_V4 =
-    /^(10\.|127\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.|100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.)/;
+    /^(0\.|10\.|127\.|192\.168\.|192\.0\.2\.|172\.(1[6-9]|2[0-9]|3[01])\.|100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.)/;
+
+  /**
+   * THE SUFFIXES A PRIVATE NETWORK ACTUALLY USES, as a named list.
+   *
+   * It was two `endsWith` calls buried in a boolean chain -- `.local` and
+   * `.internal` -- so `https://jira.lan` produced NO warning at all: not
+   * INTERNAL_HOST (the name was not recognised), not LITERAL_IP, not
+   * INSECURE_SCHEME (it is https), not PUNYCODE. The row then armed on the first
+   * click with no screen to read, and `.lan`, `.corp` and `.home.arpa` are what
+   * an actual intranet is called.
+   *
+   * `.home.arpa` is RFC 8375; the others are the de-facto set (Active Directory's
+   * `.corp`, and what home routers hand out). The direction of failure stays the
+   * safe one: this list can only ever produce MORE warnings, never fewer -- and a
+   * warning blocks arming until it is acknowledged.
+   *
+   * WHAT THIS IS NOT. It is not the control that protects the user: nothing leaves
+   * for `jira.lan` without a browser prompt naming `https://jira.lan/*`. And the
+   * genuinely dangerous targets -- cloud metadata, link-local -- are a HARD
+   * REFUSAL in JiraInstance.parse, not a warning. This list buys the sentence
+   * "that host is private", nothing more, which is why it is generous rather than
+   * exhaustive.
+   *
+   * IT LIVES HERE and not on JiraInstance, deliberately: "does this host look
+   * internal" is a judgement of the domain about a destination, while
+   * project-shortcut.js answers "will a URL parser take this". Two questions, two
+   * reasons to change -- see the note on hasInvisibleCharacter over there.
+   */
+  const INTERNAL_SUFFIXES = [
+    ".local", ".internal", ".intranet", ".lan", ".corp", ".home.arpa", ".home", ".priv",
+  ];
 
   const isLiteralIp = (hostname) =>
     /^\d{1,3}(\.\d{1,3}){3}$/.test(hostname) || hostname.startsWith("[");
 
   const isInternal = (hostname) =>
     hostname === "localhost" ||
-    hostname.endsWith(".local") ||
-    hostname.endsWith(".internal") ||
+    INTERNAL_SUFFIXES.some((suffix) => hostname.endsWith(suffix)) ||
     !hostname.includes(".") ||
     PRIVATE_V4.test(hostname) ||
     hostname === "[::1]";
@@ -161,6 +196,10 @@
       ];
     },
   };
+
+  // Exported so a test can walk the real list instead of restating it: a second
+  // copy of a security-adjacent catalogue is what drifts.
+  ShortcutWarning.INTERNAL_SUFFIXES = Object.freeze([...INTERNAL_SUFFIXES]);
 
   global.ShortcutWarning = ShortcutWarning;
 })(globalThis);

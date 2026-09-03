@@ -14,6 +14,7 @@
     "build:chrome": "npm run build:chrome-src && web-ext build --source-dir=build/chrome --filename=jira-quick-jump-chrome-{version}.zip --overwrite-dest",
     "build:firefox": "npm run build:firefox-src && web-ext build --source-dir=build/firefox --filename=jira-quick-jump-firefox-{version}.zip --overwrite-dest",
     "sign:firefox": "npm run build:firefox-src && web-ext sign --source-dir=build/firefox --channel=unlisted",
+    "sign:firefox-packaged": "web-ext sign --source-dir=build/firefox --channel=unlisted",
     "start:firefox": "web-ext run --source-dir=src",
     "start:chromium": "web-ext run --source-dir=src --target=chromium"
   },

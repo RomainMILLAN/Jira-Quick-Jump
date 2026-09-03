@@ -239,6 +239,33 @@
       return { ok: false, code: "KEY_NOT_A_STRING", message: "A project key must be text." };
     }
     const trimmed = input.trim();
+    /**
+     * THE SIZE IS JUDGED HERE, BEFORE THE SENSE -- and it was judged by the
+     * neighbours.
+     *
+     * The validation order is origin -> size -> lexical -> syntax -> semantics,
+     * and JiraInstance.parse below keeps it (`length > 256` sits second). This
+     * door did not: an unbounded string reached hasInvisibleCharacter and then
+     * normalize("NFKC"), both linear over the input, before KEY ever got to refuse
+     * it on shape. Nothing exploitable -- the callers are bounded (a 64 kB
+     * transfer file, `shortcuts` capped at 200, a typed field) and KEY is anchored
+     * -- but in the file that declares itself one of the two security functions of
+     * this project, the order was held by the callers rather than by the door.
+     *
+     * KEY_SHAPE, AND DELIBERATELY NOT A NEW CODE. Its sentence already says "2 to
+     * 20 letters, digits or underscores", which is exactly what is wrong here, and
+     * test/ui.test.js requires a translated sentence for EVERY code the typed-input
+     * parsers can return -- so a fresh KEY_TOO_LONG would cost two locale entries
+     * and a RefusalPresentation row to say what this one already says.
+     */
+    if (trimmed.length > MAX_LENGTH) {
+      return {
+        ok: false,
+        code: "KEY_SHAPE",
+        message:
+          "A project key looks like ABC: 2 to 20 letters, digits or underscores, starting with a letter.",
+      };
+    }
     if (hasInvisibleCharacter(trimmed)) {
       return {
         ok: false,

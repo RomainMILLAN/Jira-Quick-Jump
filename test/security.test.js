@@ -447,3 +447,54 @@ test("the catch-all refuses every reserved prefix, and the list cannot quietly s
   assert.deepEqual(g.ReservedPrefix.withinLength(3).filter((w) => w.length > 3), []);
   assert.throws(() => g.ReservedPrefix.withinLength(0), /positive integer/);
 });
+
+test("a private host is warned about, whatever its flavour of private", () => {
+  // `https://jira.lan` used to produce NO warning at all: not INTERNAL_HOST (the
+  // suffix was not in the chain), not LITERAL_IP, not INSECURE_SCHEME (it is
+  // https), not PUNYCODE. With nothing pending, the row armed on the first click
+  // with no screen to read.
+  //
+  // WHAT THIS TEST IS AND IS NOT. It does not guard an outbound flow -- nothing
+  // reaches jira.lan without a browser prompt naming `https://jira.lan/*`, and the
+  // genuinely dangerous targets (cloud metadata, link-local) are a HARD REFUSAL in
+  // JiraInstance.parse. It guards the SENTENCE "that host is private", on the
+  // screen where the user decides to arm. The direction of failure is one-way: a
+  // suffix added here can only ever produce more warnings.
+  const kindsFor = (raw) => {
+    const instance = g.JiraInstance.parse(raw);
+    assert.equal(instance.ok, true, `${raw} should parse`);
+    return g.ShortcutWarning.forInstance(instance.value).map((w) => w.kind);
+  };
+
+  // Walked from the real list, never a second copy of it: a duplicated catalogue
+  // is what drifts.
+  for (const suffix of g.ShortcutWarning.INTERNAL_SUFFIXES) {
+    const host = `https://jira${suffix}`;
+    assert.ok(kindsFor(host).includes("INTERNAL_HOST"), `${host} is not reported as internal`);
+  }
+
+  // The ranges, including the two that had been left out: 0.0.0.0/8 and TEST-NET-1.
+  for (const host of ["https://10.1.2.3", "https://192.168.1.1", "https://172.16.0.1",
+                      "https://100.64.0.1", "https://127.0.0.1", "https://0.1.2.3",
+                      "https://192.0.2.5"]) {
+    const kinds = kindsFor(host);
+    assert.ok(kinds.includes("INTERNAL_HOST"), `${host} is not reported as internal`);
+    assert.ok(kinds.includes("LITERAL_IP"), `${host} is not reported as a literal IP`);
+  }
+
+  // A bare name, and the loopback in brackets.
+  assert.ok(kindsFor("https://jira").includes("INTERNAL_HOST"));
+  assert.ok(kindsFor("https://[::1]").includes("INTERNAL_HOST"));
+
+  // And a public host stays unwarned, or the control would cry on every profile.
+  assert.deepEqual(kindsFor("https://example.atlassian.net"), []);
+
+  // Every warning blocks arming until it is acknowledged -- which is what makes
+  // the sentence above worth anything.
+  const ID = "11111111-1111-1111-1111-111111111111";
+  let policy = g.JumpPolicy.empty().withEngines(["google.com"]).value;
+  policy = policy.register(ID, g.ProjectKey.parse("ABC").value,
+    g.JiraInstance.parse("https://jira.lan").value).value;
+  assert.equal(policy.armShortcut(ID).code, "UNACKNOWLEDGED_WARNING",
+    "an internal host must be acknowledged before the shortcut can arm");
+});

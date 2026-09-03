@@ -104,10 +104,16 @@
     },
 
     /**
-     * The one place that builds a drag handle. The THIRD reviewed exit of this
-     * file, after downloadFile and link -- `draggable` stays OUT of the whitelist
-     * above for the same reason `href` does: a single reviewed exit rather than a
-     * widened rule.
+     * The one place that builds a drag handle. The SECOND reviewed exit of this
+     * file, after downloadFile -- `draggable` stays OUT of the whitelist above for
+     * the same reason `href` does: a single reviewed exit rather than a widened
+     * rule.
+     *
+     * It said THIRD, "after downloadFile and link". There is no `Dom.link` and
+     * there never was: the only external link in the project is written literally
+     * in options.html, outside this file. A comment that invokes a door nobody
+     * built sends the next reader looking for it -- the same fault rule-set.js
+     * names about an assertion cited before it existed.
      *
      * Three things this buys that a whitelist entry cannot:
      *

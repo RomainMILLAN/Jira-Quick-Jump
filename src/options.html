@@ -25,7 +25,15 @@
   </div>
 
   <footer class="site-foot">
-    <a class="signature" href="https://romainmillan.fr/"
+    <!-- The one external link of the extension, and it is written HERE rather than
+         through Dom.el on purpose: `href`, `target` and `rel` are all absent from
+         that file's attribute allow-list, so a link cannot be built from script.
+
+         No `target`, so there is no `window.opener` to hand over — this navigates
+         the options tab itself. `rel` is nonetheless explicit: the day someone
+         wants it to open in a new tab, `noopener noreferrer` is already there
+         instead of being the thing that was forgotten. -->
+    <a class="signature" href="https://romainmillan.fr/" rel="noopener noreferrer"
        aria-label="Romain MILLAN — Web Developer — romainmillan.fr">
       <!-- Vendored from github.com/RomainMILLAN/Romain-MILLAN-Tag@208bf7b00a446b6a5ea25281c3e48967f28ddfd8 (MIT).
            Frozen manual copy: resync by hand if upstream changes. -->

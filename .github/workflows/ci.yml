@@ -47,6 +47,23 @@ jobs:
       - name: Tests
         run: npm test
 
+      # WHAT SHIPS, AND ONLY WHAT SHIPS. `--omit=dev` is the whole point: the
+      # extension has NO runtime dependency (a test asserts pkg.dependencies is
+      # empty), so this gate is expected to stay at zero for ever, and it goes red
+      # the day something reaches users' machines.
+      #
+      # THE FULL TREE IS DELIBERATELY NOT GATED, and the reason is named rather
+      # than suppressed: addons-linter pulls `image-size`, which carries
+      # GHSA-w3rx-r6r6-pgpr and GHSA-5p2g-fcmc-qvqq -- infinite loops in the ICNS,
+      # JXL and HEIF parsers. `npm audit fix --force` would downgrade web-ext to
+      # 5.5.0, which is worse. Reachable only through `npm run lint` below, which
+      # parses THIS repository's own icons, so the blast radius is "this CI job
+      # hangs" and never "a user is affected"; the release workflow does not lint.
+      # Dependabot is the fix path (weekly, grouped, 7-day cooldown) and this
+      # comment is the exception, in the open.
+      - name: Audit what actually ships
+        run: npm audit --audit-level=high --omit=dev
+
       - name: Lint (addons-linter on the Firefox variant)
         run: npm run lint
 
