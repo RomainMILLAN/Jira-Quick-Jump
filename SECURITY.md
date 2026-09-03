@@ -98,12 +98,19 @@ trade rather than leave stale rules firing under a badge that says `off`.
 - **A custom search domain is bounded at 40 characters, and that bound is an RE2
   budget rather than tidiness.** The margin above pays for an engine envelope the
   measurement never covered, and a user-typed domain spends it: the worst case was
-  never Google. `Re2Budget.forEnvelope()` exists for exactly this and still has no
-  caller — `rule-installer.js` hands every engine the same conservative budget — so
-  the bound lives on the input, where it is checkable by eye. What it costs if it is
-  ever wrong is sound but silent: `isRegexSupported` refuses a guard, its unit falls
-  with it, and that engine's catch-all is not installed. Nothing leaks, because a
-  catch-all can never outlive its guards; the failure is availability, per engine.
+  never Google. So the reserved-prefix guards are now cut **once per engine**,
+  against that engine's own envelope: a costlier domain gets more and smaller runs
+  instead of shipping Google's runs inside its own rule. The four engines that ship
+  are byte-identical under the new arithmetic — their envelopes sit at or below the
+  one the budget was measured on — and a test pins that.
+- **An engine that cannot be guarded costs only itself.** Past a point an envelope
+  leaves nothing to spend, and that is refused by name: the engine loses its
+  catch-all, the other engines keep theirs, and the status line reports an
+  unsatisfied coverage. It used to be a global `INSTALL_FAILED` — one unusable
+  domain and nothing installed at all. Nothing leaks either way, because a
+  catch-all can never outlive its guards; the cost is availability, per engine.
+  A domain long enough to reach that point is also refused at the door it is typed
+  at, which is the only place a sentence can still help.
 - **A key-scoped acknowledgement never travels.** Accepting a catch-all's warning
   is recorded in local storage, outside the configuration, so a compromised sync
   account cannot accept a universal redirect on your behalf. The limit, stated:

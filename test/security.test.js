@@ -82,7 +82,7 @@ test("a forged storage entry produces no rule at all", () => {
   // and `rules.length` is then its ARITY -- zero -- so the assertion was green whatever
   // the forge produced, in the very test claiming a quarantined hostile entry installs
   // nothing.
-  const set = g.RuleFactory.buildRules(restored.policy, g.SearchEngineCatalog, g.Re2Budget.conservative());
+  const set = g.RuleFactory.buildRules(restored.policy, g.SearchEngineCatalog, () => g.Re2Budget.conservative());
   assert.equal(set.rules().length, 0);
 });
 
@@ -242,7 +242,7 @@ test("a forged storage entry cannot pre-acknowledge a catch-all, so it produces 
   const shortcut = restored.policy.shortcuts()[0];
   assert.equal(shortcut.consent().acknowledged("CATCH_ALL"), false, "the acknowledgement did not travel");
   assert.equal(restored.policy.activeBindings().length, 0, "an unacknowledged catch-all installs nothing");
-  const { rules } = { rules: g.RuleFactory.buildRules(restored.policy, g.SearchEngineCatalog, g.Re2Budget.conservative()).rules() };
+  const { rules } = { rules: g.RuleFactory.buildRules(restored.policy, g.SearchEngineCatalog, () => g.Re2Budget.conservative()).rules() };
   assert.deepEqual(rules, []);
 });
 

@@ -21,11 +21,20 @@
   // debugging stays readable. Rules are replaced wholesale on every sync, so the
   // ids are free.
   //
-  // THE BAND MATTERS FOUR TIMES MORE SINCE THE GUARD WAS CUT. Bindings run
-  // 1..MAX_BINDINGS (300), because binding.ruleId() is _ruleIndex + 1; guards now
-  // number engines x runs -- at most 24 x 4 = 96 -- so they occupy [1001, 1256].
-  // No overlap, and RuleSet asserts that all ids are distinct, which covers the
-  // monotonic counter that nothing else keeps inside its band.
+  // THE BAND MATTERS MORE SINCE THE CUT BECAME PER ENGINE, and the arithmetic is
+  // no longer a small product. Bindings run 1..MAX_BINDINGS (300), because
+  // binding.ruleId() is _ruleIndex + 1. Guards number the SUM over engines of that
+  // engine's runs, and an engine with a long envelope gets more, smaller runs --
+  // so the count is no longer `engines x 4`. The bound: at most 24 engines (4
+  // built-in plus MAX_CUSTOM_ENGINES) and, in the degenerate case where a budget
+  // pays for one word at a time, 49 runs each -- 1176 guards, occupying
+  // [1001, 2177]. Still no overlap with the binding band, and RuleSet asserts that
+  // all ids are distinct, which covers the monotonic counter that nothing else
+  // keeps inside its band.
+  //
+  // The DNR dynamic-rule ceiling is what the total is really measured against:
+  // 300 + 1176 stays well under it, and an engine whose budget cannot pay for a
+  // single word drops out entirely (see the cut below) rather than growing this.
   const RESERVED_RULE_ID_BASE = 1001;
 
   const condition = (regexFilter) => ({
@@ -47,7 +56,7 @@
   });
 
   const RuleFactory = {
-    buildRules(policy, catalog, budget) {
+    buildRules(policy, catalog, budgetFor) {
       const units = [];
       const skipped = [];
       // ONE source of truth for "is there an active catch-all". policy
@@ -127,19 +136,60 @@
       }
 
       // Only where a catch-all is actually active: without one, these would kill
-      // a shortcut legitimately named API for nothing. The guards are cut ONCE --
-      // the runs do not depend on the engine, only the envelope does.
-      const guards = catchAll
-        ? ReferencePattern.reservedPrefixGuards(catchAll.key, budget)
-        : [];
+      // a shortcut legitimately named API for nothing.
+      //
+      // ONE CUT PER ENGINE, and that is the whole of this change.
+      //
+      // The guards used to be cut ONCE, with the note "the runs do not depend on
+      // the engine, only the envelope does" -- which is true and was the reason to
+      // cut per engine, not the reason not to. Every engine got Google's budget,
+      // so a custom domain with a longer envelope shipped runs sized for somebody
+      // else's rule: measured, a 39-character domain produced guards of 143
+      // characters where the last measured-good point is 70, and Chrome refused
+      // them. The catch-all then fell with its unit -- silently, per engine, on the
+      // one configuration nobody tests.
+      //
+      // Cut per engine, that domain gets more and smaller runs instead. The four
+      // built-in engines are UNCHANGED: their envelopes are 54 to 56 against a
+      // calibration of 56, so the excess floors at zero and the cut is identical
+      // to the one that ships. Pinned by a test, because "this changes nothing for
+      // what exists" is exactly the claim a refactor must not merely assert.
       let nextGuardId = RESERVED_RULE_ID_BASE;
+      const refusedEngines = new Set();
       for (const [engineId, unit] of catchAll ? catchAll.units : []) {
         const engine = catalog.find(engineId);
         if (!engine) continue;
+        let guards;
+        try {
+          guards = ReferencePattern.reservedPrefixGuards(catchAll.key, budgetFor(engine));
+        } catch (error) {
+          // PER ENGINE, NOT GLOBAL -- and this is the second half of the change.
+          //
+          // A refusal used to leave buildRules entirely, which rule-installer
+          // turns into INSTALL_FAILED: one long domain name and NOTHING installed,
+          // not even the named shortcuts on the other engines. Now the engine that
+          // cannot be guarded loses ITS catch-all and says why, which is the same
+          // graceful-per-engine degradation this file already promises for a regex
+          // the platform refuses.
+          //
+          // THE CATCH-ALL GOES WITH THE GUARDS IT NO LONGER HAS. Leaving the
+          // redirect rule in place would put an unguarded catch-all on that
+          // engine, and RuleSet.assertGuardsCover would throw -- correctly, because
+          // that is the outbound flow the guards exist to stop. Emptying the unit
+          // is what keeps the invariant true rather than merely checked.
+          //
+          // Only a NAMED refusal is absorbed. Anything else is a bug in our own
+          // arithmetic and must stay loud.
+          if (!(error instanceof global.Re2Budget.Refusal)) throw error;
+          skipped.push(global.NotInstalled.of("CONSTRUCTION_REFUSED", error.reason));
+          unit.length = 0;
+          refusedEngines.add(engineId);
+          continue;
+        }
         // The catch-all of THIS engine and its guards form one unit: none can be
-        // installed without the others. THE UNIT IS NOW FIVE RULES INSTEAD OF TWO,
-        // so a single over-budget run kills the catch-all OF THAT ENGINE -- still
-        // graceful per engine, but the per-engine chance of falling quadruples.
+        // installed without the others. The unit is the catch-all plus that
+        // engine's runs, so a single over-budget run kills the catch-all OF THAT
+        // ENGINE -- graceful per engine, and now sized per engine too.
         unit.push(...guards.map((guard) => ({
           id: nextGuardId++,
           priority: RuleRanking.forReservedPrefixes(),
@@ -162,10 +212,27 @@
       // THE CONTRACT COMES FROM THE DOMAIN, and the empty truck still gets a
       // docket: without empty(), a null catch-all would throw a TypeError on the
       // MAJORITY path -- every profile without a catch-all, on every sync.
+      // THE REFUSED ENGINE STAYS IN THE CONTRACT, deliberately: it WANTED a
+      // catch-all and did not get one, so coverageSatisfied() must come out false
+      // and the status line must say so. Removing it would make the coverage true
+      // by vacuity -- the set would satisfy a contract it had just been amputated
+      // to fit, which is the tautology rule-set.js spends a paragraph refusing.
+      //
+      // assertGuardsCover does not fire on it either, and for the right reason:
+      // `needing` is built from the catch-all rules PRESENT, and this engine no
+      // longer has one.
       const contract = catchAll
         ? new global.CoverageContract(catchAll.key.prefixesWithinReach(), [...catchAll.units.keys()])
         : global.CoverageContract.empty();
-      const set = RuleSet.sealed({ units, skipped, contract }).assertIdsAreDistinct();
+      // The emptied units LEAVE rather than being sealed empty: `units.flat()`
+      // would ignore them anyway, and a blister with nothing in it is not a
+      // blister. `refusedEngines` is READ here, so the emptying above cannot be
+      // mistaken for a leftover -- and the word is the vocabulary map's: a foreign
+      // system said no, with a code, which is a refusal and never a `dropped`.
+      const shipped = refusedEngines.size === 0
+        ? units
+        : units.filter((unit) => unit.length > 0);
+      const set = RuleSet.sealed({ units: shipped, skipped, contract }).assertIdsAreDistinct();
 
       // THE BAND POST-CONDITION, both ways, where the two facts still coexist.
       //

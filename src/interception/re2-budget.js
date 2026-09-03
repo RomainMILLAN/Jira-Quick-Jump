@@ -33,9 +33,17 @@
  *
  * Worst case is not Google either: a CUSTOM engine domain of sixty characters
  * adds sixty units and more to an envelope this scalar was calibrated against
- * Google for. The failure mode is sound -- isRegexSupported refuses, the whole
- * unit falls, nothing leaks -- but it is silent and per engine. It is also the
- * first real client of forEnvelope().
+ * Google for. That WAS the silent, per-engine failure -- isRegexSupported refuses,
+ * the whole unit falls, nothing leaks, and nobody is told which engine lost its
+ * catch-all.
+ *
+ * IT IS NO LONGER SILENT, AND NO LONGER MISSIZED. forEnvelope() has the caller
+ * this paragraph used to predict: rule-installer.js builds a provider on it and
+ * rule-factory cuts the guards ONCE PER ENGINE, against that engine's own
+ * envelope. A costlier envelope now buys more and smaller runs instead of shipping
+ * Google's runs inside somebody else's rule, and an envelope that leaves nothing
+ * to spend is refused BY NAME, costing that engine its catch-all rather than the
+ * whole install.
  */
 (function (global) {
   "use strict";
@@ -220,7 +228,7 @@
    * so that `if (engineId === "duckduckgo.com")` stays unwritable.
    *
    * IT REFUSES AN UNUSABLE BUDGET RATHER THAN MINTING ONE. Subtracting an
-   * envelope was unguarded, so the first real client the header names -- a custom
+   * envelope was unguarded, so the client the header used to predict -- a custom
    * domain of sixty-odd characters -- produced a budget of zero or less. The
    * cutter then threw RUN_OVER_BUDGET on the FIRST word, which rule-installer
    * turns into a global INSTALL_FAILED: one long domain name, and nothing
@@ -232,14 +240,71 @@
    * key plus its separator.
    */
   const CHEAPEST_WORD_COST = 3;
+
+  /**
+   * THE ENVELOPE THE 50 WAS CALIBRATED AGAINST, and subtracting it is the whole
+   * difference between a working per-engine budget and one that refuses Google.
+   *
+   * MEASURED, like its neighbours: it is the guard-form envelope of
+   * `google.com` + `search-q`, the engine the alternation measurements above were
+   * taken on -- `^https://(?:www\.)?google\.com/search\?(?:.*&)?q=(?:&|$)`, 56
+   * characters. A changelock in interception.test.js compares this number to what
+   * the catalogue actually emits, so the two cannot drift.
+   *
+   * WHY AN EXCESS AND NOT THE WHOLE ENVELOPE. The first version of forEnvelope did
+   * `MAX_ALTERNATION_COST - envelopeCost`. Measured, on this catalogue: Google's
+   * guard envelope is 56 and the budget is 50, so it returned MINUS SIX and threw
+   * ENVELOPE_OVER_BUDGET -- for google.com, the engine the number was measured on,
+   * which would have taken every catch-all on every engine down with it. The 50 is
+   * already NET of a Google-sized envelope; only what an engine costs BEYOND that
+   * is a new expense.
+   *
+   * THE UNIT CONVERSION IS AN ASSUMPTION, and it is the one thing here that is not
+   * measured: nothing relates a character of envelope to a unit of alternation
+   * cost. This charges one for one, which OVER-charges -- an envelope character is
+   * almost certainly cheaper to RE2 than an alternation branch. The direction is
+   * what makes that acceptable: over-charging yields MORE, SMALLER runs, hence
+   * cheaper regexes and MORE of them. It costs rule budget, never a refused rule.
+   * Under-charging would be the other way round, and would be a silent fail.
+   */
+  const CALIBRATION_ENVELOPE_COST = 56;
+
+  /**
+   * The per-engine budget, and it now HAS a caller: rule-installer.js hands
+   * rule-factory a provider built on this, and the guards are cut once per engine.
+   * The header's "the day the envelope stops being ignorable" is that day.
+   *
+   * IT REFUSES AN UNUSABLE BUDGET RATHER THAN MINTING ONE. A budget that cannot
+   * pay for a single shortest word -- a two-letter key plus its separator -- is
+   * not a tight budget, it is an arithmetic error, and it must be named where the
+   * arithmetic happens. Its caller drops THAT ENGINE'S catch-all and says why,
+   * instead of failing the whole build.
+   *
+   * THE KEY AXIS IS DELIBERATELY NOT SHORTENED, and that is a gap with a reason
+   * rather than an oversight. The header above promises a per-engine budget can
+   * answer BOTH axes, and the instance genuinely carries both -- but no
+   * measurement relates an envelope to a key-length ceiling, and inventing a ratio
+   * would put an unsourced number in the file whose whole discipline is that its
+   * numbers are measured. So the key axis keeps LONGEST_MEASURED_KEY, which is the
+   * measured value and does not vary. If it ever must shrink, the fix starts with
+   * isRegexSupported and a stopwatch, not with arithmetic here.
+   */
   Re2Budget.forEnvelope = (envelopeCost) => {
-    const remaining = MAX_ALTERNATION_COST - envelopeCost;
-    if (!Number.isFinite(remaining) || remaining < CHEAPEST_WORD_COST) {
+    if (!Number.isFinite(envelopeCost) || envelopeCost < 0) {
+      throw refusal("ENVELOPE_OVER_BUDGET", { envelopeCost });
+    }
+    // Floored at zero: an engine CHEAPER than the calibration one does not earn
+    // extra budget. bing.com and duckduckgo.com sit at 54, two under Google, and
+    // paying them back would spend margin the measurement never promised.
+    const excess = Math.max(0, envelopeCost - CALIBRATION_ENVELOPE_COST);
+    const remaining = MAX_ALTERNATION_COST - excess;
+    if (remaining < CHEAPEST_WORD_COST) {
       throw refusal("ENVELOPE_OVER_BUDGET", { envelopeCost });
     }
     return new Re2Budget(remaining, LONGEST_MEASURED_KEY);
   };
 
+  Re2Budget.CALIBRATION_ENVELOPE_COST = CALIBRATION_ENVELOPE_COST;
   Re2Budget.CHEAPEST_WORD_COST = CHEAPEST_WORD_COST;
   Re2Budget.MAX_ALTERNATION_COST = MAX_ALTERNATION_COST;
   Re2Budget.LONGEST_MEASURED_KEY = LONGEST_MEASURED_KEY;

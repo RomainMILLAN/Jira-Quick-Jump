@@ -528,10 +528,11 @@ test("a wholly unreadable engine list leaves a repairable policy, not a throw", 
  *
  * re2-budget.js names the case in writing -- "a CUSTOM engine domain of sixty
  * characters adds sixty units and more to an envelope this scalar was calibrated
- * against Google for [...] It is also the first real client of forEnvelope()" --
- * and forEnvelope still has no caller: rule-installer.js hands every engine the
- * same conservative budget. So the bound lives on the INPUT, and it is pinned
- * against the budget rather than restated as a number.
+ * against Google for [...]". forEnvelope() now HAS that caller -- the guards are
+ * cut once per engine -- so this bound is no longer the only thing standing
+ * between a long domain and a refused rule. It is kept because it answers at the
+ * door the user is typing at, where a diagnostics panel cannot: see the paragraph
+ * in custom-engine.js. Pinned against the budget rather than restated as a number.
  */
 test("a custom domain cannot spend the whole alternation budget", () => {
   assert.ok(

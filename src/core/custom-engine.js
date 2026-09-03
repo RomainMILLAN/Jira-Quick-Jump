@@ -69,21 +69,27 @@
      * It was 100, and interception/re2-budget.js had already named the
      * consequence: "a CUSTOM engine domain of sixty characters adds sixty units
      * and more to an envelope this scalar was calibrated against Google for [...]
-     * It is also the first real client of forEnvelope()." That client was never
-     * written -- rule-installer.js still hands every engine the same
-     * Re2Budget.conservative() -- so the whole margin was spent by a field a user
-     * can type.
+     * It is also the first real client of forEnvelope()." That client now EXISTS:
+     * rule-installer.js builds a per-engine provider and the guards are cut once
+     * per engine.
      *
      * What that costs, precisely: isRegexSupported refuses a reserved-prefix
      * guard, its unit falls with it, and the catch-all of THAT engine is not
      * installed. Sound (RuleSet's per-unit atomicity means a catch-all can never
      * outlive its guards, so nothing leaks) but silent and per engine.
      *
-     * Narrowing the INPUT is the honest fix while forEnvelope has no caller: a
-     * bound is checkable by eye, where a per-engine budget is a Strategy that has
-     * to be threaded through RuleFactory -- which cuts the guards ONCE for every
-     * engine, precisely because they do not depend on it. The day that changes,
-     * re2-budget.js says what to do and this number goes back up.
+     * SO WHY KEEP THE BOUND AT ALL, now that the budget is per engine? Because the
+     * two answer different questions, and only one of them can be answered while
+     * the user is typing. The per-engine budget makes a long domain WORK -- more,
+     * smaller runs -- and, past a point, makes it FAIL BY NAME rather than through
+     * an opaque REGEX_UNSUPPORTED. This bound is what keeps a domain from reaching
+     * that point at all: it is refused at the door the user is standing at, with a
+     * sentence they can act on, instead of being accepted and then explaining
+     * itself in a diagnostics panel.
+     *
+     * Measured, on this catalogue: at 40 the costliest parseable host produces an
+     * envelope that exhausts the budget, so the two bounds meet almost exactly --
+     * which is the argument for keeping both rather than for choosing one.
      *
      * Forty is not a guess about RE2, it is a fact about search engines: the
      * longest this build ships is `duckduckgo.com`, fourteen characters. Forty

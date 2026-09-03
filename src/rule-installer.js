@@ -215,7 +215,18 @@
         // Re2Budget.forEnvelope() that has to reach the factory. Letting the
         // factory pick its own measurement would leave that Strategy without a
         // path.
-        const set = RuleFactory.buildRules(policy, catalog, Re2Budget.conservative());
+        // THE STRATEGY, NAMED HERE. The header above promised that "the day the
+        // envelope stops being ignorable it is Re2Budget.forEnvelope() that has to
+        // reach the factory": this is that day, and this line is that path. The
+        // installer still picks the measurement -- the factory only asks -- so
+        // "letting the factory pick its own measurement" stays impossible.
+        //
+        // A PROVIDER, not a budget: the guards are cut per engine because the
+        // envelope is the engine's, and one Re2Budget cannot answer for two
+        // envelopes. A refusal for one engine is caught in the factory and costs
+        // that engine its catch-all, not the whole install.
+        const budgetFor = (engine) => Re2Budget.forEnvelope(engine.guardEnvelopeCost());
+        const set = RuleFactory.buildRules(policy, catalog, budgetFor);
         // The awaits happen HERE, and the atomicity decision is a synchronous
         // property of the set: a value object must not need a platform fake to be
         // tested.

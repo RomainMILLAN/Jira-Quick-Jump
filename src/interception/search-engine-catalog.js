@@ -113,6 +113,29 @@
       },
 
       /**
+       * WHAT THIS ENGINE'S GUARD WRAPPER COSTS, in the units re2-budget spends.
+       *
+       * The engine owns it because the engine owns searchUrlPattern -- and it is
+       * DERIVED by calling that very function with an empty fragment, never
+       * restated as a number. The two therefore cannot drift: add a segment to the
+       * emitted pattern and this grows by itself.
+       *
+       * THE GUARD FORM, not the redirect form. Only the guards are cut into runs
+       * against an alternation budget, so only their envelope competes with one.
+       * `exactParameter: false` is what the guards actually ship (see
+       * searchUrlPattern below), and the difference is not cosmetic: the strict
+       * prefix costs some thirty characters more.
+       *
+       * The fixed overhead ReferencePattern adds around the alternation --
+       * `(?:`, `)`, the separator, `\d+` -- is NOT counted here. It is identical
+       * for every engine, so it is already inside the calibrated budget; counting
+       * it would charge every engine twice for the same characters.
+       */
+      guardEnvelopeCost() {
+        return this.searchUrlPattern("", { exactParameter: false }).length;
+      },
+
+      /**
        * `exactParameter` DECIDES HOW STRICT THE QUERY PREFIX IS, and the two
        * answers are not a matter of taste -- they are the two directions of failure.
        *

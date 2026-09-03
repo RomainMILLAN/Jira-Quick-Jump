@@ -21,8 +21,14 @@ const policy = (() => {
  * that simulates a different programme from the installed one is a stage set.
  */
 // The budget is passed EXPLICITLY: buildRules RECEIVES it rather than picking its
-// own measurement, so a test declares the measurement it exercises -- and the day
-// a per-engine budget arrives, Re2Budget.forEnvelope() has a path in.
+// own measurement, so a test declares the measurement it exercises. The per-engine
+// budget has ARRIVED, so the third argument is now a PROVIDER -- it answers "what
+// may THIS engine spend", not "what may anyone spend", because the guards are cut
+// once per engine against that engine's envelope.
+//
+// FLAT HERE, on purpose: these cases are about the shape of the emitted set, and a
+// flat provider keeps them reading as they did. The per-engine arithmetic has its
+// own cases further down, where the engine is the subject rather than the fixture.
 //
 // TWO COUNTERS, TWO TYPES -- the split this file's header used to promise for "the
 // next batch". The criterion is a question, not a line number: DOES THIS ARGUMENT
@@ -36,9 +42,9 @@ const policy = (() => {
 // separates a RuleSet from an array; it does NOT separate a labelled array from a
 // stripped one, which is why delivered() is DEFINED BY labelled(): it then has no
 // shape of its own to police, and the PLATFORM tooth below already guards it.
-const budget = () => g.Re2Budget.conservative();
+const flatBudget = () => g.Re2Budget.conservative();
 const labelled = (p, catalog = g.SearchEngineCatalog) =>
-  g.RuleFactory.buildRules(p, catalog, budget());
+  g.RuleFactory.buildRules(p, catalog, flatBudget);
 const delivered = (p, catalog = g.SearchEngineCatalog) =>
   labelled(p, catalog).platformRules();
 
@@ -102,7 +108,7 @@ test("every rule is main_frame only, and never uses excludedResourceTypes", () =
 
 test("an unknown engine id is reported rather than crashing or being skipped in silence", () => {
   const withGhost = policy.withEngines(["google.com", "ghost"]).value;
-  const set = g.RuleFactory.buildRules(withGhost, g.SearchEngineCatalog, budget());
+  const set = g.RuleFactory.buildRules(withGhost, g.SearchEngineCatalog, flatBudget);
   assert.equal(set.rules().length, 1);
   assert.deepEqual(set.skipped().map((s) => s.code), ["UNKNOWN_ENGINE"]);
 });
@@ -694,16 +700,42 @@ test("an envelope that leaves nothing to spend is refused where the arithmetic h
   // names -- a custom domain of sixty-odd characters -- produced a budget of zero
   // or less. The cutter then threw on the FIRST word, which rule-installer turns
   // into a global INSTALL_FAILED: one long domain name, and nothing installs.
+  //
+  // THE INPUT IS AN ABSOLUTE ENVELOPE, and it is measured from the CALIBRATION one.
+  // This assertion used to pass MAX_ALTERNATION_COST, back when forEnvelope
+  // subtracted the whole envelope -- an arithmetic that returned MINUS SIX for
+  // google.com, whose own envelope is 56 against a budget of 50. So the exhausting
+  // input is now the calibration envelope PLUS the whole budget: past that, nothing
+  // is left for even the cheapest word.
+  const exhausting = g.Re2Budget.CALIBRATION_ENVELOPE_COST + g.Re2Budget.MAX_ALTERNATION_COST;
   assert.throws(
-    () => g.Re2Budget.forEnvelope(g.Re2Budget.MAX_ALTERNATION_COST),
+    () => g.Re2Budget.forEnvelope(exhausting),
     (error) => error instanceof g.Re2Budget.Refusal
       && error.reason === g.Re2Budget.REASONS.ENVELOPE_OVER_BUDGET
   );
-  assert.throws(() => g.Re2Budget.forEnvelope(g.Re2Budget.MAX_ALTERNATION_COST + 100));
+  assert.throws(() => g.Re2Budget.forEnvelope(exhausting + 100));
+  // Nonsense is refused through the same door rather than minting a budget.
+  assert.throws(() => g.Re2Budget.forEnvelope(Number.NaN));
+  assert.throws(() => g.Re2Budget.forEnvelope(-1));
 
   // And a usable one still comes back usable.
   const budget = g.Re2Budget.forEnvelope(10);
   assert.equal(budget.affordsAlternation(["ABC"]), true);
+
+  // THE FLOOR AT ZERO, and it is what keeps the calibration engine whole: an
+  // envelope at or below the calibration one earns exactly the measured budget,
+  // never more. Without the floor, bing.com at 54 would be handed 52 -- margin the
+  // measurement never promised.
+  for (const cost of [0, 10, g.Re2Budget.CALIBRATION_ENVELOPE_COST]) {
+    assert.equal(
+      g.Re2Budget.forEnvelope(cost).costOfAlternation(["A"]) >= 0
+        && g.Re2Budget.forEnvelope(cost).affordsAlternation(
+             g.CatchAllKey.only().prefixesWithinReach().slice(0, 11)),
+      g.Re2Budget.conservative().affordsAlternation(
+        g.CatchAllKey.only().prefixesWithinReach().slice(0, 11)),
+      `an envelope of ${cost} must spend exactly the measured budget, never more`
+    );
+  }
 });
 
 test("the domain proposes a key length and the foreign system gets to answer, in production", () => {
@@ -792,7 +824,7 @@ test("two rules can never share an id, and the assertion that says so exists", (
   // And a real programme passes it, which is what makes the guard honest.
   const policy = withCatchAll();
   assert.ok(g.RuleFactory.buildRules(policy, g.SearchEngineCatalog.forPolicy(policy),
-    g.Re2Budget.conservative()).rules().length > 0);
+    flatBudget).rules().length > 0);
 });
 
 test("a sealed rule set cannot be rewritten under its readers", () => {
@@ -801,7 +833,7 @@ test("a sealed rule set cannot be rewritten under its readers", () => {
   // write on a value object whose whole contract is that it cannot change.
   const policy = withCatchAll();
   const set = g.RuleFactory.buildRules(policy, g.SearchEngineCatalog.forPolicy(policy),
-    g.Re2Budget.conservative());
+    flatBudget);
   const rule = set.rules()[0];
   const before = rule.condition.regexFilter;
   try { rule.condition.regexFilter = ".*"; } catch { /* strict mode throws, also fine */ }
@@ -996,7 +1028,7 @@ test("a built-in ticked twice resolves once, and the catch-all survives it", () 
   assert.equal(catalog.find(custom.value.id()).hostPattern,
     catalog.find("google.com").hostPattern, "and it resolves to the very same entry");
 
-  const set = g.RuleFactory.buildRules(p, catalog, g.Re2Budget.conservative());
+  const set = g.RuleFactory.buildRules(p, catalog, flatBudget);
   assert.deepEqual(set.skipped(), [],
     "a duplicate is not a refusal -- nothing is lost, so nothing is reported");
   assert.equal(set.coverageSatisfied(), true,
@@ -1048,4 +1080,192 @@ test("guards pay no strictness they cannot use, and stay well inside the budget"
       `a guard of ${emitted.length} characters ships: Chrome refused at roughly 150, ` +
       `and a refused guard takes the catch-all down with its unit`);
   }
+});
+
+/**
+ * THE FOUR BUILT-IN ENGINES EMIT EXACTLY WHAT THEY EMITTED BEFORE.
+ *
+ * This is the load-bearing test of the per-engine budget, and it is the one whose
+ * absence would make the change unreviewable. Cutting the guards per engine is a
+ * change to the arithmetic that decides how many rules ship and what is in them;
+ * the claim that it leaves the shipped catalogue untouched is exactly the kind of
+ * claim a refactor asserts in a commit message and never checks.
+ *
+ * It holds because the calibration is honest: Google's guard envelope is 56 and
+ * MAX_ALTERNATION_COST was measured against it, so the excess floors at zero for
+ * every built-in (54 to 56) and each of them is handed the measured budget itself.
+ *
+ * COMPARED ON THE PLATFORM PAYLOAD, not on the labelled set: platformRules() is
+ * what actually reaches DNR, so an equality there is an equality about what the
+ * browser receives -- ids, priorities, regexes and substitutions included.
+ */
+test("the per-engine budget changes nothing for the engines that ship", () => {
+  const engines = ["google.com", "google.fr", "bing.com", "duckduckgo.com"];
+  const policy = withCatchAll(engines);
+  const catalog = g.SearchEngineCatalog.forPolicy(policy);
+
+  const perEngine = (engine) => g.Re2Budget.forEnvelope(engine.guardEnvelopeCost());
+  const withProvider = g.RuleFactory.buildRules(policy, catalog, perEngine).platformRules();
+  const withFlat = g.RuleFactory.buildRules(policy, catalog, flatBudget).platformRules();
+
+  assert.ok(withFlat.length > engines.length, "precondition: the fixture emits a real set");
+  assert.deepEqual(withProvider, withFlat,
+    "a per-engine cut must be byte-identical on the engines the budget was measured on");
+
+  // And the reason it holds, asserted rather than trusted: no built-in exceeds the
+  // calibration envelope, so none of them pays an excess.
+  for (const engine of catalog.all()) {
+    assert.ok(engine.guardEnvelopeCost() <= g.Re2Budget.CALIBRATION_ENVELOPE_COST,
+      `${engine.id} would pay an excess: envelope ${engine.guardEnvelopeCost()}`);
+  }
+});
+
+/**
+ * THE CALIBRATION CONSTANT IS WHAT THE CATALOGUE ACTUALLY EMITS.
+ *
+ * re2-budget.js may not know the engines -- that is its own rule -- so the number
+ * it holds is a measurement written by hand, and a hand-written measurement about
+ * another file's output is a drift waiting to happen. Add a segment to
+ * searchUrlPattern and every engine silently starts paying an excess it does not
+ * owe, or stops paying one it does.
+ *
+ * The changelock the comment in re2-budget.js promises. This is it.
+ */
+test("the calibration envelope is google.com's, and the two cannot drift", () => {
+  const google = g.SearchEngineCatalog.find("google.com");
+  assert.equal(
+    google.guardEnvelopeCost(),
+    g.Re2Budget.CALIBRATION_ENVELOPE_COST,
+    "Re2Budget.CALIBRATION_ENVELOPE_COST no longer matches the engine it was measured on"
+  );
+  // Derived, never restated: the cost IS the length of the emitted wrapper.
+  assert.equal(
+    google.guardEnvelopeCost(),
+    google.searchUrlPattern("", { exactParameter: false }).length
+  );
+  // The guard form, not the redirect form. They differ by some thirty characters,
+  // and charging the guards for the strict prefix they do not carry would refuse
+  // budget nobody spends.
+  assert.ok(
+    google.searchUrlPattern("", { exactParameter: true }).length > google.guardEnvelopeCost(),
+    "the two forms must stay distinguishable, or this constant means nothing"
+  );
+});
+
+/**
+ * A LONGER ENVELOPE BUYS MORE, SMALLER RUNS -- which is the bug F-03 named.
+ *
+ * Measured before this change: a 39-character custom domain shipped Google's five
+ * runs inside its own 86-character envelope, giving guards of 143 characters where
+ * the last measured-good alternation cost is 70. Chrome refused them, the unit fell,
+ * and the catch-all went with it -- silently, per engine.
+ *
+ * The property is not "twelve runs": that number would break the day a prefix is
+ * added. It is that a costlier envelope gets MORE runs, and that every run stays
+ * inside the budget its own engine was given.
+ */
+test("a custom domain with a longer envelope gets more and smaller guard runs", () => {
+  const engine = g.CustomEngine.parse({ host: `${"a".repeat(27)}.example.org`, shape: "search-q" });
+  assert.equal(engine.ok, true, "precondition: the domain parses");
+
+  let policy = withCatchAll(["google.com"]);
+  policy = policy.withCustomEngine(engine.value).value;
+  policy = policy.withEngines(["google.com", engine.value.id()]).value;
+  const catalog = g.SearchEngineCatalog.forPolicy(policy);
+
+  const google = catalog.find("google.com");
+  const custom = catalog.find(engine.value.id());
+  assert.ok(custom.guardEnvelopeCost() > google.guardEnvelopeCost(),
+    "precondition: the custom domain really is the costlier envelope");
+
+  const set = g.RuleFactory.buildRules(policy, catalog,
+    (e) => g.Re2Budget.forEnvelope(e.guardEnvelopeCost()));
+  const allows = set.rules().filter((r) => r.action.type === "allow");
+  const runsOn = (id) => allows.filter((r) => r.engineId === id).length;
+
+  assert.ok(runsOn(custom.id) > runsOn(google.id),
+    `the costlier envelope must be cut finer: ${runsOn(custom.id)} vs ${runsOn(google.id)}`);
+
+  // EVERY RUN INSIDE ITS OWN ENGINE'S BUDGET. This is what the old single cut
+  // could not say: the runs were sized for an envelope that was not theirs.
+  for (const engineId of [google.id, custom.id]) {
+    const budget = g.Re2Budget.forEnvelope(catalog.find(engineId).guardEnvelopeCost());
+    for (const allow of allows.filter((r) => r.engineId === engineId)) {
+      assert.ok(budget.affordsAlternation(allow.guardedPrefixes),
+        `${engineId} ships a run of cost ${budget.costOfAlternation(allow.guardedPrefixes)} ` +
+        `it cannot pay for`);
+    }
+  }
+
+  // And the catch-all is still guarded on BOTH engines, prefix by prefix -- the
+  // invariant the finer cut must not buy its way out of.
+  assert.equal(set.coverageSatisfied(), true, "both engines kept their catch-all");
+  for (const engineId of [google.id, custom.id]) {
+    const covered = new Set(
+      allows.filter((r) => r.engineId === engineId).flatMap((r) => r.guardedPrefixes));
+    for (const word of g.CatchAllKey.only().prefixesWithinReach()) {
+      assert.ok(covered.has(word), `${engineId} leaves ${word} unguarded`);
+    }
+  }
+});
+
+/**
+ * AN ENGINE WHOSE ENVELOPE EXHAUSTS THE BUDGET COSTS ONLY ITSELF.
+ *
+ * The other half of the change, and the half that used to be a global failure: a
+ * refusal left buildRules entirely, and rule-installer turns that into
+ * INSTALL_FAILED -- one unusable domain and NOTHING installs, not even the named
+ * shortcuts on the other engines.
+ *
+ * The host below is a real one the parser accepts, at the length cap: nineteen
+ * single-character labels. Escaping each dot pushes the envelope to 104 against a
+ * budget of 50 over a calibration of 56, so there is nothing left for even the
+ * cheapest word -- and that is refused where the arithmetic happens, by name.
+ */
+test("an engine that cannot be guarded loses its own catch-all, and only its own", () => {
+  const host = `${"a.".repeat(19)}ab`;
+  const engine = g.CustomEngine.parse({ host, shape: "search-q" });
+  assert.equal(engine.ok, true, `precondition: ${host} must parse, got ${engine.code}`);
+
+  let policy = withCatchAll(["google.com"]);
+  policy = policy.withCustomEngine(engine.value).value;
+  policy = policy.withEngines(["google.com", engine.value.id()]).value;
+  const catalog = g.SearchEngineCatalog.forPolicy(policy);
+  const custom = catalog.find(engine.value.id());
+
+  // The precondition is the refusal itself: if the arithmetic ever stops refusing
+  // this envelope, the test below would pass for the wrong reason.
+  assert.throws(
+    () => g.Re2Budget.forEnvelope(custom.guardEnvelopeCost()),
+    (error) => error.reason === g.Re2Budget.REASONS.ENVELOPE_OVER_BUDGET,
+    "precondition: this envelope must exhaust the budget"
+  );
+
+  const set = g.RuleFactory.buildRules(policy, catalog,
+    (e) => g.Re2Budget.forEnvelope(e.guardEnvelopeCost()));
+  const rules = set.rules();
+
+  // GOOGLE IS UNTOUCHED: its catch-all, its guards, and the named shortcuts.
+  assert.ok(rules.some((r) => r.isCatchAll && r.engineId === "google.com"),
+    "the healthy engine keeps its catch-all");
+  assert.ok(rules.some((r) => r.action.type === "allow" && r.engineId === "google.com"),
+    "and its guards");
+  assert.ok(rules.some((r) => !r.isCatchAll && r.action.type === "redirect"),
+    "and the named shortcuts still ship");
+
+  // THE REFUSED ENGINE HAS NO CATCH-ALL AND NO GUARDS. Half of that pair would be
+  // the outbound flow the guards exist to stop.
+  assert.equal(rules.some((r) => r.isCatchAll && r.engineId === custom.id), false,
+    "the refused engine must not keep an unguarded catch-all");
+  assert.equal(rules.some((r) => r.action.type === "allow" && r.engineId === custom.id), false,
+    "nor orphaned guards");
+
+  // AND IT IS SAID. A refusal nobody can read is the silent failure F-03 named.
+  const causes = set.skipped();
+  assert.ok(causes.some((c) => c.subject === g.Re2Budget.REASONS.ENVELOPE_OVER_BUDGET),
+    `the named cause must reach the receipt, got ${JSON.stringify(causes)}`);
+  // The user asked for a catch-all on that engine and did not get one, so the
+  // status line must be able to say so rather than reporting a satisfied coverage.
+  assert.equal(set.coverageSatisfied(), false,
+    "coverage must NOT be satisfied by vacuity: the engine wanted a catch-all");
 });
