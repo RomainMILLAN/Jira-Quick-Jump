@@ -15,7 +15,7 @@
       // READ ONCE, BEFORE any compare-and-set. _restore is synchronous and runs
       // inside a replayed mutate closure, so it can never await this itself.
       const acknowledgements = await global.KeyAcknowledgements.read();
-      // THE REVISION TRAVELS. It was dropped here, so reconcile received a
+      // THE REVISION TRAVELS. It was refused here, so reconcile received a
       // waterline it could only rewrite, never compare against -- which is why
       // `loggedRev` was decorative and every ordinary edit produced a duplicate
       // fact labelled UNKNOWN, the code reserved for compromise.
@@ -45,7 +45,7 @@
     // had no attributes. An empty Acknowledgements says what the file already
     // says: absent means not attested.
     _restore(value, acknowledgements = global.KeyAcknowledgements.Acknowledgements.admitting(undefined)) {
-      if (value === undefined) return { ok: true, stored: StoredPolicy.empty(), dropped: [], unreadable: [] };
+      if (value === undefined) return { ok: true, stored: StoredPolicy.empty(), refused: [], unreadable: [] };
       const restored = JumpPolicy.restore(value.policy === undefined ? value : value.policy);
       if (!restored.ok) return restored;
       const merged = this._merge(restored.policy, acknowledgements);
@@ -74,7 +74,7 @@
         stored: shadows.size === 0
           ? folder
           : new StoredPolicy(merged, quarantine.filter((raw) => !(raw && shadows.has(raw.id)))),
-        dropped: restored.dropped,
+        refused: restored.refused,
         // Document-scoped facts, carried separately from refused entries. They
         // have no reader on screen yet; that is named dette, not an oversight --
         // see the arming-state note in admission.js.
@@ -185,6 +185,32 @@
       }
 
       await Platform.setStorageArea(target);
+
+      /**
+       * AND THE WORKER IS WOKEN AFTER THE SWITCH, not only before it.
+       *
+       * The copy above fires storage.onChanged, which wakes sync() -- but at that
+       * instant `storageArea` still names the OLD area, so sync() reloads from the
+       * area we are leaving and reinstalls its rules. The switch that follows
+       * changes nothing anyone is listening to: the `storageArea` key is watched by
+       * no one (the listener below filters on ENTRY alone, deliberately, because it
+       * must not care which area an entry came from).
+       *
+       * A second write to the SAME bytes would fire nothing -- storage.onChanged is
+       * byte-driven -- so the revision climbs instead. That is a touch, not a
+       * change: the value is the one we just wrote.
+       *
+       * The gain is bounded and honest: without it the window closes at the next
+       * ordinary edit anyway, and the stale rules are the user's OWN previous ones.
+       * Nothing an adversary chooses.
+       */
+      try {
+        const settled = await VersionedEntry.read(to, ENTRY);
+        await VersionedEntry.put(to, ENTRY, settled.value, settled.rev + 1);
+      } catch {
+        // A touch we cannot land leaves the area switched and the rules stale until
+        // the next edit -- the pre-existing behaviour, never worse.
+      }
 
       // BOTH DIRECTIONS ARE CLEANED. Only sync -> local removed the source, so
       // migrating INTO sync left a full copy of the host names in local -- the

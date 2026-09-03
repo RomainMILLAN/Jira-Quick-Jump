@@ -652,9 +652,18 @@ input.f[aria-invalid="true"] {
   font-size: 10.5px;
   color: var(--faint);
 }
+/* THROUGH THE CONTAINER WE OWN, never through the vendored component's internals.
+   This used to name `.rm-tag-logo-circle`, a private class: an upstream resync
+   renames it and the motion preference stops being honoured WITHOUT ANYTHING GOING
+   RED. The component publishes --rm-tag-* variables but none for animation, so the
+   honest anchor is `.signature`, which is ours. */
 @media (prefers-reduced-motion: reduce) {
-  .signature .rm-tag-logo:hover .rm-tag-logo-circle {
-    animation: none;
+  .signature,
+  .signature *,
+  .signature *::before,
+  .signature *::after {
+    animation: none !important;
+    transition: none !important;
   }
 }
 
@@ -687,7 +696,10 @@ input.f[aria-invalid="true"] {
 .is-compact .sections {
   padding: 0 16px 14px;
   overflow-y: auto;
-  max-height: 470px;
+  /* The popup's own ceiling minus its header, rather than a number chosen by eye.
+     Chrome caps an extension popup at 600px; --popup-chrome is what the heading
+     and padding take above this scroller. Change either and the other follows. */
+  max-height: calc(var(--popup-max, 600px) - var(--popup-chrome, 130px));
 }
 .is-compact .section {
   padding: 15px 0;

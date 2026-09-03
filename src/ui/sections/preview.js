@@ -13,18 +13,6 @@
   const { PREVIEW_MISS, SKIPPED_SENTENCE } = global.SectionSentences;
 
   const Preview = {
-    /**
-     * Nothing to blank: this section paints no verdict of its own, so a condemned
-     * page leaves it stale rather than lying. DECLARED rather than absent, because
-     * an optional protocol member is a presence test -- the null this repository
-     * bans everywhere else -- and structure.test.js pins that all eight declare it.
-     */
-    blank() {
-    },
-    reconcile() {
-      /* No optimistic state to give up: this section writes through ctx.apply and
-         never holds a pending order of its own. */
-    },
 
     mount(root, ctx) {
       root.appendChild(label(
@@ -43,11 +31,6 @@
       root.appendChild(this.why);
     },
 
-    render() {
-      /* Stateless: the preview only reflects what is typed into it. Every gesture
-         receives its ctx, so nothing is stored -- the field that used to be kept
-         here had no reader at all. */
-    },
 
     async preview(ctx) {
       // A THROW HERE MUST NOT BE SILENT. This handler is called from onInput, so its

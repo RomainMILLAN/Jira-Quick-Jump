@@ -112,8 +112,19 @@ So the extension shows you the destination everywhere else:
 
 That the destination you configured is really your Jira. That part is yours.
 
-**This extension never needs access to all sites.** If a prompt ever asks for it,
-refuse it and open an issue.
+**This extension never needs access to all sites** — but its manifest has to *ask*
+for the shape `http://*/*, https://*/*`, and both stores show that at install time
+as "read and change your data on all websites".
+
+The two are not in conflict, and the difference is worth knowing:
+
+- The manifest lists a **ceiling on what may ever be requested**. MV3 has no way to
+  say "whichever host the user types later", so the widest shape is declared once.
+- What is ever actually **granted** is computed per destination, by name, from your
+  own shortcuts. The Access section lists exactly those origins, in full.
+
+So the prompt you see when you grant access names your host and nothing else. If a
+prompt ever asks for **all sites**, refuse it and open an issue.
 
 ## Limitations
 

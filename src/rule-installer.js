@@ -433,10 +433,12 @@
       return {
         // The DISCRIMINANT, always present.
         source,
-        // The aggregate root travels, licit because immutable -- but the derogation
-        // is named: the day a setter appears, this field becomes a handle on live
-        // state.
-        policy,
+        // NO `policy` HERE ANY MORE. The aggregate root used to travel out to the
+        // page, under a named derogation ("licit because immutable -- the day a
+        // setter appears, this field becomes a handle on live state"). Measured:
+        // NOTHING read it. Every section takes its policy from ctx.stored(), so the
+        // derogation protected a risk taken for nobody. A receipt carries FACTS,
+        // never the root.
         applied,
         // The rules AS INSTALLED, so the preview simulates the delivered
         // programme rather than the intended one -- and so the badge and the

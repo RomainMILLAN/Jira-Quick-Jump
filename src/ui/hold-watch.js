@@ -40,12 +40,14 @@
 
     /** The section whose subtree this node belongs to, if any. */
     sectionAt(node) {
-      return this._sections.find((section) => section.root && section.root.contains(node));
+      return this._sections.find((section) => section.root() && section.root().contains(node));
     }
 
     /** Is this section held -- by a pointer, a drag, or a caret inside it? */
     holding(section) {
-      return Boolean(section.root) && (section === this._held || this.editing(section.root));
+      // ASKED, not read. The host used to graft `root` onto the section object;
+      // it now lives on the Section wrapper, which answers root() instead.
+      return Boolean(section.root()) && (section === this._held || this.editing(section.root()));
     }
 
     /** Is the caret inside this subtree? */

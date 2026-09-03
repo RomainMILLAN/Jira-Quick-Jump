@@ -96,18 +96,18 @@
   };
 
 
-  /** Custom domains go through parse like everything else, and a bad one is dropped. */
-  const admitCustomEngines = (raws, policy, dropped) => {
+  /** Custom domains go through parse like everything else, and a bad one is refused. */
+  const admitCustomEngines = (raws, policy, refused) => {
     let result = policy;
     for (const raw of raws) {
       const engine = global.CustomEngine.parse(raw);
       if (!engine.ok) {
-        dropped.push({ entry: raw, code: engine.code, message: engine.message });
+        refused.push({ entry: raw, code: engine.code, message: engine.message });
         continue;
       }
       const added = result.withCustomEngine(engine.value);
       if (added.ok) result = added.value;
-      else dropped.push({ entry: raw, code: added.code, message: added.message });
+      else refused.push({ entry: raw, code: added.code, message: added.message });
     }
     return result;
   };
@@ -234,12 +234,12 @@
     // reach the absent branch.
     // A DOCUMENT-SCOPED FACT, and it travels in its own list.
     //
-    // It first went into `dropped`, and that was wrong twice. `dropped` is the
+    // It first went into `refused`, and that was wrong twice. `refused` is the
     // register of REFUSED ENTRIES -- one entry, one reason -- so this fact had to
     // forge `entry: { armed }`, a pseudo-shortcut that was never an entry: when a
     // fact must borrow a foreign identity to fit a list, the list is the wrong
     // one. And it lied on screen: the import surface renders "Some entries were
-    // refused" on `dropped.length > 0`, so a file carrying `armed: "yes"` -- a
+    // refused" on `refused.length > 0`, so a file carrying `armed: "yes"` -- a
     // field that door does not even read -- announced refusals that never
     // happened, on the one surface the whole batch says must be believed.
     const unreadable = [];
@@ -292,9 +292,9 @@
    */
   const admitAll = (document, policy, door) => {
     const quarantine = [];
-    const dropped = [];
+    const refused = [];
     const admittedIds = [];
-    let admitted = admitCustomEngines(document.customEngines, policy, dropped);
+    let admitted = admitCustomEngines(document.customEngines, policy, refused);
 
     // `rejectEntry`, NEVER `refuse`: the module already has a `refuse(code,
     // message)` with a different arity and a different meaning, and shadowing it
@@ -303,7 +303,7 @@
     // not confusing two doors.
     const rejectEntry = (entry, code, message) => {
       if (door.quarantines) quarantine.push(entry);
-      dropped.push({ entry, code, message });
+      refused.push({ entry, code, message });
     };
 
     for (const entry of document.shortcuts) {
@@ -337,14 +337,14 @@
     }
 
     assertAdmittedInDocumentOrder(admitted, admittedIds);
-    return { policy: admitted, quarantine, dropped };
+    return { policy: admitted, quarantine, refused };
   };
 
   /**
    * Storage door. Always yields a policy plus whatever could not be re-read.
    *
    * QUARANTINE, NEVER DESTRUCTION: an entry we refuse is MOVED aside, not
-   * dropped. Otherwise the first apply -- ticking an engine, arming a shortcut --
+   * refused. Otherwise the first apply -- ticking an engine, arming a shortcut --
    * would rewrite storage from an amputated policy and erase, permanently, a
    * configuration the user created. That path opens on the FIRST UPGRADE, when a
    * hardened validator rejects entries that were legitimate before, and it hits
@@ -371,7 +371,7 @@
       ok: true,
       policy: walked.policy,
       quarantine: walked.quarantine,
-      dropped: walked.dropped,
+      refused: walked.refused,
       // Document-scoped facts, carried apart from refused entries.
       unreadable: document.value.unreadable,
     };
@@ -413,7 +413,7 @@
     // it never consults `armed`. Refusing to believe a field one was not going to
     // read is a refusal without an object -- and it would render as "some entries
     // were refused" over an import where none were.
-    return { ok: true, policy: walked.policy, dropped: walked.dropped };
+    return { ok: true, policy: walked.policy, refused: walked.refused };
   };
 
   ShortcutAdmission.MAX_CUSTOM_ENGINES = MAX_CUSTOM_ENGINES;

@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { loadCore } from "./load-core.js";
 import * as IDENTITIES from "./fixtures/identities.js";
+import { installedAndCovered, without } from "./fixtures/facts.js";
 
 const g = await loadCore();
 // The identifiers live in one file now: the same UUID was spelled in five,
@@ -108,7 +109,7 @@ test("diagnose says why nothing works, in a fixed order of priority", () => {
   // THE TWO FACTS OF INSTALLED REALITY ARE DECLARED, never defaulted: diagnose() no
   // longer supplies them, because an absent fact is not a true one. This literal
   // serves FIVE assertions -- correcting it here repairs five sites.
-  const granted = { originsGranted: true, installed: true, coverageSatisfied: true };
+  const granted = installedAndCovered();
   assert.equal(g.JumpPolicy.empty().disarm().diagnose(granted), "DISARMED");
   assert.equal(g.JumpPolicy.empty().diagnose(granted), "NO_SHORTCUTS");
   let policy = g.JumpPolicy.empty().register(ID, key("ABC"), instance("https://example.atlassian.net")).value;
@@ -118,7 +119,7 @@ test("diagnose says why nothing works, in a fixed order of priority", () => {
   policy = policy.armShortcut(ID).value;
   // The rank-11 PARTIAL_POLICY, on a POPULATED policy. The other entry, conditioned on
   // an empty registry, is the one admission.test.js interrogates -- two ranks, one code.
-  assert.equal(policy.diagnose({ originsGranted: true, quarantinedCount: 2, installed: true, coverageSatisfied: true }), "PARTIAL_POLICY");
+  assert.equal(policy.diagnose(installedAndCovered({ quarantinedCount: 2 })), "PARTIAL_POLICY");
   // The two reality facts, but originsGranted stays FALSE -- supplying it true here
   // would test something else entirely.
   assert.equal(policy.diagnose({ originsGranted: false, installed: true, coverageSatisfied: true }), "MISSING_ORIGINS");
@@ -145,7 +146,7 @@ test("an ABSENT fact of installed reality is neither true nor a failure", () => 
   // Link 1, both sides. "Bare facts" names two different things: one answers
   // MISSING_ORIGINS today, the other answered READY.
   assert.equal(p.diagnose({}), "INSTALL_STATE_UNKNOWN", "absent is IGNORANCE, not failure");
-  assert.equal(p.diagnose({ originsGranted: true, quarantinedCount: 0 }), "INSTALL_STATE_UNKNOWN");
+  assert.equal(p.diagnose(without(installedAndCovered(), "installed", "coverageSatisfied")), "INSTALL_STATE_UNKNOWN");
   assert.equal(p.diagnose({ originsGranted: true, installed: false }), "INSTALL_FAILED",
                "and a LEARNED no still outranks everything");
   // typeof, not === undefined: null, "false" and 0 would fall through to READY, and
@@ -212,7 +213,7 @@ test("both UNKNOWN ranks are pinned, or the guards become ornaments", () => {
   // AND THE SYMMETRIC ONE, which pins the DECISION: a blank profile stays SILENT.
   // 0/0/0 with the fact absent must not shout on a browser that has never been
   // configured.
-  assert.equal(g.JumpPolicy.empty().diagnose({ originsGranted: true, quarantinedCount: 0 }),
+  assert.equal(g.JumpPolicy.empty().diagnose(without(installedAndCovered(), "installed", "coverageSatisfied")),
                "NO_SHORTCUTS", "an untouched profile has nothing to lose");
 
   // Rank 10: ABOVE MISSING_ORIGINS. Slid below it, the wantsCatchAll() guard becomes
@@ -462,7 +463,47 @@ test("a wholesale replacement collapses into a single fact rather than evicting 
   }
   const facts = g.PolicyDiff.between(before, after);
   assert.equal(facts.length, 1);
-  assert.deepEqual(facts[0], { type: "PolicyReplaced", changedCount: 8 });
+  // THE KINDS SURVIVE THE COLLAPSE. Without them, making more noise made the alarm
+  // less specific -- so the adversary's optimal move was to be louder, and the
+  // control's gradient ran backwards. Fact types are a closed vocabulary this
+  // repository writes, so carrying them hands the attacker no word (which is
+  // exactly why the engine IDS stay out, two dozen lines up in policy-diff.js).
+  assert.deepEqual(facts[0], {
+    type: "PolicyReplaced",
+    changedCount: 8,
+    kinds: ["DestinationChanged"],
+  });
+});
+
+/**
+ * MOVING SIX DESTINATIONS MUST NOT BE QUIETER THAN MOVING ONE.
+ *
+ * The behavioural half of the changelock above: past MAX_FACTS_PER_COMMIT the diff
+ * collapses, and what the banner can still say must not fall to "8 things changed".
+ */
+test("a louder attack does not become a vaguer alarm", () => {
+  const instance = (url) => g.JiraInstance.parse(url).value;
+  let before = g.JumpPolicy.empty().withEngines(["google.com"]).value;
+  for (let i = 0; i < 8; i += 1) {
+    before = before.register(`id-${i}`, g.ProjectKey.parse("K" + i + "0").value, instance("https://jira.example.org")).value;
+  }
+
+  // One destination moved: the fact names the old and the new host.
+  const one = g.PolicyDiff.between(before, before.withBaseUrlFor("id-0", instance("https://elsewhere.example.org")).value);
+  assert.equal(one.length, 1);
+  assert.equal(one[0].type, "DestinationChanged");
+
+  // Six moved AND a key renamed: collapsed, but the KINDS are still there.
+  let noisy = before;
+  for (let i = 0; i < 6; i += 1) {
+    noisy = noisy.withBaseUrlFor(`id-${i}`, instance("https://elsewhere.example.org")).value;
+  }
+  noisy = noisy.withKeyFor("id-7", g.ProjectKey.parse("ZZZ").value).value;
+
+  const [collapsed] = g.PolicyDiff.between(before, noisy);
+  assert.equal(collapsed.type, "PolicyReplaced");
+  assert.deepEqual(collapsed.kinds, ["DestinationChanged", "KeyChanged"],
+    "the banner can still say WHICH kinds changed, sorted so it does not depend on diff order");
 });
 
 test("every mutation still returns the same shape, withOrder included, with events always present", () => {
@@ -1000,7 +1041,7 @@ test("an unknown coverage is only reachable where the receipt is silent", () => 
   let p = g.JumpPolicy.empty().withEngines(["google.com"]).value;
   p = p.register(ID, g.CatchAllKey.only(), g.JiraInstance.parse("https://j.example.org").value).value;
   p = p.acknowledge(ID, "CATCH_ALL").value.armShortcut(ID).value.arm();
-  const granted = { originsGranted: true, quarantinedCount: 0 };
+  const granted = without(installedAndCovered(), "installed", "coverageSatisfied");
 
   // 1. A failed install hides the coverage question entirely, either way.
   assert.equal(p.diagnose({ ...granted, installed: false, coverageSatisfied: false }),
@@ -1014,4 +1055,58 @@ test("an unknown coverage is only reachable where the receipt is silent", () => 
     "CATCH_ALL_NOT_INSTALLED", "a measured no");
   assert.equal(p.diagnose({ ...granted, installed: true }), "COVERAGE_STATE_UNKNOWN",
     "an absent field is the third term, and it is NOT the same sentence as a no");
+});
+
+/**
+ * SWAPPING AN ENGINE PRODUCES TWO FACTS, NOT ONE.
+ *
+ * A removal shrinks the interception surface, so its direction is reassuring and it
+ * used to produce nothing at all. But the surface is part of the destination -- this
+ * repository says so at the top of policy-diff.js -- and an adversary who removes
+ * the engine you watch and adds another performed TWO gestures while the journal
+ * recorded one.
+ */
+test("removing a search engine is a fact of its own", () => {
+  const before = g.JumpPolicy.empty().withEngines(["google.com", "bing.com"]).value;
+
+  const removed = g.PolicyDiff.between(before, before.withEngines(["google.com"]).value);
+  assert.deepEqual(removed, [{ type: "EnginesRemoved", engineCount: 1 }]);
+
+  // The swap: one out, one in. Two gestures, two facts.
+  const swapped = g.PolicyDiff.between(before, before.withEngines(["google.com", "duckduckgo.com"]).value);
+  assert.deepEqual(swapped.map((f) => f.type).sort(), ["EnginesAdded", "EnginesRemoved"],
+    "a swap that reported only the addition told half the story");
+
+  assert.deepEqual(g.PolicyDiff.between(before, before), [], "and an unchanged set says nothing");
+});
+
+/**
+ * A WARNING KIND IS THE PUBLISHED LANGUAGE OF A CONTEXT BOUNDARY.
+ *
+ * It is persisted -- one third of the row key an attestation is filed under -- and
+ * it crosses into the key-scoped consent context, where both sides agree on it
+ * through scopeOf. Two files used to validate it with a boolean and carry on with a
+ * bare string; an unknown kind then vanished inside a filter at the consent airlock.
+ *
+ * parse() gives it the repository's refusable shape, so the refusal has a CODE.
+ */
+test("an unknown warning kind is refused with a code, not filtered away", () => {
+  const known = g.ShortcutWarning.parse("CATCH_ALL");
+  assert.equal(known.ok, true);
+  assert.equal(known.value, "CATCH_ALL");
+  assert.equal(known.scope, "key", "and it says which side of the boundary it belongs to");
+
+  assert.equal(g.ShortcutWarning.parse("INSECURE_SCHEME").scope, "destination");
+
+  const future = g.ShortcutWarning.parse("A_KIND_FROM_A_LATER_BUILD");
+  assert.equal(future.ok, false);
+  assert.equal(future.code, "UNKNOWN_KIND");
+
+  assert.equal(g.ShortcutWarning.parse(undefined).code, "KIND_NOT_A_STRING");
+  assert.equal(g.ShortcutWarning.parse(42).code, "KIND_NOT_A_STRING");
+
+  // Every shipped kind parses -- otherwise the door refuses our own vocabulary.
+  for (const kind of g.ShortcutWarning.KINDS) {
+    assert.equal(g.ShortcutWarning.parse(kind).ok, true, `${kind} is shipped but unparseable`);
+  }
 });

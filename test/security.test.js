@@ -77,7 +77,7 @@ test("a forged storage entry produces no rule at all", () => {
   assert.equal(restored.ok, true);
   assert.equal(restored.policy.activeBindings().length, 0);
   assert.equal(restored.quarantine.length, 2, "both entries must be quarantined, not dropped");
-  assert.deepEqual(restored.dropped.map((d) => d.code), ["KEY_SHAPE", "BASE_SCHEME"]);
+  assert.deepEqual(restored.refused.map((d) => d.code), ["KEY_SHAPE", "BASE_SCHEME"]);
   // `.rules()`, NOT a destructured `rules`: `const { rules } = ...` binds the METHOD,
   // and `rules.length` is then its ARITY -- zero -- so the assertion was green whatever
   // the forge produced, in the very test claiming a quarantined hostile entry installs
@@ -378,4 +378,72 @@ test("a baseUrl carrying a backreference is refused, never emitted", () => {
     assert.equal(g.ReferencePattern.substitutionFor({ baseUrl: () => raw }, key), doubled,
       "a lone backslash must reach DNR doubled, or it escapes the character after it");
   }
+});
+
+/**
+ * THE AIRLOCK COUNTS WHAT IT COULD NOT CARRY.
+ *
+ * Key-scoped consent is a distinct bounded context -- local-only, because a control
+ * that travels by the channel it watches is worthless -- and `admitting` is its
+ * anticorruption layer. Two facts used to vanish there without a word: the 400-row
+ * ceiling, and an unknown `kind`, which disappeared DISGUISED AS A FILTER because
+ * `ShortcutWarning.scopeOf` returns `undefined` for anything it does not know.
+ *
+ * Both stay fail-safe -- a forgotten acknowledgement DISARMS, it never arms -- and
+ * neither is reachable by the sync channel. They are counted, not refused: refusing
+ * would un-acknowledge in the same breath.
+ */
+test("the consent airlock counts both of its silent losses", () => {
+  const overflowing = {};
+  for (let at = 0; at < 420; at += 1) overflowing[`row-${at}`] = ["CATCH_ALL"];
+  const spilled = g.KeyAcknowledgements.Acknowledgements.admitting(overflowing);
+  assert.equal(spilled.losses().overflowed, 20, "the rows past the ceiling are counted");
+  assert.equal(spilled.losses().unknownKinds, 0);
+
+  const future = g.KeyAcknowledgements.Acknowledgements.admitting({
+    "row-a": ["CATCH_ALL", "A_KIND_FROM_A_LATER_BUILD", "ANOTHER"],
+  });
+  assert.equal(future.losses().unknownKinds, 2,
+    "an unknown kind is counted, not swallowed by a filter");
+  assert.equal(future.losses().overflowed, 0);
+
+  const clean = g.KeyAcknowledgements.Acknowledgements.admitting({ "row-a": ["CATCH_ALL"] });
+  assert.deepEqual(clean.losses(), { overflowed: 0, unknownKinds: 0 },
+    "and an honest store loses nothing");
+});
+
+/**
+ * THE LIST THAT BOUNDS AN OUTBOUND FLOW MUST NOT SHRINK BY ACCIDENT.
+ *
+ * ReservedPrefix.ALL answers two questions that are not the same one:
+ * `neverClaimedByCatchAll` bounds what leaves for a Jira instance, while
+ * ProjectKey.collidesWithOrdinarySearches is a non-blocking warning and is the
+ * UNION of this list with the two-character rule. Removing a word for a UI reason
+ * used to widen the outbound flow in silence, because both read `has`.
+ *
+ * Only the security half gets a test that goes red when the list shrinks.
+ */
+test("the catch-all refuses every reserved prefix, and the list cannot quietly shrink", () => {
+  const star = g.CatchAllKey.only();
+  const words = g.ReservedPrefix.ALL;
+
+  assert.equal(words.length, 49, "the shipped count, pinned: a shrink is a widened flow");
+
+  for (const word of words) {
+    if (word.length > star.claimsKeysUpTo()) continue;
+    const key = g.ProjectKey.parse(word);
+    if (!key.ok) continue;
+    assert.equal(star.verdictFor(key.value), g.CatchAllKey.VERDICTS.RESERVED_PREFIX,
+      `${word} would be claimed by the catch-all and leave for the Jira instance`);
+  }
+
+  // The two questions are distinct, and T1 is the proof: it collides with ordinary
+  // searches (so the UI warns) but MUST be claimed (so it is not in the list).
+  assert.equal(g.ReservedPrefix.neverClaimedByCatchAll("T1"), false);
+  assert.equal(g.ProjectKey.parse("T1").value.collidesWithOrdinarySearches(), true,
+    "the polite half is the union, and it is a different question");
+
+  // And the catalogue answers its own length question rather than handing out ALL.
+  assert.deepEqual(g.ReservedPrefix.withinLength(3).filter((w) => w.length > 3), []);
+  assert.throws(() => g.ReservedPrefix.withinLength(0), /positive integer/);
 });

@@ -35,7 +35,9 @@
       if (!container || !held) return;
       for (const row of container.querySelectorAll(".row")) {
         if (row.getAttribute("data-id") !== held.rowId) continue;
-        for (const selector of [".btn", ".f", ".sw"]) {
+        // `.ack-box` joins the list: an acknowledgement checkbox is a control a
+        // keyboard user must reach, and it was the only one whose focus was lost.
+        for (const selector of [".btn", ".f", ".sw", ".ack-box"]) {
           for (const control of row.querySelectorAll(selector)) {
             if (control.getAttribute("data-field") === held.field) {
               control.focus();

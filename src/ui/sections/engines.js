@@ -11,18 +11,6 @@
   const { el, t, label, toggle, icon } = global.SectionParts;
 
   const Engines = {
-    /**
-     * Nothing to blank: this section paints no verdict of its own, so a condemned
-     * page leaves it stale rather than lying. DECLARED rather than absent, because
-     * an optional protocol member is a presence test -- the null this repository
-     * bans everywhere else -- and structure.test.js pins that all eight declare it.
-     */
-    blank() {
-    },
-    reconcile() {
-      /* No optimistic state to give up: this section writes through ctx.apply and
-         never holds a pending order of its own. */
-    },
 
     adding: false,
 

@@ -62,6 +62,7 @@ const ORDER = [
   "ui/refusal-presentation.js",
   "ui/write-queue.js",
   "ui/hold-watch.js",
+  "ui/section.js",
   "ui/focus-memory.js",
   "ui/row-reorder.js",
 ];

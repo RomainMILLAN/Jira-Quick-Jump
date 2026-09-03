@@ -13,17 +13,12 @@
   const { FACT_SENTENCE } = global.SectionSentences;
 
   const Status = {
-    reconcile() {
-      /* No optimistic state to give up: this section writes through ctx.apply and
-         never holds a pending order of its own. */
-    },
 
     mount(root, ctx) {
       this.node = el("div", { class: "status" });
       this.banner = el("div", { class: "alert", hidden: true });
       root.appendChild(this.banner);
       root.appendChild(this.node);
-      this.ctx = ctx;
     },
 
     /**

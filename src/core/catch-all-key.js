@@ -114,7 +114,10 @@
       }
       const written = projectKey.toString();
       if (written.length > this.claimsKeysUpTo()) return VERDICTS.OUT_OF_REACH;
-      if (global.ReservedPrefix.has(written)) return VERDICTS.RESERVED_PREFIX;
+      // THE SECURITY QUESTION, by its own name. Reading `has` here made this
+      // refusal and the options page's polite warning look like one rule; removing
+      // a word for a UI reason would silently widen an outbound flow.
+      if (global.ReservedPrefix.neverClaimedByCatchAll(written)) return VERDICTS.RESERVED_PREFIX;
       return VERDICTS.CLAIMED;
     }
 
@@ -141,7 +144,7 @@
      * prevented.
      */
     prefixesWithinReach() {
-      return global.ReservedPrefix.ALL.filter((word) => word.length <= this.claimsKeysUpTo());
+      return global.ReservedPrefix.withinLength(this.claimsKeysUpTo());
     }
 
     /**

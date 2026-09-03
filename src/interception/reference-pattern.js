@@ -211,14 +211,16 @@
       // metacharacter check on SHIPPED words, at the validator's full length; the
       // emitted key fragment is a CLAIM, at the key's length. Two neighbouring
       // bounds in a file that forbids bound drift, so the roles are named.
-      const shaped = new RegExp("^" + global.ProjectKey.CASE_INSENSITIVE_SHAPE + "$");
+      // ASKED, not compiled here. The airlock used to take the core's regex
+      // fragment and wrap it itself, which put RE2 notation in the domain's
+      // exports and anchoring in the airlock's hands.
       for (const word of words) {
         // THIS throw is not the one that was removed, and it guards TWO things:
         // metacharacter injection -- "NODE.JS" would make the dot a WILDCARD in a
         // priority 2 allow, silently killing legitimate jumps -- AND the
         // termination of the cut, since a key-shaped word costs at most 21 < 60,
         // so no single word can ever exceed the budget.
-        if (!shaped.test(word)) throw refusal("PREFIX_NOT_KEY_SHAPED", { word });
+        if (!global.ProjectKey.isShapedLikeAKey(word)) throw refusal("PREFIX_NOT_KEY_SHAPED", { word });
       }
 
       const guards = budget.cutIntoAffordableRuns(words).map((run) => {

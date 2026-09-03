@@ -28,6 +28,33 @@
 (function (global) {
   "use strict";
 
+  /**
+   * THE VOCABULARY OF WHAT WE DID NOT TAKE -- written once, here, because it used
+   * to have FIVE words for what turned out to be two questions.
+   *
+   * `refused`, `dropped`, `quarantine`, `skipped` and `unreadable` were spread over
+   * forty files, and that is precisely why a cause could travel from the worker to
+   * the page under three different names and be read by nobody at the far end.
+   *
+   * Two axes, and they do NOT exclude each other -- an entry can be refused AND put
+   * in quarantine:
+   *
+   *   WHO DECIDED          refused    the domain said no, with a code
+   *                        unreadable nobody could decide: the bytes made no sense
+   *   WHERE IT WENT        quarantine kept, repairable, shown to the user
+   *                        (nowhere)  the default: it is simply not in the policy
+   *
+   * `dropped` is gone as a synonym of `refused`. It survives in exactly two places,
+   * and in neither does it mean "the domain said no":
+   *   - `orderDropped`, a reordering ABANDONED because the list moved underneath;
+   *   - `skipUnitIncomplete`, a rule dropped WITH THE GROUP it belongs to.
+   *
+   * `skipped` is FROZEN, and not because it is the best word: it is a key written
+   * into storage.local by install-outcome.js and read back from receipts written by
+   * earlier builds. Renaming it would need a migration, and a migration for a word
+   * is not worth its risk. It means "not installed, and here is why".
+   */
+
   const MutationResult = {
     ok(value, events = []) {
       return { ok: true, value, events };

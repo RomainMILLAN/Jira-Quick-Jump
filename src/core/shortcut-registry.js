@@ -306,7 +306,8 @@
       if (!shortcut) return MutationResult.refused("UNKNOWN_SHORTCUT", "This shortcut no longer exists.");
       // An acknowledgement that acknowledges nothing because the string is
       // misspelled is a silent failure of a security control.
-      if (!global.ShortcutWarning.has(kind)) {
+      // PARSED, for the same reason consent.js parses it.
+      if (!global.ShortcutWarning.parse(kind).ok) {
         return MutationResult.refused("UNKNOWN_WARNING_KIND", `Unknown warning kind "${kind}".`);
       }
       return MutationResult.ok(this._with(id, shortcut.withConsent(shortcut.consent().acknowledging(kind))));

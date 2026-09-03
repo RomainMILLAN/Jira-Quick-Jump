@@ -89,8 +89,20 @@
    * and ShortcutRegistry already argues at length why `obj[key]` is unsafe there.
    */
   class Acknowledgements {
-    constructor(rows) {
+    /**
+     * `losses` is what the READING DOOR could not carry across the airlock, and it
+     * is ALWAYS an object -- never absent, so no caller writes a presence test.
+     * Every other constructor site is downstream of that door and loses nothing,
+     * hence the default.
+     */
+    constructor(rows, losses = { overflowed: 0, unknownKinds: 0 }) {
       this._rows = rows;
+      this._losses = losses;
+    }
+
+    /** WHAT THE SAS DROPPED, as one value. Zero on every path but the door. */
+    losses() {
+      return { overflowed: this._losses.overflowed, unknownKinds: this._losses.unknownKinds };
     }
 
     /**
@@ -113,21 +125,42 @@
      */
     static admitting(raw) {
       const rows = new Map();
+      // TWO LOSSES USED TO HAPPEN HERE WITHOUT A WORD, and this door is the
+      // anticorruption layer of a distinct bounded context -- key-scoped consent,
+      // local-only because a control that travels by the channel it watches is
+      // worthless. Losing facts AT the airlock is the airlock leaking.
+      //
+      // Both losses are FAIL-SAFE (a forgotten acknowledgement DISARMS, it never
+      // arms) and neither is reachable by this project's named adversary: the sync
+      // channel cannot write here. They are counted, not refused, because refusing
+      // would un-acknowledge in the same breath -- see the paragraph above.
+      let overflowed = 0;
+      let unknownKinds = 0;
       if (!raw || typeof raw !== "object" || Array.isArray(raw)) return new Acknowledgements(rows);
       for (const [key, kinds] of Object.entries(raw)) {
-        if (rows.size >= MAX_ENTRIES) break;
+        if (rows.size >= MAX_ENTRIES) { overflowed += 1; continue; }
         if (typeof key !== "string" || !Array.isArray(kinds)) continue;
-        const kept = kinds.filter(
-          (kind) => typeof kind === "string" && global.ShortcutWarning.scopeOf(kind) === "key"
-        );
+        const kept = [];
+        for (const kind of kinds) {
+          if (typeof kind !== "string") continue;
+          const scope = global.ShortcutWarning.scopeOf(kind);
+          // THE TWIN LEAK, and the more insidious of the two: an unknown kind --
+          // a future build, a tampered local store -- vanished disguised as a
+          // filter. `undefined` is the null this repository bans everywhere else.
+          if (scope === undefined) { unknownKinds += 1; continue; }
+          if (scope === "key") kept.push(kind);
+        }
         if (kept.length > 0) rows.set(key, [...new Set(kept)]);
       }
-      return new Acknowledgements(rows);
+      return new Acknowledgements(rows, { overflowed, unknownKinds });
     }
 
     /** The attestations a policy carries, as an Acknowledgements. */
     static attestedBy(policy) {
       const rows = new Map();
+      // NO COUNT HERE, on purpose: these kinds come from the policy this build
+      // just admitted, not from the store. An unknown one would be a bug in our
+      // own admission, not a fact to show the user.
       for (const shortcut of policy.shortcuts()) {
         const kinds = shortcut
           .consent()

@@ -346,7 +346,7 @@ test("read() reconstructs: a forged `rules` or `applied` cannot ride along", asy
 });
 
 test("the causes of a refusal survive the trip to the page", async () => {
-  // They were produced by the worker, returned by _install and dropped: every
+  // They were produced by the worker, returned by _install and refused: every
   // named reason in Re2Budget.REASONS existed only in a value nobody kept, while
   // the options page rendered `skipped.length` from an array it always built
   // empty. Six named causes for a counter that read zero.
@@ -716,4 +716,35 @@ test("a skipped cause is bounded in length at the customs post, from the front",
     "and clipped from the FRONT, so the origin survives -- a tail-clipped URL would " +
     "make jira.internal look like jira.internal.evil.example");
   assert.equal(cause.code, "RUN_OVER_BUDGET", "a short code passes through untouched");
+});
+
+/**
+ * A STALE DETECTOR BASELINE IS SAID, NOT SWALLOWED.
+ *
+ * `InstalledProjection.record` returns a MutationResult, and reconcile inspects its
+ * own writes twenty lines below -- this call did not. A QUOTA_EXCEEDED there leaves
+ * the comparison baseline stale in silence, and a stale baseline is what makes the
+ * detector cry on ordinary use: the next honest rename is compared against an old
+ * projection and reported as unattributed. That is the exact failure the waterline
+ * exists to prevent, so the asymmetry was unintentional, not a design.
+ *
+ * It is a MISSED update, never a lost one -- the next sync() records again from a
+ * fresh read -- so the fact is journalled rather than made fatal.
+ */
+test("a projection that cannot be refreshed leaves a fact behind", async () => {
+  await seedPolicy(armedCatchAll());
+  await bg.sync();
+
+  const before = (await g.DestinationJournal.read()).entries.length;
+  // TARGETED: the projection is the big entry, and the browser's quota is not
+  // all-or-nothing. Failing every write would also kill the journal we are
+  // looking for -- which would prove nothing.
+  store.failWritesTo("installedProjection");
+  await bg.sync();
+  store.failWritesTo(undefined);
+
+  const after = await g.DestinationJournal.read();
+  assert.ok(after.entries.length > before, "the failed refresh produced a fact");
+  assert.ok(after.entries.some((e) => e.type === "ProjectionStale"),
+    `no ProjectionStale among ${JSON.stringify(after.entries.map((e) => e.type))}`);
 });

@@ -82,36 +82,6 @@
     orderToShow(stored) {
       return this.order || stored.policy().orderedIds();
     },
-
-    /**
-     * ABANDONS A COMMAND THAT BECAME UNSATISFIABLE, AND SAYS SO.
-     *
-     * That is what this is -- a compensating action -- and the name explains its
-     * three constraints at once: it runs BEFORE the host's latch (the command
-     * leaves by a timer, not by the render, so a frozen view must not be able to
-     * strand it), it must SPEAK (a silent compensation is data loss for the user,
-     * in a product whose README says reordering IS a change of destination), and
-     * it must NOT redraw (it is not a view).
-     *
-     * Not "no DOM": it may write the live region, which sits outside the subtree
-     * render clears. And it announces CONSTANTS only -- routing storage text
-     * through a path the freeze hides from the tests would be the best place for a
-     * future injection.
-     *
-     * Idempotent: a second pass finds this.order already null and returns.
-     *
-     * The project has another `reconcile`, in background.js, which reconciles the
-     * INSTALLED RULES against the policy and produces facts. Different subject,
-     * same verb; the host calls this one generically on every section, so the name
-     * has to stay generic.
-     *
-     * Nothing to blank: this section paints no verdict of its own, so a condemned
-     * page leaves it stale rather than lying. DECLARED rather than absent, because
-     * an optional protocol member is a presence test -- the null this repository
-     * bans everywhere else -- and structure.test.js pins that all eight declare it.
-     */
-    blank() {
-    },
     reconcile(stored, ctx) {
       if (!this.order) return;
       const ids = stored.policy().orderedIds();
@@ -210,7 +180,7 @@
       // Dom.clear removes every node, so the focus falls to <body>. Only the
       // arrows were restored -- so a change arriving from the other surface while
       // the user was on the arm switch, the bin or an acknowledgement checkbox
-      // dropped them out of the list entirely, mid-task, with no way back but the
+      // refused them out of the list entirely, mid-task, with no way back but the
       // Tab key. The host already defers a repaint under a CARET; this is the same
       // rule for everything that is not a text field.
       const held = FocusMemory.capture(this.rows);
@@ -261,7 +231,11 @@
         "aria-disabled": existing !== undefined,
         "aria-describedby": existing ? "catch-all-exists" : undefined,
         onClick: () => {
-          if (policy.catchAllShortcut()) {
+          // THE DRAFTS COUNT TOO. This guard only asked the policy, so a second
+          // catch-all draft could always be opened: two rows, two nodes carrying
+          // id="catch-all-note", invalid HTML, and the second field's
+          // aria-describedby resolving to the FIRST note.
+          if (policy.catchAllShortcut() || this.drafts.some((d) => d.catchAll)) {
             this.announce(t("catchAllExists", "There can only be one catch-all."));
             return;
           }
@@ -406,9 +380,18 @@
           ...pending.map((warning) => el("label", { class: "ack" }, [
             el("input", {
               type: "checkbox",
+              // NAMED, so the focus survives the re-render. FocusMemory keys on
+              // data-field and the row's data-id; without a name it returned
+              // undefined and the focus fell back to <body> -- on the one control
+              // a keyboard user must tick to arm anything.
+              "data-field": `ack:${warning.kind}`,
+              class: "ack-box",
               onChange: () => ctx.applyToPolicy((p) => p.acknowledge(id, warning.kind)),
             }),
-            WARNING_MESSAGE()[warning.kind] || warning.message,
+            // NO FALLBACK TO THE CORE ANY MORE: the core no longer carries English.
+            // A missing sentence would print the kind, which is a developer-visible
+            // failure -- and a structure test makes it impossible to ship.
+            WARNING_MESSAGE()[warning.kind] || warning.kind,
           ])),
           // Two independent high-severity warnings whose COMPOSITION means
           // something neither says alone. A UI sentence, assembled from DOM nodes
@@ -552,17 +535,23 @@
       this.drafts = this.drafts.filter((d) => d !== draft);
     },
 
-    editKey(input, id, ctx) {
+    async editKey(input, id, ctx) {
       // ProjectKey.parse, deliberately: the typed field is NOT the storage door,
       // and the only door that turns a string into a catch-all key must stay out
       // of this file. A structure test greps for it literally, comments included.
       const parsed = ProjectKey.parse(input.value);
       input.setAttribute("aria-invalid", String(!parsed.ok));
       if (!parsed.ok) return;
-      ctx.applyToPolicy((policy) => policy.withKeyFor(id, parsed.value), `shortcut:${id}:key`);
+      // AND THE DOMAIN'S ANSWER TOO. The local parse says the shape is fine; only
+      // the aggregate knows about DUPLICATE_KEY or KEY_NATURE_IMMUTABLE. Throwing
+      // that away left aria-invalid="false" on the very field that was refused --
+      // the draft path already shows its refusal, this one lied.
+      const written = await ctx.applyToPolicy(
+        (policy) => policy.withKeyFor(id, parsed.value), `shortcut:${id}:key`);
+      if (written && !written.ok) input.setAttribute("aria-invalid", "true");
     },
 
-    editUrl(input, id, ctx) {
+    async editUrl(input, id, ctx) {
       const parsed = JiraInstance.parse(input.value);
       input.setAttribute("aria-invalid", String(!parsed.ok));
       if (!parsed.ok) return;

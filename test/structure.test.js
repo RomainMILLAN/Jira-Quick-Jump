@@ -763,30 +763,55 @@ test("the host removes every listener it adds", () => {
   );
 });
 
-test("every section declares its own reconcile, none is grafted by the host", () => {
-  // mutation-result.js: "a field that shows up only on some operations … would
-  // force every caller to write a presence test, which is the mistake". A signed
-  // empty body is an implementation; an empty body filled in by the neighbour is a
-  // patch -- and a typo would disable the compensation in silence.
-  const ui = sectionsSource();
-  // The list now names Section* constants across files, and a trailing comma
-  // makes `split(",")` count one phantom entry -- so the count comes from the
-  // names, not from the separators.
-  const listed = /OptionsSections = \[([^\]]*)\]/.exec(ui)[1]
-    .split(",")
-    .map((name) => name.trim())
-    .filter(Boolean).length;
-  const declared = (ui.match(/^\s{4}reconcile\(/gm) || []).length;
-  assert.equal(declared, listed, "as many reconcile() as there are sections");
-  assert.equal(/section\.reconcile\s*=/.test(read("src/ui/section-host.js")), false);
+/**
+ * THE LIFECYCLE MEMBER IS TOTAL -- measured ON THE OBJECT, not on the source text.
+ *
+ * This used to count `^\s{4}blank\(` and `^\s{4}reconcile\(` with a regex and
+ * compare the totals to the number of sections. It was a test of INDENTATION: a
+ * reformat broke it, and what it really protected -- that the host never writes
+ * `section.blank?.()`, i.e. a presence test -- was only its second assertion.
+ *
+ * Worse, it MANDATED the copy-paste it was meant to police: six sections carried an
+ * empty `blank(){}` and seven an empty `reconcile(){}`, word for word, because the
+ * count had to add up.
+ *
+ * ui/section.js supplies the neutral halves now, so a section declares only what it
+ * actually does. What must stay true is what this measures: every wrapped section
+ * answers both members, and the host calls them unconditionally.
+ */
+test("every wrapped section answers the whole lifecycle", async () => {
+  const { Section } = await import("../src/ui/section.js").then(() => ({ Section: globalThis.Section }));
+  assert.ok(Section, "ui/section.js must publish Section");
 
-  // THE SAME ARGUMENT FOR blank(), which the host loops over on a condemned page.
-  // Written `section.blank?.()` it would be an optional member, i.e. a presence
-  // test -- and this very pin is what settles the question for reconcile.
-  assert.equal((ui.match(/^\s{4}blank\(/gm) || []).length, listed,
-    "as many blank() as there are sections");
-  assert.equal(/section\.blank\?\./.test(read("src/ui/section-host.js")), false,
+  // A section that declares NOTHING but render/mount is still whole once wrapped.
+  const bare = new Section({ mount() {} });
+  for (const member of ["mount", "blank", "reconcile", "render", "fail", "hold", "root", "isDirty"]) {
+    assert.equal(typeof bare[member], "function", `Section must answer ${member}()`);
+  }
+  bare.blank();
+  bare.reconcile(undefined, undefined);
+  bare.fail(new Error("x"));
+  await bare.render(undefined, undefined);
+
+  // And the wrapper forwards to the section when it DOES declare them.
+  const calls = [];
+  const speaking = new Section({
+    mount() {},
+    blank() { calls.push("blank"); },
+    reconcile() { calls.push("reconcile"); },
+  });
+  speaking.blank();
+  speaking.reconcile(undefined, undefined);
+  assert.deepEqual(calls, ["blank", "reconcile"]);
+
+  // The host still calls them unconditionally -- no presence test came back.
+  const host = read("src/ui/section-host.js");
+  assert.equal(/section\.blank\?\./.test(host), false,
     "the host calls blank() unconditionally: the member is TOTAL, not optional");
+  assert.equal(/section\.reconcile\?\./.test(host), false);
+  // And it no longer grafts its own bookkeeping onto the section object.
+  assert.equal(/section\.(root|dirty)\s*=/.test(codeOf(host)), false,
+    "root and dirty belong to the wrapper, not to the section");
 });
 
 test("reconcile never redraws, and only ever speaks constants", () => {
@@ -970,6 +995,10 @@ test("every document that counts the reserved prefixes counts the same list", ()
     `SECURITY.md must say ${words.length}`);
   assert.ok(read("README.md").includes(`${words.length} in all`),
     `README.md must say ${words.length}`);
+  // PRIVACY.md was the one document left out of this pin, and it already carries
+  // the same wording -- so the assertion was a copy of its neighbour away.
+  assert.ok(read("PRIVACY.md").includes(`${words.length} in all`),
+    `PRIVACY.md must say ${words.length}`);
 
   // AND EVERY WORD MUST BE REACHABLE. A prefix longer than what the catch-all
   // claims is filtered out of the guards and protects nothing -- silently.
@@ -1275,4 +1304,111 @@ test("src holds nothing that must not ship", async () => {
     assert.ok(SHIPPABLE.has(ext),
       `${file} would be published to both stores. Move it out of src/, or add ${ext} to scripts/package-filter.mjs on purpose.`);
   }
+});
+
+/**
+ * EVERY WARNING KIND HAS A SENTENCE, AND THE CORE HAS NONE.
+ *
+ * shortcut-warning.js used to carry an English `message` beside each `kind` -- a
+ * dead copy of interface text no translator ever saw, kept in step with nothing.
+ * The core states a KIND and a SEVERITY; the interface owns the wording, exactly
+ * as RefusalPresentation already does for refusals.
+ *
+ * Removing the copy only works if the real table is total, so that is measured
+ * here rather than trusted.
+ */
+test("warning wording lives in the interface, and covers every kind", () => {
+  const core = read("src/core/shortcut-warning.js");
+  assert.equal(/\n\s*message:\s*"/.test(codeOf(core)), false,
+    "the core carries an English sentence again");
+
+  const kinds = [...codeOf(core).matchAll(/kind:\s*"([A-Z_]+)"/g)].map((m) => m[1]);
+  assert.ok(kinds.length >= 5, `only ${kinds.length} kinds found -- the scan broke`);
+
+  const sentences = read("src/ui/sections/sentences.js");
+  const table = sentences.slice(sentences.indexOf("const WARNING_MESSAGE"));
+  for (const kind of kinds) {
+    assert.ok(table.includes(`${kind}:`), `${kind} has no sentence in WARNING_MESSAGE`);
+  }
+});
+
+/**
+ * KEY-SCOPED CONSENT NEVER TRAVELS BY THE CHANNEL IT WATCHES.
+ *
+ * This is the whole reason that context is separate: an acknowledgement that
+ * replicated through sync could be granted on your behalf by a compromised browser
+ * account -- the named adversary of this project's threat model -- and the control
+ * would be worthless. PRIVACY.md promises it in prose, key-acknowledgements.js says
+ * "ALWAYS local" in a comment, and NOTHING went red if someone changed it.
+ *
+ * The frontier map calls this the one row with an empty control column. It is not
+ * empty any more.
+ */
+test("the consent store is local-only, and cannot quietly become synced", () => {
+  const body = codeOf(read("src/key-acknowledgements.js"));
+  assert.equal(/storage\.sync/.test(body), false,
+    "key-scoped consent reached storage.sync: a control that travels by the channel " +
+    "it watches is worthless");
+  assert.ok(/storage\.local/.test(body), "and it must still name the local area explicitly");
+
+  // Nor through the area-selecting facade, which is what the POLICY uses.
+  assert.equal(/Platform\.storageArea\b/.test(body), false,
+    "the consent store must not follow the policy's area: that facade is sync-capable");
+});
+
+/**
+ * THE PAGES READ THE RULES; THEY NEVER WRITE THEM.
+ *
+ * background.js calls itself "the SINGLE WRITER of the rules", and policy-repository
+ * leans on that claim -- but rule-installer.js is loaded by BOTH HTML surfaces, so
+ * `RuleInstaller.install()` and `.purge()` are reachable from any extension page.
+ * Nothing structural stood behind the sentence.
+ *
+ * The file cannot simply be dropped from the pages: they need report(), which is
+ * what paints the status line and the preview. So what is measured is the boundary
+ * that actually matters -- the UI READS, the worker WRITES.
+ */
+test("no UI file installs or purges rules", () => {
+  const writers = ["install", "purge"];
+  for (const file of srcFiles().filter((f) => f.startsWith("src/ui/"))) {
+    const body = codeOf(read(file));
+    for (const verb of writers) {
+      assert.equal(new RegExp(`RuleInstaller\\.${verb}\\s*\\(`).test(body), false,
+        `${file} calls RuleInstaller.${verb}() -- the worker is the single writer`);
+    }
+  }
+
+  // And the claim itself stays anchored to something measurable.
+  const worker = codeOf(read("src/background.js"));
+  assert.ok(/RuleInstaller\.(install|purge)\s*\(/.test(worker),
+    "background.js must be the one that actually writes, or this pin guards nothing");
+});
+
+/**
+ * `dropped` DOES NOT COME BACK AS A SYNONYM FOR `refused`.
+ *
+ * Five words used to name what we did not take, spread over forty files -- which is
+ * how a cause travelled from the worker to the page under three names and was read
+ * at neither end. mutation-result.js now states the map: two axes, `refused` for the
+ * verdict, `quarantine` for the destination, `unreadable` for "nobody could decide".
+ *
+ * Two uses of `dropped` survive on purpose, and neither means "the domain said no":
+ * a reordering abandoned because the list moved, and a rule dropped with its group.
+ * They are listed here so the pin stays honest instead of banning a word outright.
+ */
+test("the vocabulary of what we did not take stays at four words", () => {
+  const allowed = new Map([
+    ["src/ui/sections/shortcuts.js", 1],   // orderDropped: a reordering abandoned
+    ["src/ui/sections/sentences.js", 1],   // a rule dropped WITH its group
+  ]);
+  for (const file of srcFiles()) {
+    const body = codeOf(read(file));
+    const uses = (body.match(/\bdropped\b/gi) || []).length;
+    assert.equal(uses, allowed.get(file) || 0,
+      `${file} uses "dropped" ${uses} time(s): see the vocabulary map in ` +
+      `core/mutation-result.js -- the verdict is "refused"`);
+  }
+  // The map itself must still be there to be read.
+  assert.ok(read("src/core/mutation-result.js").includes("THE VOCABULARY OF WHAT WE DID NOT TAKE"),
+    "the map is what makes this pin explicable rather than arbitrary");
 });

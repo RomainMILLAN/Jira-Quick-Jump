@@ -75,17 +75,18 @@ test("Dom.clear empties a node completely", async () => {
   });
 });
 
-test("Dom.setValue leaves an unchanged field alone, so the caret survives", async () => {
-  await withDocument(async () => {
-    await loadUi();
-    const input = g.Dom.el("input", { value: "ABC" });
-    const before = input.valueWrites;
-    g.Dom.setValue(input, "ABC");
-    assert.equal(input.valueWrites, before, "writing the same value would move the caret to the end");
-    g.Dom.setValue(input, "ABD");
-    assert.equal(input.valueWrites, before + 1, "and a real change is written once");
-  });
-});
+/*
+ * `Dom.setValue` USED TO BE TESTED HERE, and it never had a caller.
+ *
+ * It skipped writing a field whose value had not changed, so the caret would not
+ * jump. A real concern -- but the render REBUILDS its subtree (Dom.clear, then
+ * fresh nodes), so there is no surviving input for it to spare. The caret is kept
+ * by FocusMemory instead, which is the mechanism that actually runs.
+ *
+ * A tested function with no caller is worse than an untested one: the test makes
+ * it look load-bearing. Both are gone; the day an in-place field update appears,
+ * this comment says what to bring back.
+ */
 
 test("the SVG tags offered are the ones that can actually be built", async () => {
   await withDocument(async () => {
@@ -442,20 +443,25 @@ test("the write queue tells every waiter the truth, including the ones it drops"
 test("the hold watch defers a repaint under a caret, and releases when it moves", async () => {
   await withDocument(async (doc) => {
     await import("../src/ui/hold-watch.js");
+    await import("../src/ui/section.js");
     let released = 0;
-    const section = { root: doc.createElement("div") };
+    // A Section, not a raw section: `root` is a question the wrapper answers now,
+    // because the host no longer grafts the node onto the section object.
+    const node = doc.createElement("div");
+    const section = new g.Section({ mount() {} });
+    section.mount(node, {});
     const field = doc.createElement("input");
-    section.root.appendChild(field);
-    doc.body.appendChild(section.root);
+    node.appendChild(field);
+    doc.body.appendChild(node);
 
     const holds = new g.HoldWatch([section], () => { released += 1; });
-    holds.watch(section.root);
+    holds.watch(section.root());
 
     assert.equal(holds.holding(section), false, "nothing is held to begin with");
 
     // The caret lands in the field: repainting would rebuild the node mid-word.
     field.focus();
-    assert.equal(holds.editing(section.root), true);
+    assert.equal(holds.editing(section.root()), true);
     assert.equal(holds.holding(section), true);
 
     // A pointer on the subtree holds it too -- and repainting there does not merely
@@ -600,6 +606,7 @@ test("the host starts, commits a real intention, and repaints from what it commi
     await loadSections();
     await import("../src/ui/write-queue.js");
     await import("../src/ui/hold-watch.js");
+    await import("../src/ui/section.js");
     await import("../src/ui/section-host.js");
 
     const previous = g.Platform.api;
@@ -720,5 +727,95 @@ test("a skipped cause cannot borrow a sentence from Object.prototype", async () 
         `${borrowed} resolves through the prototype chain, so the || fallback stays asleep`);
     }
     assert.equal(typeof table.UNKNOWN_ENGINE, "string", "and the real keys still answer");
+  });
+});
+
+/**
+ * ONE CATCH-ALL MEANS ONE, DRAFTS INCLUDED.
+ *
+ * The guard only asked the policy, so a second catch-all DRAFT could always be
+ * opened. Two draft rows meant two nodes carrying id="catch-all-note": invalid
+ * HTML, and the second field's aria-describedby resolving to the FIRST note --
+ * so the explanation a screen-reader user heard belonged to another row.
+ */
+test("a second catch-all draft cannot be opened", async () => {
+  await withDocument(async (doc) => {
+    const section = await shortcutsSection();
+    const root = doc.createElement("div");
+    const stored = new g.StoredPolicy(g.JumpPolicy.empty().withEngines(["google.com"]).value, []);
+    const ctx = contextFor(stored, []);
+    section.mount(root, ctx);
+    section.render(stored, ctx);
+
+    const addCatchAll = () => [...root.querySelectorAll("button")]
+      .find((b) => (b.textContent || "").toLowerCase().includes("catch-all"));
+
+    addCatchAll().dispatch("click");
+    assert.equal(section.drafts.filter((d) => d.catchAll).length, 1);
+
+    addCatchAll().dispatch("click");
+    assert.equal(section.drafts.filter((d) => d.catchAll).length, 1,
+      "a second draft was opened, so two nodes would carry id=catch-all-note");
+
+    const notes = root.querySelectorAll("#catch-all-note");
+    assert.ok(notes.length <= 1, `${notes.length} nodes share id="catch-all-note"`);
+  });
+});
+
+/**
+ * ORDER_STALE IS THE ONE REFUSAL THAT REDRAWS -- and nothing exercised it.
+ *
+ * Every other refusal deliberately leaves the screen alone: redrawing would throw
+ * away the correction the user is mid-way through typing. ORDER_STALE is the
+ * exception, because the section is holding an OPTIMISTIC order the storage does
+ * not have, and showFailure alone would leave that wrong order on screen for good.
+ *
+ * The domain half is tested; this branch of the host is not, and it has already
+ * been a bug once (announce-then-reload erased its own message in the same turn).
+ */
+test("a stale order reloads the screen, unlike every other refusal", async () => {
+  const { installPlatform, reset } = await import("./fake-platform.js");
+  await withDocument(async (doc) => {
+    await loadSections();
+    await import("../src/ui/write-queue.js");
+    await import("../src/ui/hold-watch.js");
+    await import("../src/ui/section.js");
+    await import("../src/ui/section-host.js");
+
+    const previous = g.Platform.api;
+    installPlatform();
+    g.Platform.api = globalThis.chrome;
+    reset();
+    try {
+      const banner = doc.createElement("div");
+      banner.setAttribute("id", "host-banner");
+      banner.hidden = true;
+      doc.body.appendChild(banner);
+      const root = doc.createElement("div");
+      doc.body.appendChild(root);
+
+      const painted = [];
+      const section = {
+        mount(node, ctx) { this.node = node; this.ctx = ctx; },
+        render() { painted.push("render"); },
+      };
+      const host = await g.SectionHost.start({ root, sections: [section] });
+      const before = painted.length;
+
+      // An order naming ids the policy does not hold: the domain answers ORDER_STALE.
+      const result = await section.ctx.applyToPolicy((policy) =>
+        policy.withOrder(["cccccccc-3333-4333-8333-333333333333"]));
+
+      assert.equal(result.ok, false);
+      assert.equal(result.code, "ORDER_STALE", "the domain must still name this refusal");
+      assert.ok(painted.length > before,
+        "ORDER_STALE must REDRAW: the section is holding an order storage never took, " +
+        "and leaving it on screen is the one thing worse than losing a keystroke");
+      assert.equal(banner.hidden, false, "and it still says why");
+
+      await host.stop();
+    } finally {
+      g.Platform.api = previous;
+    }
   });
 });

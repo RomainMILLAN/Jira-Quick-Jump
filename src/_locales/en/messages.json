@@ -209,7 +209,7 @@
   "importDisarmed": {
     "message": "Everything arrives disarmed, and warnings you accepted before are not carried over."
   },
-  "importDropped": {
+  "importRefused": {
     "message": "Some entries were refused and will not be imported."
   },
   "importLede": {
@@ -595,5 +595,41 @@
   },
   "previewUnavailable": {
     "message": "Could not read the installed rules."
+  },
+  "factProjectionStale": {
+    "message": "The change detector could not refresh its baseline, so the next alert may name a change you made yourself."
+  },
+  "factReplacedKinds": {
+    "message": "What changed:"
+  },
+  "kindDestination": {
+    "message": "destinations"
+  },
+  "kindKey": {
+    "message": "keys"
+  },
+  "kindArmed": {
+    "message": "shortcuts switched on"
+  },
+  "kindCatchAll": {
+    "message": "a catch-all"
+  },
+  "kindShadowing": {
+    "message": "which shortcut wins"
+  },
+  "kindEngines": {
+    "message": "search engines"
+  },
+  "kindPolicyArmed": {
+    "message": "the extension switched on"
+  },
+  "kindReadmitted": {
+    "message": "quarantined entries brought back"
+  },
+  "factEnginesRemoved": {
+    "message": "Fewer search engines are intercepted than before."
+  },
+  "kindEnginesRemoved": {
+    "message": "search engines removed"
   }
 }

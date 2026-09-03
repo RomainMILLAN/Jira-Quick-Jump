@@ -60,6 +60,19 @@
   // validator.
   const CASE_INSENSITIVE_SHAPE = caseInsensitiveShape(MAX_LENGTH);
 
+  /**
+   * ONE RULE, ONE PLACE -- and ONLY this one.
+   *
+   * Both parses ask it, so it is extracted. What is NOT extracted is the sequence
+   * around it: ProjectKey trims, checks this, normalises NFKC and refuses anything
+   * the normalisation changes; JiraInstance trims, checks this, refuses `%`, `\`
+   * and a userinfo, then hands the rest to `new URL()`. Those are two different
+   * questions -- "is this exactly what the user sees?" and "will a URL parser take
+   * this?" -- so folding them into one SafeText would build a class with two
+   * reasons to change.
+   */
+  const hasInvisibleCharacter = (text) => INVISIBLE.test(text);
+
   // Control and invisible characters, refused BEFORE anything else. A message
   // saying "invalid character" about characters nobody can see is unusable, so
   // this gets its own code. Bidi overrides matter on their own: they let a host
@@ -163,18 +176,46 @@
    */
   (function assertShapesCannotDrift() {
     const insensitive = new RegExp("^" + CASE_INSENSITIVE_SHAPE + "$");
-    for (const sample of ["AB", "A_9", "ABCDEFGHIJKLMNOPQRST", "A1"]) {
+    // SIX AND SIX, and the added ones cover THE AXIS THAT MOVED: the catch-all
+    // now claims up to six characters, and not one sample sat at that boundary --
+    // the assertion could not have caught a drift exactly where the feature lives.
+    for (const sample of [
+      "AB", "A_9", "ABCDEFGHIJKLMNOPQRST", "A1",
+      "ABCDEF",  // the catch-all's claim boundary, exactly
+      "ABCDE",   // one below it
+    ]) {
       if (KEY.test(sample) && !insensitive.test(sample)) {
         throw new Error("key shape drifted: " + sample);
       }
     }
     // And the reverse direction, on what must stay OUT of both.
-    for (const sample of ["A", "1AB", "_AB", "A-B", "A.B", "ABCDEFGHIJKLMNOPQRSTU"]) {
+    for (const sample of [
+      "A", "1AB", "_AB", "A-B", "A.B", "ABCDEFGHIJKLMNOPQRSTU",
+      "AB C",    // a space: the separator set must never widen the key set
+      "AB%20C",  // nor its encoded form, which reference-pattern emits as a separator
+    ]) {
       if (insensitive.test(sample) !== KEY.test(sample.toUpperCase())) {
         throw new Error("key shape drifted on a rejected sample: " + sample);
       }
     }
   })();
+
+  /**
+   * DOES THIS WORD HAVE THE SHAPE OF A KEY? -- the question the airlock actually
+   * asked, answered here instead of handed over as syntax.
+   *
+   * It used to read CASE_INSENSITIVE_SHAPE and build its own RegExp, which made the
+   * CORE export a fragment of RE2 notation: a domain that produces syntax, and an
+   * airlock that has to know how to wrap it. The constant stays exported -- the
+   * emitted key fragment genuinely is notation, and rule-factory needs it -- but a
+   * yes/no question no longer travels as a string to be compiled downstream.
+   *
+   * Anchored HERE, once, rather than at each call site: an unanchored test would
+   * accept "NODE.JS" on a substring and let a metacharacter through into a
+   * priority-2 allow rule.
+   */
+  ProjectKey.isShapedLikeAKey = (word) =>
+    typeof word === "string" && new RegExp("^" + CASE_INSENSITIVE_SHAPE + "$").test(word);
 
   Object.defineProperty(ProjectKey, "CASE_INSENSITIVE_SHAPE", {
     value: CASE_INSENSITIVE_SHAPE,
@@ -198,7 +239,7 @@
       return { ok: false, code: "KEY_NOT_A_STRING", message: "A project key must be text." };
     }
     const trimmed = input.trim();
-    if (INVISIBLE.test(trimmed)) {
+    if (hasInvisibleCharacter(trimmed)) {
       return {
         ok: false,
         code: "KEY_CONTROL_CHARS",
@@ -289,7 +330,7 @@
 
     // Before new URL(): it silently strips tabs and newlines, so any check made
     // afterwards would inspect a different string from the one the user sees.
-    if (INVISIBLE.test(trimmed)) {
+    if (hasInvisibleCharacter(trimmed)) {
       return refuse("BASE_CONTROL_CHARS", "The base URL contains an invisible or control character.");
     }
     if (trimmed.includes("%")) {
@@ -316,6 +357,26 @@
       return refuse("BASE_NOT_A_URL", "This is not a valid URL.");
     }
 
+    /**
+     * `http:` IS ACCEPTED, AND THAT IS A NAMED PRODUCT DECISION.
+     *
+     * The population is real and specific: a Jira Server on an internal network,
+     * behind a VPN, with no TLS -- `http://jira:8080` is the canonical shape. It
+     * cannot be typed by accident, because the IMPLICIT scheme is https (above);
+     * a user gets here only by writing `http://` themselves.
+     *
+     * What bounds it is not a refusal but a WARNING THE USER MUST ACCEPT:
+     * INSECURE_SCHEME is a high-severity acknowledgement, and a shortcut carrying
+     * an unacknowledged warning cannot arm. So the traffic never leaves in clear
+     * text without someone having said so.
+     *
+     * THE COST IS DECLARED, not hidden: optional_host_permissions must then carry
+     * an http wildcard beside the https one, which is half of what the stores show
+     * at install time. Removing `http:` here would halve that surface -- and cut
+     * off every internal Jira Server. Refusing it at THIS door is the only place
+     * the change could be made honestly, because permissionOrigin() derives the
+     * origin from the scheme kept here.
+     */
     if (url.protocol !== "https:" && url.protocol !== "http:") {
       return refuse("BASE_SCHEME", 'Only http and https are accepted, not "' + url.protocol + '".');
     }

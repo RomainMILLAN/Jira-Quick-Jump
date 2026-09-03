@@ -4,6 +4,19 @@
 (function (global) {
   "use strict";
 
+  /**
+   * THE BADGE'S TWO COLOURS, named. They cannot come from tokens.css: the badge is
+   * painted by the browser chrome, which no stylesheet of ours reaches. Naming them
+   * here is what keeps them findable when the palette moves -- they were two bare
+   * hexadecimals in the middle of a call.
+   *
+   * Both are the palette's own: --red-strong and --ink-soft.
+   */
+  const BADGE_COLOUR = Object.assign(Object.create(null), {
+    "!": "#b3372c",
+    off: "#6a7370",
+  });
+
   if (typeof importScripts === "function") {
     importScripts(
       "platform.js",
@@ -155,7 +168,20 @@
         // What it would cost is a MISSED divergence -- but only for a change that
         // is itself below the waterline, i.e. one already attributed. There is
         // nothing to detect there.
-        await InstalledProjection.record(policy);
+        // INSPECTED, like reconcile's own writes twenty lines below. A
+        // QUOTA_EXCEEDED here leaves the comparison baseline stale in silence,
+        // and a stale baseline is what makes the detector cry on ordinary use --
+        // the exact failure the waterline exists to prevent. The asymmetry with
+        // reconcile was unintentional; there is no argument for it.
+        const written = await InstalledProjection.record(policy);
+        if (!written.ok) {
+          // The next sync() records again from a fresh read, so this is a missed
+          // update rather than a lost one -- said, not swallowed.
+          await DestinationJournal.recordUnclaimable(
+            [{ type: "ProjectionStale", code: written.code }],
+            Date.now()
+          );
+        }
       }
     } catch {
       outcome = { installed: false, coverageSatisfied: false };   // BEFORE purge, which can throw
@@ -223,7 +249,7 @@
         // The recorder does not break down: it politely answers "tape busy", and
         // nobody was listening to the answer.
         const written = await DestinationJournal.recordUnclaimed(
-          [{ type: "PolicyReplaced", changedCount: policy.shortcuts().length }],
+          [{ type: "PolicyReplaced", changedCount: policy.shortcuts().length, kinds: [] }],
           policy.fingerprint(),
           Date.now()
         );
@@ -320,7 +346,7 @@
         });
       }
       if (api.action.setBadgeBackgroundColor) {
-        await api.action.setBadgeBackgroundColor({ color: text === "!" ? "#b3372c" : "#6a7370" });
+        await api.action.setBadgeBackgroundColor({ color: BADGE_COLOUR[text] || BADGE_COLOUR.off });
       }
     } catch {
       /* no action in some contexts */

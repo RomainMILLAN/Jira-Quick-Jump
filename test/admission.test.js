@@ -47,7 +47,7 @@ test("import refuses an unknown field wholesale rather than ignoring it", () => 
   // field from a future version smuggles itself in today.
   assert.equal(g.JumpPolicy.proposeImport({ schemaVersion: 1, shortcuts: [], surprise: 1 }).code, "UNKNOWN_FIELD");
   const withExtra = { schemaVersion: 1, shortcuts: [{ id: "a", key: "ABC", baseUrl: "https://x.example.org", extra: 1 }] };
-  assert.deepEqual(g.JumpPolicy.proposeImport(withExtra).dropped.map((d) => d.code), ["UNKNOWN_FIELD"]);
+  assert.deepEqual(g.JumpPolicy.proposeImport(withExtra).refused.map((d) => d.code), ["UNKNOWN_FIELD"]);
 });
 
 test("a schema newer than the code is refused, never overwritten", () => {
@@ -175,7 +175,7 @@ test("an unreadable arming state travels as a DOCUMENT fact, not as a refused en
     armed: "false",
     shortcuts: [],
   });
-  assert.deepEqual(restored.dropped, [], "no entry was refused, so nothing is reported as one");
+  assert.deepEqual(restored.refused, [], "no entry was refused, so nothing is reported as one");
   const fact = restored.unreadable.find((u) => u.code === "ARMING_STATE_UNREADABLE");
   assert.ok(fact, "the refusal to believe the field must be carried out");
   assert.match(fact.message, /nothing is armed/);
@@ -193,7 +193,7 @@ test("the import door never reports a refusal it did not make", () => {
     shortcuts: [],
   });
   assert.equal(proposed.ok, true);
-  assert.deepEqual(proposed.dropped, [], "nothing was refused, so the screen must say nothing");
+  assert.deepEqual(proposed.refused, [], "nothing was refused, so the screen must say nothing");
   assert.equal(proposed.policy.armed(), false);
 });
 
@@ -231,7 +231,7 @@ test("two entries claiming one identity: the second is quarantined, the first ke
   assert.equal(survivor.keyText(), "ABC", "the first occupant keeps the identity");
   assert.equal(survivor.destination(), "https://first.atlassian.net");
   assert.equal(restored.quarantine.length, 1, "the squatter is set aside, never destroyed");
-  assert.ok(restored.dropped.some((d) => d.code === "DUPLICATE_ID"));
+  assert.ok(restored.refused.some((d) => d.code === "DUPLICATE_ID"));
 });
 
 test("the document's order survives an entry being quarantined mid-list", () => {

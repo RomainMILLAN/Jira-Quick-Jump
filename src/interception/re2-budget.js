@@ -83,6 +83,11 @@
    * and lets code continue in a state it believes valid.
    *
    * A NAMED DEROGATION from "no inheritance", and the only one in the project.
+   * A NAMED DEROGATION -- and the name is what was missing, not the argument.
+   * rule-set.js labels its own derogation in those words; this one reasoned
+   * correctly under no heading, so a reader meeting `extends` could not tell
+   * whether it had been argued or overlooked.
+   *
    * `throw` is a platform contract: a value that is not an Error loses the stack,
    * and every tool that reads a crash -- the console, the browser, node's test
    * runner -- reads Error. Refusing to extend it here would not buy purity, it

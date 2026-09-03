@@ -158,6 +158,12 @@ const area = {
   async set(entry) {
     for (const name of Object.keys(entry)) await passGate("set", name);
     if (local.get("__rejectSet") === true) throw new Error("QUOTA_BYTES quota exceeded");
+    // TARGETED, because the browser's quota is not all-or-nothing: a large entry
+    // can be refused where a small one still fits. A fake that only fails
+    // wholesale cannot express "the projection was refused but the journal was
+    // written", which is the case worth testing -- the projection is the big one.
+    const only = local.get("__rejectSetFor");
+    if (only && Object.keys(entry).includes(only)) throw new Error("QUOTA_BYTES quota exceeded");
     const changes = {};
     for (const [k, v] of Object.entries(entry)) {
       // THE BYTES DECIDE, as they do in the browser: storage.onChanged fires only
@@ -292,6 +298,8 @@ export const store = {
   /** storage.local itself dying, which is not the same as a quota refusal. */
   failReads: (yes = true) => local.set("__rejectGet", yes),
   failWrites: (yes = true) => local.set("__rejectSet", yes),
+  /** Refuse writes to ONE entry, leaving the rest of the store working. */
+  failWritesTo: (name) => local.set("__rejectSetFor", name),
   failRemoves: (yes = true) => local.set("__rejectRemove", yes),
   openedOptions: () => chrome._openedOptions,
 };

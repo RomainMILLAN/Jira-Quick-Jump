@@ -30,6 +30,20 @@
 (function (global) {
   "use strict";
 
+  /**
+   * NO ENGLISH SENTENCES HERE ANY MORE.
+   *
+   * Each warning used to carry a `message` in English beside its `kind`. The UI
+   * never showed it -- `WARNING_MESSAGE()[kind]` covers all five, measured -- so
+   * the core held a DEAD COPY of interface text that no translator ever saw and
+   * nothing kept in step with the real one.
+   *
+   * The core states a KIND and a SEVERITY; the interface owns the wording. That is
+   * already how refusals work (RefusalPresentation indexes on the code), and now
+   * warnings work the same way. A test pins that every kind has a sentence, which
+   * is the guarantee the dead copy pretended to give.
+   */
+
   const PRIVATE_V4 =
     /^(10\.|127\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.|100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.)/;
 
@@ -49,25 +63,21 @@
     {
       kind: "INSECURE_SCHEME",
       severity: "high",
-      message: "Traffic and your Jira session cookie travel in clear text.",
       appliesTo: (instance) => instance.protocol() === "http:",
     },
     {
       kind: "INTERNAL_HOST",
       severity: "medium",
-      message: "This destination is on a private or non-public network.",
       appliesTo: (instance) => isInternal(instance.hostname()),
     },
     {
       kind: "LITERAL_IP",
       severity: "medium",
-      message: "This destination is an IP address rather than a host name.",
       appliesTo: (instance) => isLiteralIp(instance.hostname()),
     },
     {
       kind: "PUNYCODE",
       severity: "high",
-      message: "This host name uses non-ASCII characters and may imitate another one.",
       appliesTo: (instance) => instance.hostname().includes("xn--"),
     },
   ];
@@ -77,7 +87,6 @@
     {
       kind: "CATCH_ALL",
       severity: "high",
-      message: "Every key-shaped search on your engines will leave for this destination.",
       appliesTo: (key) => key.isCatchAll(),
     },
   ];
@@ -88,6 +97,31 @@
 
   const ShortcutWarning = {
     KINDS: [...DESTINATION_KINDS, ...KEY_KINDS].map((k) => k.kind),
+
+    /**
+     * THE PUBLISHED LANGUAGE OF A CONTEXT BOUNDARY, and that is why it gets a
+     * parse rather than a membership test.
+     *
+     * A `kind` is not an internal convenience: it is PERSISTED (one third of the
+     * row key an attestation is filed under), it crosses into the key-scoped
+     * consent context, and both sides agree on it through `scopeOf`. Two files
+     * validated it with `has(kind)` and moved on with a bare string.
+     *
+     * `parse` returns the repository's usual refusable shape, so an unknown kind
+     * is REFUSED WITH A CODE at the door instead of being filtered away later --
+     * which is exactly how one of the two silent losses at the consent airlock
+     * happened. `has` stays: a boolean question is legitimate where the caller has
+     * no refusal to build.
+     */
+    parse(kind) {
+      if (typeof kind !== "string") {
+        return { ok: false, code: "KIND_NOT_A_STRING", message: "A warning kind must be text." };
+      }
+      if (!ShortcutWarning.KINDS.includes(kind)) {
+        return { ok: false, code: "UNKNOWN_KIND", message: "This warning kind is not one this build knows." };
+      }
+      return { ok: true, value: kind, scope: SCOPES.key.some((k) => k.kind === kind) ? "key" : "destination" };
+    },
 
     has(kind) {
       return ShortcutWarning.KINDS.includes(kind);

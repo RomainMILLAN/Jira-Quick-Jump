@@ -172,11 +172,6 @@
     clear(node) {
       while (node.firstChild) node.removeChild(node.firstChild);
     },
-
-    /** Idempotent: never writes a value the field already has, so the caret stays put. */
-    setValue(input, value) {
-      if (input.value !== value) input.value = value;
-    },
   };
 
   global.Dom = Dom;

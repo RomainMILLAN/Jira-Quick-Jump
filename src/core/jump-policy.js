@@ -26,8 +26,27 @@
   // fail-closed validator and a designated channel for what it refuses.
   const SCHEMA_VERSION = 1;
 
-  // DNR caps dynamic rules; a binding is one rule, and bindings are
-  // shortcuts x engines. Deliberately well below MAX_NUMBER_OF_DYNAMIC_RULES.
+  /**
+   * A NAMED DEROGATION: a platform quota, held in the core.
+   *
+   * DNR caps dynamic rules; a binding is one rule, and bindings are shortcuts x
+   * engines. Deliberately well below MAX_NUMBER_OF_DYNAMIC_RULES.
+   *
+   * WHY IT IS NOT MOVED OUT, unlike the regex fragment and the English sentences
+   * that left this layer in the same pass. The aggregate must REFUSE a mutation
+   * that would exceed it -- `_guarded` runs before any rule exists, so the number
+   * has to be knowable at decision time, in the core. Handing it down from the
+   * airlock would invert the dependency this project spends a structure test
+   * protecting, and injecting it through every constructor would put a platform
+   * argument in the domain's signatures.
+   *
+   * So the derogation is the honest form, and it is spelled out rather than
+   * disguised -- the neighbour below is a REAL domain limit, and the two constants
+   * sitting side by side is precisely what made this one look like one too.
+   *
+   * IF DNR'S CEILING MOVES: this number moves with it, and rule-set.js's band
+   * separation (1..300 vs 1001+) moves too. They are one decision in two files.
+   */
   const MAX_BINDINGS = 300;
 
   // A DOMAIN limit, and the reason is written as one: a policy of two hundred

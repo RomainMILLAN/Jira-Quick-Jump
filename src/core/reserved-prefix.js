@@ -60,9 +60,55 @@
   const ReservedPrefix = {
     ALL,
 
-    /** Membership, and nothing else. The two-character rule lives elsewhere. */
+    /**
+     * ONE LIST, TWO QUESTIONS -- and the questions are NOT the same, which is why
+     * they now have two names over one source of truth.
+     *
+     *   neverClaimedByCatchAll(word)  bounds an OUTBOUND FLOW: the word will never
+     *                                 be claimed, so `ISO-9001` does not leave for
+     *                                 a Jira instance. A security control.
+     *   looksLikeAnOrdinarySearch()   a non-blocking WARNING on the options page.
+     *                                 ProjectKey owns it, because it is the UNION
+     *                                 of this list and the two-character rule --
+     *                                 the code says so: "a single predicate named
+     *                                 after the list would lie for half its answers"
+     *                                 (T1 collides with ordinary searches AND must
+     *                                 be claimed, so it is deliberately NOT here).
+     *
+     * NOT two lists: duplicating 49 words is the very thing the duplication rule
+     * forbids. One catalogue, two questions -- and only the first deserves a test
+     * that goes red if the list shrinks.
+     *
+     * `has` remains as the neutral membership primitive the two are built on.
+     */
     has(value) {
       return SET.has(value);
+    },
+
+    /** The security half. Named after what it protects, not after the list. */
+    neverClaimedByCatchAll(value) {
+      return SET.has(value);
+    },
+
+    /**
+     * THE WORDS A CLAIM OF THIS LENGTH CAN ACTUALLY GUARD -- asked of the list,
+     * not computed from its entrails.
+     *
+     * `catch-all-key.js` used to do `ReservedPrefix.ALL.filter(w => w.length <= n)`:
+     * the caller reached inside to decide on the catalogue's behalf, and the
+     * catalogue's own docstring promised that "LOWERING the bound tomorrow stays
+     * safe without touching the catalogue" -- a promise only this method can keep.
+     *
+     * A word LONGER than the claim is filtered out because it could never be
+     * claimed anyway, so guarding it would protect nothing; structure.test.js pins
+     * that no such word exists today, which makes this a narrowing that currently
+     * narrows nothing -- and stays correct the day the bound moves.
+     */
+    withinLength(max) {
+      if (!Number.isInteger(max) || max < 1) {
+        throw new Error("withinLength needs a positive integer");
+      }
+      return ALL.filter((word) => word.length <= max);
     },
   };
 

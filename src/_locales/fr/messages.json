@@ -209,7 +209,7 @@
   "importDisarmed": {
     "message": "Tout arrive désarmé, et les avertissements déjà acceptés ne sont pas repris."
   },
-  "importDropped": {
+  "importRefused": {
     "message": "Certaines entrées ont été refusées et ne seront pas importées."
   },
   "importLede": {
@@ -279,7 +279,7 @@
     "message": "Tapez une clé de ticket dans la barre d’adresse, atterrissez sur le ticket."
   },
   "orderDropped": {
-    "message": "La liste a changé : votre déplacement a été abandonné."
+    "message": "La liste a changé, votre déplacement a été abandonné."
   },
   "orderNote": {
     "message": "Évalué de haut en bas. Le premier qui correspond gagne."
@@ -595,5 +595,41 @@
   },
   "previewUnavailable": {
     "message": "Impossible de lire les règles installées."
+  },
+  "factProjectionStale": {
+    "message": "Le détecteur de changement n'a pas pu rafraîchir sa référence : la prochaine alerte pourrait nommer une modification que vous avez faite vous-même."
+  },
+  "factReplacedKinds": {
+    "message": "Ce qui a changé :"
+  },
+  "kindDestination": {
+    "message": "destinations"
+  },
+  "kindKey": {
+    "message": "clés"
+  },
+  "kindArmed": {
+    "message": "raccourcis activés"
+  },
+  "kindCatchAll": {
+    "message": "un attrape-tout"
+  },
+  "kindShadowing": {
+    "message": "quel raccourci l'emporte"
+  },
+  "kindEngines": {
+    "message": "moteurs de recherche"
+  },
+  "kindPolicyArmed": {
+    "message": "l'extension activée"
+  },
+  "kindReadmitted": {
+    "message": "entrées remises en service"
+  },
+  "factEnginesRemoved": {
+    "message": "Moins de moteurs de recherche sont interceptés qu'avant."
+  },
+  "kindEnginesRemoved": {
+    "message": "moteurs retirés"
   }
 }

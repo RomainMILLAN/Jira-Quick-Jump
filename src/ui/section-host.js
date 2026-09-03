@@ -18,7 +18,15 @@
   const DEBOUNCE_MS = 500;
 
   const SectionHost = {
-    async start({ root, sections }) {
+    async start({ root, sections: declared }) {
+      /**
+       * WRAPPED ONCE, HERE. Everything below talks to Section objects, never to the
+       * raw section: `root` and `dirty` used to be grafted onto them from this file
+       * and read back from it -- public mutable fields shared across two modules --
+       * and the two neutral lifecycle members had to be declared by all eight
+       * sections, six of them empty, word for word. See ui/section.js.
+       */
+      const sections = declared.map((section) => new global.Section(section));
       /**
        * THE QUEUE IS AN OBJECT NOW. It was a Map plus three inner functions inside
        * a 442-line closure -- unbuildable twice, unreachable from outside,
@@ -129,10 +137,9 @@
        * place. See ui/hold-watch.js.
        */
       const holds = new HoldWatch(sections, () => {
-        if (sections.some((s) => s.dirty)) render();
+        if (sections.some((s) => s.isDirty())) render();
       });
       const isHeldByUser = (section) => holds.holding(section);
-      const isEditing = (root) => holds.editing(root);
 
       let lastReport = null;
       async function report() {
@@ -258,17 +265,15 @@
           // strand it. reconcile never redraws; it may speak.
           section.reconcile(stored, ctx);
           if (isHeldByUser(section)) {
-            section.dirty = true;
+            section.hold();
             continue;
           }
-          section.dirty = false;
           await section.render(stored, ctx);
           } catch (error) {
             // The section paints its own alarming state (see Status.render). Here we
             // only make sure the loop continues and the section is not left dirty,
             // which would make the next pass replay the same throw.
-            section.dirty = false;
-            if (typeof section.fail === "function") section.fail(error);
+            section.fail(error);
           }
         }
       }
@@ -323,7 +328,6 @@
         const node = document.createElement("div");
         node.className = "section";
         root.appendChild(node);
-        section.root = node;
         section.mount(node, ctx);
       }
 

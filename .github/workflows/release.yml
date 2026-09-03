@@ -26,8 +26,18 @@ jobs:
         with:
           # audit, not block, and deliberately: an allowlist guessed instead of
           # observed fails the build at the worst moment, and blocks a release
-          # rather than an attack. One clean run publishes the real endpoint
-          # list; the switch to block is a one-line change afterwards.
+          # rather than an attack.
+          #
+          # THE DECISION, DATED. `block` is the target for BOTH jobs of this file,
+          # and it cannot be flipped from a desk: harden-runner blocks everything
+          # outside `allowed-endpoints`, and a guessed list fails the release at the
+          # worst possible moment. The sequence is: (1) let one release run in
+          # audit, (2) take the endpoint list from that run's insights, (3) commit
+          # `block` WITH that list. The two jobs need SEPARATE lists -- build talks
+          # to the registry, publish talks to the stores.
+          #
+          # ci.yml stays on audit on purpose: a guessed list there breaks pull
+          # requests while protecting nothing that ships.
           egress-policy: audit
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -81,8 +91,18 @@ jobs:
         with:
           # audit, not block, and deliberately: an allowlist guessed instead of
           # observed fails the build at the worst moment, and blocks a release
-          # rather than an attack. One clean run publishes the real endpoint
-          # list; the switch to block is a one-line change afterwards.
+          # rather than an attack.
+          #
+          # THE DECISION, DATED. `block` is the target for BOTH jobs of this file,
+          # and it cannot be flipped from a desk: harden-runner blocks everything
+          # outside `allowed-endpoints`, and a guessed list fails the release at the
+          # worst possible moment. The sequence is: (1) let one release run in
+          # audit, (2) take the endpoint list from that run's insights, (3) commit
+          # `block` WITH that list. The two jobs need SEPARATE lists -- build talks
+          # to the registry, publish talks to the stores.
+          #
+          # ci.yml stays on audit on purpose: a guessed list there breaks pull
+          # requests while protecting nothing that ships.
           egress-policy: audit
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

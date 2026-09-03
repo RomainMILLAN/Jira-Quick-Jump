@@ -8,29 +8,21 @@
 (function (global) {
   "use strict";
 
-  const { Dom, MutationResult } = global;
+  const { Dom, MutationResult, RefusalPresentation } = global;
   const { el, t, label, destination } = global.SectionParts;
 
   const Transfer = {
-    /**
-     * Nothing to blank: this section paints no verdict of its own, so a condemned
-     * page leaves it stale rather than lying. DECLARED rather than absent, because
-     * an optional protocol member is a presence test -- the null this repository
-     * bans everywhere else -- and structure.test.js pins that all eight declare it.
-     */
-    blank() {
-    },
-    reconcile() {
-      /* No optimistic state to give up: this section writes through ctx.apply and
-         never holds a pending order of its own. */
-    },
 
     proposal: undefined,
 
     mount(root, ctx) {
       root.appendChild(label(t("transfer", "Import and export"),
         t("transferNote", "Imported shortcuts always arrive disarmed.")));
-      this.file = el("input", { type: "file", hidden: true, "aria-label": t("import", "Import…") });
+      // NO aria-label HERE. `hidden` removes the node from the accessibility tree,
+      // so the label was dead: nothing could ever announce it. The BUTTON below is
+      // what a screen reader reaches, and it carries the name. The input is a
+      // mechanism, not a control -- so it is hidden from assistive tech on purpose.
+      this.file = el("input", { type: "file", hidden: true, tabindex: "-1", "aria-hidden": "true" });
       this.file.accept = "application/json";
       this.file.addEventListener("change", () => this.read(ctx));
       this.review = el("div");
@@ -65,12 +57,12 @@
       }
       const parsed = global.ShortcutAdmission.parseJson(await file.text());
       if (!parsed.ok) {
-        this.fail(parsed.message);
+        this.fail(RefusalPresentation.sentence(parsed));
         return;
       }
       const proposed = global.JumpPolicy.proposeImport(parsed.value);
       if (!proposed.ok) {
-        this.fail(proposed.message);
+        this.fail(RefusalPresentation.sentence(proposed));
         return;
       }
       this.proposal = proposed;
@@ -119,9 +111,9 @@
         el("p", { class: "hint", text: t("importLede",
           "Check where each key would send you. A configuration file can point a key you already use at a different server.") }),
         el("div", { class: "rows" }, rows),
-        this.proposal.dropped.length > 0
+        this.proposal.refused.length > 0
           ? el("p", { class: "row-msg refused",
-              text: t("importDropped", "Some entries were refused and will not be imported.") })
+              text: t("importRefused", "Some entries were refused and will not be imported.") })
           : null,
         el("p", { class: "hint", text: t("importDisarmed",
           "Everything arrives disarmed, and warnings you accepted before are not carried over.") }),

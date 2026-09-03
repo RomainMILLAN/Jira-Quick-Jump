@@ -120,7 +120,9 @@
     const declared = new Set();
     const seen = new Set();
     for (const kind of kinds) {
-      if (!global.ShortcutWarning.has(kind)) {
+      // PARSED, not merely tested: the kind is the published language of a
+      // context boundary, and an unknown one deserves a coded refusal.
+      if (!global.ShortcutWarning.parse(kind).ok) {
         return { ok: false, code: "UNKNOWN_WARNING_KIND", message: `Unknown warning kind "${kind}".` };
       }
       // THE DUPLICATE CHECK COMES FIRST, over ALL kinds.

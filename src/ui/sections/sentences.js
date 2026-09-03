@@ -14,6 +14,25 @@
   const { el, t } = global.SectionParts;
   const { CatchAllKey } = global;
 
+  /**
+   * The nouns behind the fact types carried by PolicyReplaced. No prototype: the
+   * keys come from a stored fact, and `{ kinds: ["constructor"] }` would otherwise
+   * resolve through Object.prototype -- the same trap SKIPPED_SENTENCE closes.
+   * An unknown kind maps to undefined and is refused, which is the safe direction:
+   * the count is still said.
+   */
+  const KIND_NOUN = () => Object.assign(Object.create(null), {
+    DestinationChanged: t("kindDestination", "destinations"),
+    KeyChanged: t("kindKey", "keys"),
+    ShortcutArmed: t("kindArmed", "shortcuts switched on"),
+    CatchAllAppeared: t("kindCatchAll", "a catch-all"),
+    ShadowingChanged: t("kindShadowing", "which shortcut wins"),
+    EnginesAdded: t("kindEngines", "search engines"),
+    EnginesRemoved: t("kindEnginesRemoved", "search engines removed"),
+    PolicyArmed: t("kindPolicyArmed", "the extension switched on"),
+    QuarantinedReadmitted: t("kindReadmitted", "quarantined entries brought back"),
+  });
+
   const FACT_SENTENCE = (fact) => {
     const host = (text) => el("span", { class: "dest host", text });
     // NOT `.dest`: this paints a key, or a phrase standing in for one -- never a
@@ -58,8 +77,25 @@
           host(fact.catchAllBaseUrl),
           ".",
         ];
-      case "PolicyReplaced":
-        return [t("factReplaced", "The whole configuration changed elsewhere. Check every destination.")];
+      case "PolicyReplaced": {
+        // AND WHICH KINDS, when the diff carried them. Without this the collapse
+        // rewarded noise: six moved destinations read "the whole configuration
+        // changed" while ONE read the old and the new host by name. The kinds are
+        // a closed vocabulary this repository writes -- unlike an engine id, none
+        // of these words is authored by whoever wrote the policy.
+        const said = (fact.kinds || []).map((kind) => KIND_NOUN()[kind]).filter(Boolean);
+        if (said.length === 0) {
+          return [t("factReplaced", "The whole configuration changed elsewhere. Check every destination.")];
+        }
+        return [
+          t("factReplaced", "The whole configuration changed elsewhere. Check every destination."),
+          " ",
+          t("factReplacedKinds", "What changed:"),
+          " ",
+          said.join(", "),
+          ".",
+        ];
+      }
       case "KeyChanged":
         return [
           plain(fact.oldKey),
@@ -86,6 +122,13 @@
         return [
           t("factEnginesAdded", "More search engines are intercepted than before. Check the Access section."),
         ];
+      case "EnginesRemoved":
+        // The reassuring direction -- a smaller surface -- but still a change to
+        // the policy made somewhere else, and saying it is what stops "one engine
+        // added" from being the whole story of a swap.
+        return [
+          t("factEnginesRemoved", "Fewer search engines are intercepted than before."),
+        ];
       case "PolicyArmed":
         return [t("factPolicyArmed",
           "The extension was switched back on elsewhere, and every shortcut redirects again.")];
@@ -94,6 +137,13 @@
         // mute: purge, badge to `off`, not one line anywhere.
         return [t("factUnreadable",
           "What was saved stopped being readable, so nothing is installed. Check every destination.")];
+      case "ProjectionStale":
+        // The change detector's baseline could not be refreshed. Nothing is wrong
+        // with the rules; what is at risk is the NEXT comparison, which may report
+        // an ordinary edit as unattributed. Said, so a spurious banner afterwards
+        // has an explanation instead of looking like a compromise.
+        return [t("factProjectionStale",
+          "The change detector could not refresh its baseline, so the next alert may name a change you made yourself.")];
       default:
         return [
           plain(fact.key),

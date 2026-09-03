@@ -191,8 +191,34 @@
         facts.push({ type: "EnginesAdded", engineCount: added.length });
       }
 
+      // AND THE SYMMETRIC HALF, which was missing. A removal shrinks the
+      // interception surface, so its direction is reassuring -- but the surface is
+      // part of the destination, and this file says so at the top. An adversary
+      // who REMOVES the engine you watch and ADDS another produced exactly one
+      // fact for two gestures; now it produces two.
+      //
+      // The count, not the ids, for the reason argued just above.
+      const enginesAfter = new Set(after.engineIds());
+      const removed = before.engineIds().filter((engineId) => !enginesAfter.has(engineId));
+      if (removed.length > 0) {
+        facts.push({ type: "EnginesRemoved", engineCount: removed.length });
+      }
+
       if (facts.length > MAX_FACTS_PER_COMMIT) {
-        return [{ type: "PolicyReplaced", changedCount: facts.length }];
+        // THE KINDS SURVIVE THE COLLAPSE, and this is a detection property, not a
+        // nicety. Moving ONE destination produced DestinationChanged naming the old
+        // and the new host; moving SIX produced "8 things changed" -- so making
+        // MORE noise made the alarm LESS specific, and the optimal move for the
+        // adversary was to be louder. A control whose specificity falls as the
+        // attack grows has its gradient backwards.
+        //
+        // WHY THIS DOES NOT REOPEN THE OBJECTION ABOVE: engine ids are refused two
+        // dozen lines up because they are TEXT CHOSEN BY WHOEVER WROTE THE POLICY.
+        // Fact TYPES are the opposite -- a closed vocabulary this file writes, so
+        // nothing here is authored by the attacker. Sorted, so the sentence does
+        // not depend on the order the diff happened to run in.
+        const kinds = [...new Set(facts.map((fact) => fact.type))].sort();
+        return [{ type: "PolicyReplaced", changedCount: facts.length, kinds }];
       }
       return facts;
     },

@@ -1,4 +1,5 @@
 import { test } from "node:test";
+import { readFileSync } from "node:fs";
 import assert from "node:assert/strict";
 import { loadCore } from "./load-core.js";
 import * as IDENTITIES from "./fixtures/identities.js";
@@ -826,4 +827,133 @@ test("the rule fires on the parameter the engine reads, never a later one", () =
     "a second q is the one the engine ignores: firing on it lets any page aim the redirect");
   assert.equal(re.test("https://www.google.com/search?q=&q=ABC-1"), false,
     "an empty first q is still the one the engine reads");
+});
+
+/**
+ * WHY claimantFor STAYS, MEASURED RATHER THAN ASSUMED.
+ *
+ * An audit point called it a second matching engine and asked for it to be reduced
+ * to one -- jump-policy.js:250-251 itself recommends "make it the single engine,
+ * never drop the oracle and keep the translation".
+ *
+ * That single engine ALREADY EXISTS. reference-pattern.js:165 does
+ * `spell(key.claim())`: the airlock does not re-derive what a key claims, it
+ * TRANSLATES the domain's own claim into RE2. There is one source of truth for
+ * "what does this key claim", and the regex is derived from it.
+ *
+ * So the two are not two answers to one question -- which is what this plan's
+ * duplication rule bans. They answer:
+ *
+ *   claim() / ReferencePattern  -> "how is this claim written for RE2?"  (translation)
+ *   claimantFor                 -> "is this reference claimed, by whom?" (decision)
+ *
+ * The second is what the agreement test uses to check the first, and a regex that
+ * claims MORE than the domain does is a universal redirector -- so an independent
+ * check of the translation is the one thing worth keeping twice.
+ *
+ * This test pins the derivation, so nobody re-derives the claim in the airlock and
+ * turns the oracle into the duplicate it was mistaken for.
+ */
+test("the airlock derives its pattern from the domain's claim, never its own", () => {
+  const source = readFileSync(new URL("../src/interception/reference-pattern.js", import.meta.url), "utf8");
+  assert.ok(source.includes("spell(key.claim())"),
+    "the pattern must come from key.claim(): re-deriving it here would create the second engine");
+
+  // And the claim is the domain's, in the domain's terms -- not a regex.
+  const named = g.ProjectKey.parse("ABC").value.claim();
+  assert.deepEqual(named, { literal: "ABC" },
+    "a named key claims a LITERAL -- the word itself, not a pattern for it");
+  // The VALUES carry no notation (the JSON braces around them are not the claim).
+  for (const value of Object.values(named)) {
+    assert.equal(/[\\[\](){}*+?|^$]/.test(String(value)), false,
+      `${value} carries regex notation: that is the airlock's job, not the domain's`);
+  }
+
+  const star = g.CatchAllKey.only().claim();
+  assert.equal(typeof star.anyKeyUpTo, "number",
+    "the catch-all claims a LENGTH, and the airlock turns that into a pattern");
+});
+
+/**
+ * MOVING A LINE ABOVE THE CATCH-ALL BRINGS ITS RULE BACK -- in the DELIVERED set.
+ *
+ * The reordering tests stop at shadowedShortcuts() and statusOf(): they prove the
+ * domain's opinion, never that the rule set changes. That gap is the whole feature:
+ * a user who drags a row above the catch-all does it to make that shortcut fire
+ * again, and nothing measured the rules they end up with.
+ */
+test("a shortcut lifted above the catch-all reappears in the installed rules", () => {
+  const NAMED = "aaaaaaaa-1111-4111-8111-111111111111";
+  const STAR = "bbbbbbbb-2222-4222-8222-222222222222";
+  const jira = g.JiraInstance.parse("https://jira.example.org").value;
+
+  // The catch-all FIRST, so the named key below it is shadowed.
+  let policy = g.JumpPolicy.empty().withEngines(["google.com"]).value;
+  policy = policy.register(STAR, g.CatchAllKey.only(), jira).value;
+  policy = policy.register(NAMED, g.ProjectKey.parse("ABC").value, jira).value;
+  policy = policy.acknowledge(STAR, "CATCH_ALL").value.armShortcut(STAR).value;
+  policy = policy.armShortcut(NAMED).value.arm();
+
+  const shadowed = delivered(policy);
+  assert.equal(policy.isShadowed(NAMED), true, "precondition: the named key is below");
+  const literalOf = (rules) => rules.filter((r) => r.condition.regexFilter.includes("ABC"));
+  assert.deepEqual(literalOf(shadowed), [],
+    "a shadowed shortcut ships no rule of its own -- that is what shadowing means");
+
+  // The user drags it above. The order is an absolute intention, not a swap.
+  const lifted = policy.withOrder([NAMED, STAR]).value;
+  assert.equal(lifted.isShadowed(NAMED), false);
+  assert.equal(literalOf(delivered(lifted)).length > 0, true,
+    "lifting it above the catch-all must put its rule back into the DELIVERED set, " +
+    "not merely change the domain's opinion about it");
+});
+
+/**
+ * THE SIMULATOR ARBITRATES LIKE THE SPECIFICATION, ON THE SPECIFICATION'S OWN EXAMPLE.
+ *
+ * Every interception test reads its verdict through JumpPreview, which arbitrates
+ * with RuleRanking.winner() -- a hand-written model of Chrome's algorithm. Until
+ * now the model was only ever checked against ITSELF: the regression net proved the
+ * rules were what we meant, never that Chrome reads them the way we do.
+ *
+ * This cannot be closed by a unit test in the strict sense -- only a browser can --
+ * but it can be ANCHORED FROM OUTSIDE, against the four-rule example Chrome
+ * publishes in the declarativeNetRequest reference, whose documented outcome is:
+ *
+ *   "Generally, allow actions take precedence over block actions, which in turn
+ *    take precedence over redirect actions. When multiple rules match a URL, the
+ *    rule with the highest developer-defined priority is applied."
+ *
+ * So: developer priority FIRST, action type SECOND. That is the whole algorithm we
+ * rely on, and it is what is pinned here.
+ */
+test("the arbitration matches the documented algorithm, priority before action", () => {
+  const at = (band, type) => ({
+    rule: { band: () => band, actionType: () => type },
+    destination: `${band}:${type}`,
+  });
+
+  // Priority wins over action type -- a lower-priority `allow` does NOT beat a
+  // higher-priority redirect. This is the half a naive model gets wrong.
+  const highRedirect = at(2, "redirect");
+  assert.equal(g.RuleRanking.winner([at(1, "allow"), highRedirect]).match, highRedirect,
+    "developer priority is compared BEFORE the action type");
+
+  // At equal priority, allow beats redirect -- the documented order.
+  const allow = at(1, "allow");
+  assert.equal(g.RuleRanking.winner([at(1, "redirect"), allow]).match, allow,
+    "at equal priority, allow takes precedence over redirect");
+
+  // The order is total and self-consistent whichever way the input arrives.
+  assert.equal(g.RuleRanking.winner([allow, at(1, "redirect")]).match, allow,
+    "arbitration must not depend on the order the matches were collected in");
+
+  // An action type this extension never emits is a CANARY, not a silent zero:
+  // sorting an unknown as undefined would put it anywhere.
+  assert.throws(() => g.RuleRanking.rankOfAction("block"), /unknown action type/,
+    "block is documented but never emitted here -- meeting one means reading a " +
+    "rule set that is not ours, and that must be loud");
+  assert.throws(() => g.RuleRanking.rankOfAction("upgradeScheme"), /unknown action type/);
+
+  assert.deepEqual(g.RuleRanking.winner([]), { code: "NO_MATCH" });
 });

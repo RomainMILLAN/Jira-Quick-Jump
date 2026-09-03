@@ -83,8 +83,18 @@ const DIAGNOSES = [
   },
   {
     code: "ALL_SHORTCUTS_AWAITING_ACKNOWLEDGEMENT",
-    applies: (p) =>
-      p.activeBindings().length === 0 &&
+    // `live` is the ARMED VIEW, computed once per diagnosis and handed to every
+    // entry. This one re-derived it, which meant rebuilding shadowedIds() and
+    // re-running the warning scan per shortcut a second time -- on the hot path,
+    // for a value already in the argument list.
+    //
+    // The deeper shape is still missing and is worth naming: `activeBindings()`
+    // recomputes an armed view of the policy from scratch on every call, and half
+    // this catalogue wants it. What is absent is a value object -- an armed view --
+    // that the aggregate builds once. Passing `live` is the symptom's cure; that
+    // object is the cause's.
+    applies: (p, f, live) =>
+      live.length === 0 &&
       p.shortcuts().some((s) => s.armed()) &&
       p.shortcuts().filter((s) => s.armed()).every((s) => s.unacknowledgedWarnings().length > 0),
   },
