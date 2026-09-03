@@ -24,21 +24,59 @@ jobs:
       - name: Watch what the job talks to
         uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
         with:
-          # audit, not block, and deliberately: an allowlist guessed instead of
-          # observed fails the build at the worst moment, and blocks a release
-          # rather than an attack.
+          # BLOCK. Nothing outside the list below leaves this job.
           #
-          # THE DECISION, DATED. `block` is the target for BOTH jobs of this file,
-          # and it cannot be flipped from a desk: harden-runner blocks everything
-          # outside `allowed-endpoints`, and a guessed list fails the release at the
-          # worst possible moment. The sequence is: (1) let one release run in
-          # audit, (2) take the endpoint list from that run's insights, (3) commit
-          # `block` WITH that list. The two jobs need SEPARATE lists -- build talks
-          # to the registry, publish talks to the stores.
+          # HOW THIS LIST WAS BUILT, because it decides whether a release runs.
+          # harden-runner allows NOTHING by default in block mode: a missing
+          # endpoint is a denied connection, and a denied connection here is a
+          # failed release. So the list is not guessed -- every entry is traceable
+          # to a step of THIS job, and the reason is written beside it.
+          #
+          # WHAT IS STILL ASSUMED, said plainly: this list is DERIVED from the
+          # steps and from the shipped code of the tools they run, not OBSERVED
+          # from a StepSecurity insights page. That is the one thing the previous
+          # note asked for and the one thing a desk cannot produce. If a release
+          # ever fails here, harden-runner names the blocked endpoint in the run
+          # summary: add it, with its reason, rather than widening a neighbour or
+          # reverting to audit.
+          #
+          # WHAT BLOCK MODE IS WORTH, and it is not a wall. Domain filtering is
+          # bypassable by tunnelling -- a DNS-over-HTTPS bypass of the community
+          # tier was fixed in v2.16.0, and this action is pinned to v2.21.0, so
+          # that one is closed. It stays a control against an UNWITTING
+          # exfiltration -- a compromised dependency phoning a host nobody
+          # declared -- never against code that is already running and trying.
+          # `--ignore-scripts` is what keeps most of that code from running at all.
           #
           # ci.yml stays on audit on purpose: a guessed list there breaks pull
           # requests while protecting nothing that ships.
-          egress-policy: audit
+          egress-policy: block
+          allowed-endpoints: >
+            api.github.com:443
+            github.com:443
+            codeload.github.com:443
+            objects.githubusercontent.com:443
+            release-assets.githubusercontent.com:443
+            raw.githubusercontent.com:443
+            nodejs.org:443
+            registry.npmjs.org:443
+            fulcio.sigstore.dev:443
+            rekor.sigstore.dev:443
+            tuf-repo-cdn.sigstore.dev:443
+          # api.github.com, github.com, codeload, objects, release-assets, raw:
+          #   checkout, the action tarballs themselves, and the attestation API.
+          # nodejs.org:        setup-node fetching Node 22.
+          # registry.npmjs.org: `npm ci`. It is ALSO what web-ext's update-notifier
+          #   dependency calls on startup -- a version check, non-fatal, but it
+          #   would otherwise show up as a blocked endpoint on every build.
+          # fulcio / rekor / tuf-repo-cdn.sigstore.dev: attest-build-provenance.
+          #   This repository is PUBLIC, so the attestation goes to the public-good
+          #   Sigstore instance. A private repository would use GitHub's own
+          #   instance and need different hosts here.
+          # DELIBERATELY ABSENT: the artifact endpoints. upload-artifact talks to
+          #   the Actions control plane, which is the runner's own channel and not
+          #   filtered by this action -- verified against a working block-mode
+          #   release using the same action versions.
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -89,21 +127,62 @@ jobs:
       - name: Watch what the job talks to
         uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
         with:
-          # audit, not block, and deliberately: an allowlist guessed instead of
-          # observed fails the build at the worst moment, and blocks a release
-          # rather than an attack.
+          # BLOCK. Nothing outside the list below leaves this job.
           #
-          # THE DECISION, DATED. `block` is the target for BOTH jobs of this file,
-          # and it cannot be flipped from a desk: harden-runner blocks everything
-          # outside `allowed-endpoints`, and a guessed list fails the release at the
-          # worst possible moment. The sequence is: (1) let one release run in
-          # audit, (2) take the endpoint list from that run's insights, (3) commit
-          # `block` WITH that list. The two jobs need SEPARATE lists -- build talks
-          # to the registry, publish talks to the stores.
+          # HOW THIS LIST WAS BUILT, because it decides whether a release runs.
+          # harden-runner allows NOTHING by default in block mode: a missing
+          # endpoint is a denied connection, and a denied connection here is a
+          # failed release. So the list is not guessed -- every entry is traceable
+          # to a step of THIS job, and the reason is written beside it.
+          #
+          # WHAT IS STILL ASSUMED, said plainly: this list is DERIVED from the
+          # steps and from the shipped code of the tools they run, not OBSERVED
+          # from a StepSecurity insights page. That is the one thing the previous
+          # note asked for and the one thing a desk cannot produce. If a release
+          # ever fails here, harden-runner names the blocked endpoint in the run
+          # summary: add it, with its reason, rather than widening a neighbour or
+          # reverting to audit.
+          #
+          # WHAT BLOCK MODE IS WORTH, and it is not a wall. Domain filtering is
+          # bypassable by tunnelling -- a DNS-over-HTTPS bypass of the community
+          # tier was fixed in v2.16.0, and this action is pinned to v2.21.0, so
+          # that one is closed. It stays a control against an UNWITTING
+          # exfiltration -- a compromised dependency phoning a host nobody
+          # declared -- never against code that is already running and trying.
+          # `--ignore-scripts` is what keeps most of that code from running at all.
           #
           # ci.yml stays on audit on purpose: a guessed list there breaks pull
           # requests while protecting nothing that ships.
-          egress-policy: audit
+          egress-policy: block
+          allowed-endpoints: >
+            api.github.com:443
+            github.com:443
+            codeload.github.com:443
+            objects.githubusercontent.com:443
+            release-assets.githubusercontent.com:443
+            raw.githubusercontent.com:443
+            uploads.github.com:443
+            nodejs.org:443
+            registry.npmjs.org:443
+            addons.mozilla.org:443
+            addons.cdn.mozilla.net:443
+            chromewebstore.googleapis.com:443
+            www.googleapis.com:443
+          # A DIFFERENT LIST FROM build's, and that is the point of having two:
+          # this job talks to the STORES, and it must not be able to reach
+          # Sigstore, just as build must not be able to reach the stores.
+          #
+          # uploads.github.com:  action-gh-release attaching the zip and the xpi.
+          # addons.mozilla.org:  web-ext sign, against the AMO API v5, and the
+          #   download of the signed xpi it returns.
+          # addons.cdn.mozilla.net: Mozilla's own add-on CDN, in case that
+          #   download redirects to it. Narrow, and it costs nothing; a missing
+          #   redirect target would cost the release.
+          # chromewebstore.googleapis.com: the Chrome Web Store API that
+          #   chrome-webstore-upload actually calls.
+          # www.googleapis.com:  the OAuth token refresh that precedes it
+          #   (/oauth2/v4/token). Read from the shipped package, not assumed.
+          # nodejs.org / registry.npmjs.org: setup-node and `npm ci`, as in build.
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

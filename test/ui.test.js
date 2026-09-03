@@ -863,3 +863,168 @@ test("the status section names the causes behind a failed verdict", async () => 
     assert.equal(root.querySelector(".causes").hidden, true);
   });
 });
+
+/**
+ * THE ENGINES SECTION, PAINTED FOR REAL -- and it did not paint at all.
+ *
+ * Two defects were stacked here, and the suite was green through both because
+ * nothing had ever mounted this section.
+ *
+ * (1) `aria-expanded` was missing from Dom.el's attribute whitelist while the
+ *     "Add a domain" disclosure sets it on EVERY render. Dom.el threw `refusing to
+ *     set attribute "aria-expanded"`, renderOnce caught it, section.fail() painted
+ *     the alarming state -- so the section was inert for EVERY user, ALWAYS: no
+ *     engine tickable, no domain addable. The whitelist was right to refuse what it
+ *     did not know; what was wrong is that a legitimate ARIA state had never been
+ *     added to it.
+ *
+ * (2) `TRASH` was used but never destructured from SectionParts, so the bin beside
+ *     a custom domain threw `ReferenceError: TRASH is not defined` -- reached only
+ *     once a user had added one, which is why (1) masked it.
+ *
+ * Both are scope mistakes, not design mistakes, and both were invisible to a suite
+ * that tested this file with regular expressions over its own source.
+ */
+test("the engines section paints, with and without a custom domain", async () => {
+  await withDocument(async (doc) => {
+    const sections = await loadSections();
+    const section = sections.find((s) => s === g.SectionEngines);
+    assert.ok(section, "the engines section is one of the declared sections");
+
+    // WITHOUT a custom domain first: this is the case every user is in, and the
+    // one the aria-expanded defect broke.
+    const plain = new g.StoredPolicy(g.JumpPolicy.empty().withEngines(["google.com"]).value, []);
+    const root = doc.createElement("div");
+    const ctx = contextFor(plain, []);
+    section.mount(root, ctx);
+    section.render(plain, ctx);
+
+    const chips = root.querySelectorAll(".chip");
+    assert.ok(chips.length > 1, `the catalogue is painted, got ${chips.length} chips`);
+    // The disclosure ANNOUNCES whether it is open. That is the attribute whose
+    // absence from the whitelist took the whole section down.
+    const disclosure = chips[chips.length - 1];
+    assert.equal(disclosure.getAttribute("aria-expanded"), "false",
+      "the Add-a-domain button says it is closed");
+
+    // WITH a custom domain: the branch that reaches the bin, hence TRASH.
+    const engine = g.CustomEngine.parse({ host: "intra.example.org", shape: "search-q" });
+    assert.equal(engine.ok, true, "precondition: the domain parses");
+    let withCustom = g.JumpPolicy.empty().withCustomEngine(engine.value).value;
+    withCustom = withCustom.withEngines([engine.value.id()]).value;
+    const stored = new g.StoredPolicy(withCustom, []);
+
+    const root2 = doc.createElement("div");
+    const ctx2 = contextFor(stored, []);
+    section.mount(root2, ctx2);
+    section.render(stored, ctx2);
+
+    assert.ok(
+      root2.querySelectorAll(".chip").length > chips.length,
+      "the custom domain adds a chip of its own"
+    );
+    // The bin is what needed TRASH. Its presence IS the regression net.
+    const bins = root2.querySelectorAll(".btn");
+    assert.ok(bins.length > 0, "the custom domain carries a remove button");
+  });
+});
+
+/**
+ * OPENING THE FORM DOES NOT THROW EITHER, and it flips the announcement.
+ *
+ * The disclosure's own branch: `this.adding` toggles and the section re-renders
+ * itself, which is a second pass through the same attribute.
+ */
+test("opening the add-a-domain form flips aria-expanded instead of throwing", async () => {
+  await withDocument(async (doc) => {
+    const sections = await loadSections();
+    const section = sections.find((s) => s === g.SectionEngines);
+    const stored = new g.StoredPolicy(g.JumpPolicy.empty().withEngines(["google.com"]).value, []);
+    const root = doc.createElement("div");
+    const ctx = contextFor(stored, []);
+    section.mount(root, ctx);
+    section.render(stored, ctx);
+
+    const chips = root.querySelectorAll(".chip");
+    chips[chips.length - 1].dispatch("click");
+
+    const reopened = root.querySelectorAll(".chip");
+    // The shape chips of the form join the row, so the disclosure is no longer
+    // last: it is found by the attribute it owns.
+    const disclosure = reopened.find((chip) => chip.getAttribute("aria-expanded") !== null);
+    assert.ok(disclosure, "the disclosure is still on screen");
+    assert.equal(disclosure.getAttribute("aria-expanded"), "true", "and it says it is open");
+    // Restore the module-level flag: these sections are singletons on globalThis.
+    section.adding = false;
+  });
+});
+
+/**
+ * EVERY DECLARED SECTION MOUNTS AND RENDERS, against a policy that reaches its
+ * branches. This is the CHANGELOCK the aria-expanded defect needed.
+ *
+ * Neither of the two scope mistakes fixed above was a design mistake, and neither
+ * was catchable by a test of the module they lived in: one was an attribute absent
+ * from a whitelist in ANOTHER file, the other an identifier absent from a
+ * destructuring. What they have in common is that they only exist WHEN THE CODE
+ * RUNS -- and section-host.js catches per-section throws by design, so in the
+ * browser they degrade into a section that paints an alarming state instead of
+ * crashing. Silent, per section, and invisible to a suite that never mounted them.
+ *
+ * A per-section unit test would not have caught either: nothing had mounted
+ * `engines` at all, and the next such omission will be a different section. So the
+ * net is TOTAL over the declared list -- add a section and it is covered, forget to
+ * test it and this still goes red.
+ *
+ * The policy is built to reach the branches that only exist on some data: a custom
+ * engine (the bin, hence TRASH), a catch-all (the static key cell, no arrows, no
+ * grip), a named shortcut with a pending warning (the acknowledgement boxes), and a
+ * quarantined entry (a section that is hidden when empty).
+ *
+ * Platform is safe in a bare process: every one of its methods wraps the browser
+ * handle in a try/catch with a written fallback, so `access` reads "not granted"
+ * and `storage` reads "local" rather than throwing.
+ */
+test("every declared section mounts and renders without throwing", async () => {
+  await withDocument(async (doc) => {
+    const sections = await loadSections();
+    assert.ok(sections.length >= 8, `the declared list is present, got ${sections.length}`);
+
+    const engine = g.CustomEngine.parse({ host: "intra.example.org", shape: "search-q" });
+    let policy = g.JumpPolicy.empty().withCustomEngine(engine.value).value;
+    policy = policy.withEngines(["google.com", engine.value.id()]).value;
+    // Insecure scheme => a pending, arming-blocking acknowledgement on this row.
+    policy = policy.register("id-named", g.ProjectKey.parse("ABC").value,
+      instance("http://jira:8080")).value;
+    policy = policy.registerCatchAll("id-catch-all",
+      instance("https://catchall.atlassian.net")).value;
+    // An entry that could not be read back: the quarantine section is hidden when
+    // this list is empty, so an empty one would leave that render unvisited.
+    const stored = new g.StoredPolicy(policy, [{ id: "bad", key: "!!", baseUrl: "nope" }]);
+
+    // THROUGH THE WRAPPER, exactly as section-host.js does. `render` and
+    // `reconcile` are OPTIONAL on a section -- the preview declares no render at
+    // all, its output being driven by its own input handler -- and ui/section.js
+    // supplies the neutral halves. Calling the raw object would test a protocol
+    // this project deliberately does not have.
+    const painted = [];
+    for (const declared of sections) {
+      const section = new g.Section(declared);
+      const node = doc.createElement("div");
+      const ctx = contextFor(stored, []);
+      // NOT wrapped in a try that reports: the assertion IS that nothing throws.
+      // A throw here fails the test with the real stack, which names the file.
+      section.mount(node, ctx);
+      section.reconcile(stored, ctx);
+      await section.render(stored, ctx);
+      painted.push(node);
+    }
+    // AND SOMETHING WAS ACTUALLY PAINTED. A loop that renders eight no-ops would
+    // pass the no-throw assertion above while proving nothing; this is what makes
+    // the net a net. Not asserted per section: `quarantine` legitimately hides
+    // itself when there is nothing to say, and the count is what cannot be faked.
+    const total = painted.reduce((n, node) => n + node.children.length, 0);
+    assert.ok(total > sections.length,
+      `the sections painted almost nothing: ${total} nodes for ${sections.length} sections`);
+  });
+});

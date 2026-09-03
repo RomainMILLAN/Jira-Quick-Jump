@@ -10,7 +10,7 @@
  * NOT a browser, and it does not pretend to be one. It implements exactly the
  * surface this project uses -- measured, not guessed: createElement,
  * createElementNS, appendChild/removeChild, textContent, setAttribute, hidden,
- * value, disabled, classList, addEventListener plus a dispatch, querySelector
+ * value, disabled, accept, classList, addEventListener plus a dispatch, querySelector
  * limited to the two forms the code writes, focus and activeElement.
  *
  * NODES ARE SEALED, so writing a property this fake does not implement throws in
@@ -79,6 +79,25 @@ class FakeNode {
     Object.defineProperty(this, "disabled", {
       get: () => "disabled" in this._attrs,
       set: (v) => { if (v) this._attrs.disabled = true; else delete this._attrs.disabled; },
+      enumerable: false,
+    });
+    /**
+     * `accept`, ATTRIBUTE-BACKED like its two neighbours above.
+     *
+     * Nodes are sealed on purpose (see the header), so `this.file.accept = "..."`
+     * in sections/transfer.js threw "Cannot add property accept, object is not
+     * extensible" -- and that is the seal working, not a defect in the extension:
+     * `accept` is a real HTMLInputElement property. It is here because this file
+     * implements "exactly the surface this project uses -- measured, not guessed",
+     * and the surface grew by one the day the import button was written.
+     *
+     * Deliberately NOT in the Dom.el whitelist: it is set once, on the one input
+     * that opens a file picker, which is the same reviewed-exit shape as `href` on
+     * Dom.downloadFile.
+     */
+    Object.defineProperty(this, "accept", {
+      get: () => (this._attrs.accept === undefined ? "" : this._attrs.accept),
+      set: (v) => { this._attrs.accept = String(v); },
       enumerable: false,
     });
   }

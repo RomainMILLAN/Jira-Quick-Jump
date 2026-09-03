@@ -55,12 +55,33 @@
         this.fail(t("importTooBig", "That file is too large to be a configuration."));
         return;
       }
-      const parsed = global.ShortcutAdmission.parseJson(await file.text());
-      if (!parsed.ok) {
-        this.fail(RefusalPresentation.sentence(parsed));
+      // GUARDED, because this handler's promise FLOATS: `change` does not await it.
+      //
+      // Every refusal on this path is designed to be a VALUE -- parseJson and
+      // proposeImport both return { ok: false, code } -- and fail() is the whole
+      // recovery. A THROW skipped it: the rejection went nowhere, and the Import
+      // button visibly did nothing at all, on a screen whose entire job is to be
+      // believed. Measured: a temporal dead zone in admission.js's readDocument
+      // turned one unreadable engine id in a file into a ReferenceError out of
+      // proposeImport. That jet is fixed at its source; this is what makes the
+      // next one land on the sentence that was already written.
+      //
+      // file.text() is inside too: a file the browser can no longer read (removed
+      // or replaced between the pick and the read) rejects here, not in parseJson.
+      let proposed;
+      try {
+        const parsed = global.ShortcutAdmission.parseJson(await file.text());
+        if (!parsed.ok) {
+          this.fail(RefusalPresentation.sentence(parsed));
+          return;
+        }
+        proposed = global.JumpPolicy.proposeImport(parsed.value);
+      } catch (error) {
+        this.fail(RefusalPresentation.sentence({
+          ok: false, code: "POLICY_UNREADABLE", message: String(error && error.message),
+        }));
         return;
       }
-      const proposed = global.JumpPolicy.proposeImport(parsed.value);
       if (!proposed.ok) {
         this.fail(RefusalPresentation.sentence(proposed));
         return;

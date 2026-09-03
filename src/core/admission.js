@@ -193,6 +193,28 @@
     // A refused id is DROPPED, never fatal: it is one entry of a list, and losing
     // the whole configuration over a ticked engine would be the denial of service
     // the bound above exists to prevent.
+    //
+    // THE TWO REGISTERS ARE DECLARED BEFORE THE LOOP THAT FILLS THEM, and that is
+    // not a style question: `unreadableEngines` was a `const` sitting FORTY-FIVE
+    // LINES BELOW its only writer, so the first refused id hit the temporal dead
+    // zone and threw `ReferenceError: Cannot access 'unreadableEngines' before
+    // initialization`.
+    //
+    // The throw escaped readDocument, hence JumpPolicy.restore, hence
+    // PolicyRepository.load -- where nobody expects a jet, because every other
+    // failure on this path is a VALUE. background.js caught it in its outer catch
+    // and purged the rules; the options page did not catch it at all
+    // (section-host.js awaits load() outside a try), so the screen stayed mounted,
+    // blank and mute, with no way to repair the very entry that broke it. On every
+    // device the sync reached.
+    //
+    // The sentence three lines above -- "a refused id is DROPPED, never fatal" --
+    // was therefore the exact opposite of what the code did, and the only shape
+    // that reached it was a STRING that is not an engine identity ("foo",
+    // "https://google.com", a bare label with no dot): a non-string is refused
+    // earlier, as ENGINES_NOT_A_LIST.
+    const unreadable = [];
+    const unreadableEngines = [];
     const engines = [];
     const seenEngines = new Set();
     for (const raw of rawEngines) {
@@ -242,8 +264,6 @@
     // refused" on `refused.length > 0`, so a file carrying `armed: "yes"` -- a
     // field that door does not even read -- announced refusals that never
     // happened, on the one surface the whole batch says must be believed.
-    const unreadable = [];
-    const unreadableEngines = [];
     let armed = false;
     if (typeof raw.armed === "boolean") {
       armed = raw.armed;

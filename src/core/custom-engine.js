@@ -21,6 +21,11 @@
   // at 1.2.3.4, so accepting one would only ever be an attempt at something else.
   const HOST = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*\.[a-z]{2,}$/;
 
+  // See the paragraph in parse below: this is an RE2 budget expressed as an input
+  // bound, not a cosmetic limit. Exported so a test can pin it against
+  // Re2Budget.MAX_ALTERNATION_COST rather than restating the number.
+  const MAX_HOST_LENGTH = 40;
+
   class CustomEngine {
     constructor(host, shape) {
       this._host = host;
@@ -58,7 +63,37 @@
     // catalogue means the identity `custom:<host>` is normalised too, so the same
     // domain typed twice cannot enter twice.
     const host = raw.host.trim().toLowerCase().replace(/^www\./, "");
-    if (host.length > 100) {
+    /**
+     * FORTY, AND THE BOUND IS AN RE2 BUDGET RATHER THAN A TIDINESS RULE.
+     *
+     * It was 100, and interception/re2-budget.js had already named the
+     * consequence: "a CUSTOM engine domain of sixty characters adds sixty units
+     * and more to an envelope this scalar was calibrated against Google for [...]
+     * It is also the first real client of forEnvelope()." That client was never
+     * written -- rule-installer.js still hands every engine the same
+     * Re2Budget.conservative() -- so the whole margin was spent by a field a user
+     * can type.
+     *
+     * What that costs, precisely: isRegexSupported refuses a reserved-prefix
+     * guard, its unit falls with it, and the catch-all of THAT engine is not
+     * installed. Sound (RuleSet's per-unit atomicity means a catch-all can never
+     * outlive its guards, so nothing leaks) but silent and per engine.
+     *
+     * Narrowing the INPUT is the honest fix while forEnvelope has no caller: a
+     * bound is checkable by eye, where a per-engine budget is a Strategy that has
+     * to be threaded through RuleFactory -- which cuts the guards ONCE for every
+     * engine, precisely because they do not depend on it. The day that changes,
+     * re2-budget.js says what to do and this number goes back up.
+     *
+     * Forty is not a guess about RE2, it is a fact about search engines: the
+     * longest this build ships is `duckduckgo.com`, fourteen characters. Forty
+     * leaves room for a long intranet domain and still removes the worst case.
+     *
+     * A stored engine longer than this is REFUSED at the admission door and
+     * reported in `refused`, like any other unreadable entry -- it is not silently
+     * dropped.
+     */
+    if (host.length > MAX_HOST_LENGTH) {
       return { ok: false, code: "HOST_TOO_LONG", message: "That domain is too long." };
     }
     if (!HOST.test(host)) {
@@ -74,5 +109,6 @@
     return { ok: true, value: new CustomEngine(host, raw.shape) };
   };
 
+  CustomEngine.MAX_HOST_LENGTH = MAX_HOST_LENGTH;
   global.CustomEngine = CustomEngine;
 })(globalThis);

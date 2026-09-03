@@ -174,7 +174,15 @@
        */
       async function reload() {
         condemned = false;
-        const loaded = await PolicyRepository.load();
+        // GUARDED FOR THE SAME REASON AS THE FIRST READ, and this one is reached
+        // from three floating callers -- onPolicyChanged, the InstallOutcome
+        // doorbell and commit() -- so a throw here has nowhere at all to surface.
+        let loaded;
+        try {
+          loaded = await PolicyRepository.load();
+        } catch (error) {
+          loaded = { ok: false, code: "POLICY_UNREADABLE", message: String(error && error.message) };
+        }
         if (!loaded.ok) {
           showFailure(loaded, "load");
           condemn();
@@ -404,8 +412,34 @@
        * be armed before it too, or the window in which heldSection is structurally
        * null grows from zero to the length of a full render, and a dragstart inside
        * it would not arm the drag latch.
+       *
+       * AND THE READ IS GUARDED, which it was not.
+       *
+       * Every failure on this path is meant to be a VALUE -- load() returns
+       * { ok: false, code } -- so the else branch below is the whole recovery: a
+       * banner, and eight sections painted in an alarming state. A THROW skipped
+       * both: SectionHost.start's promise rejected, the sections stayed mounted
+       * from the loop above and were never painted once, `condemned` stayed false,
+       * and nothing was written to the banner. A blank, mute page whose two
+       * subscriptions were live but whose first paint never happened -- and the
+       * only way back was for the user to guess.
+       *
+       * Measured, on this project's own code: a temporal dead zone in
+       * admission.js's readDocument turned one unreadable engine id into a
+       * ReferenceError out of JumpPolicy.restore. That particular jet is fixed at
+       * its source; this catch is what makes the NEXT one land on the recovery
+       * that was already written.
+       *
+       * A throw is treated as the ignorance it is -- INSTALL_STATE_UNKNOWN's
+       * direction, never the reassuring branch -- and it carries a code so
+       * RefusalPresentation has something to say instead of an empty banner.
        */
-      const loaded = await PolicyRepository.load();
+      let loaded;
+      try {
+        loaded = await PolicyRepository.load();
+      } catch (error) {
+        loaded = { ok: false, code: "POLICY_UNREADABLE", message: String(error && error.message) };
+      }
       if (loaded.ok) {
         stored = loaded.stored;
         await render();

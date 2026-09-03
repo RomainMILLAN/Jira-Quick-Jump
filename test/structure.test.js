@@ -1464,3 +1464,71 @@ test("every destructured collaborator is loaded before the file that destructure
     }
   }
 });
+
+/**
+ * THE RELEASE PIPELINE DENIES WHAT IT DID NOT DECLARE, and the two jobs deny
+ * DIFFERENT things.
+ *
+ * `egress-policy` is one word, and going back from `block` to `audit` is a
+ * one-word edit that turns a deny into a log with nothing on screen to say so --
+ * exactly the class of silent relaxation this file exists to catch. Worse, the
+ * whole value of splitting the lists is that build cannot reach the STORES and
+ * publish cannot reach SIGSTORE: merge the two into one convenient list and the
+ * separation is gone while both jobs still say `block`.
+ *
+ * A grep, not a YAML parse: pyyaml-shaped dependencies are exactly what this
+ * repository refuses to add, and the properties asserted here are lexical.
+ */
+test("the release workflow blocks egress, with a separate allowlist per job", () => {
+  const release = read(".github/workflows/release.yml");
+
+  const policies = release.match(/egress-policy:\s*\S+/g) || [];
+  assert.equal(policies.length, 2, "one policy per job, and there are two jobs");
+  for (const policy of policies) {
+    assert.match(policy, /egress-policy:\s*block$/, `release.yml relaxed a policy: ${policy}`);
+  }
+
+  // The two lists, in file order: build first, publish second.
+  const lists = [...release.matchAll(/allowed-endpoints:\s*>([\s\S]*?)\n\s*#/g)]
+    .map((m) => m[1].split(/\s+/).filter(Boolean));
+  assert.equal(lists.length, 2, "each job declares its own allowlist");
+  const [build, publish] = lists;
+
+  // Every entry is host:port. A bare host silently allows nothing.
+  for (const entry of [...build, ...publish]) {
+    assert.match(entry, /^\*?[a-z0-9.-]+:\d+$/, `${entry} is not a host:port entry`);
+  }
+
+  // THE SEPARATION, both ways. This is the assertion with teeth: it fails the day
+  // somebody factors the two lists into one.
+  const sigstore = (list) => list.filter((e) => e.includes("sigstore.dev"));
+  const stores = (list) =>
+    list.filter((e) => e.includes("mozilla") || e.includes("googleapis.com"));
+
+  assert.ok(sigstore(build).length >= 3, "build must reach Sigstore: it attests");
+  assert.equal(stores(build).length, 0, "build must NOT be able to reach the stores");
+  assert.ok(stores(publish).length >= 3, "publish must reach the stores: it publishes");
+  assert.equal(sigstore(publish).length, 0, "publish must NOT be able to reach Sigstore");
+
+  // The one endpoint that carries a release asset outward.
+  assert.ok(publish.includes("uploads.github.com:443"), "publish attaches the release assets");
+  assert.equal(build.includes("uploads.github.com:443"), false,
+    "build produces artifacts, it does not attach them to a release");
+});
+
+/**
+ * AND PULL REQUESTS STAY IN AUDIT, which is a decision rather than an omission.
+ *
+ * A guessed allowlist on ci.yml breaks every pull request while protecting nothing
+ * that ships -- ci.yml publishes no artifact anyone installs. Asserted so the
+ * asymmetry between the two files reads as intentional to whoever finds it.
+ */
+test("CI stays in audit mode on purpose, and says so", () => {
+  const ci = read(".github/workflows/ci.yml");
+  const policies = ci.match(/egress-policy:\s*\S+/g) || [];
+  assert.ok(policies.length > 0, "ci.yml still runs harden-runner");
+  for (const policy of policies) {
+    assert.match(policy, /egress-policy:\s*audit$/, `ci.yml changed policy: ${policy}`);
+  }
+  assert.match(ci, /audit, not block/i, "ci.yml no longer explains why it is not block");
+});

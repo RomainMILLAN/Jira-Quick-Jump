@@ -92,6 +92,13 @@
     ORDER_STALE: t("refuseOrderStale", "The order changed in another window. Try again."),
     CONFLICT_EXHAUSTED: t("refuseConflict", "Another window changed the configuration at the same time. Try again."),
     QUOTA_EXCEEDED: t("refuseQuota", "There is no room left to save this."),
+    // NOT A DOMAIN CODE: section-host.js mints it when PolicyRepository.load
+    // THROWS instead of returning { ok: false }. It has to be here, because the
+    // fallback for a missing entry is `result.message` -- and on that path the
+    // message is a raw JavaScript error string, which is neither actionable nor
+    // translated, on the one banner that tells a user why the extension is inert.
+    POLICY_UNREADABLE: t("refusePolicyUnreadable",
+      "The saved configuration could not be read, so nothing is redirecting."),
 
     // Consent
     UNACKNOWLEDGED_WARNING: t("refuseUnacknowledged", "Read the destination warnings before switching this shortcut on."),

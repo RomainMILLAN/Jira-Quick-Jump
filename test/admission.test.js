@@ -453,3 +453,97 @@ test("a v1 reader meeting a catch-all quarantines THAT entry and keeps the rest"
     "and the screen says a partial read happened"
   );
 });
+
+/**
+ * AN UNREADABLE ENGINE ID IS DROPPED, NEVER FATAL -- and for a while it was fatal.
+ *
+ * `unreadableEngines` was a `const` declared forty-five lines BELOW the loop that
+ * fills it, so the first refused id hit the temporal dead zone and threw
+ * `ReferenceError: Cannot access 'unreadableEngines' before initialization` out of
+ * readDocument. Out of JumpPolicy.restore, therefore, where nobody expects a jet:
+ * background.js caught it in its outer catch and purged the rules, and the options
+ * page did not catch it at all -- SectionHost.start rejected, the sections stayed
+ * mounted and were never painted, and the banner said nothing. On every device the
+ * sync reached, with no way to repair the entry that broke it.
+ *
+ * The comment three lines above the loop already promised the opposite: "A refused
+ * id is DROPPED, never fatal: [...] losing the whole configuration over a ticked
+ * engine would be the denial of service the bound above exists to prevent."
+ *
+ * BOTH DOORS, because both reach readDocument and the storage one is the one the
+ * compromised sync channel writes.
+ */
+test("an unreadable engine id is dropped, and the rest of the document survives", () => {
+  const document = {
+    schemaVersion: 1,
+    armed: true,
+    // Three shapes that EngineId.parse refuses, beside one it accepts. None of
+    // them is a non-string: that case is refused earlier as ENGINES_NOT_A_LIST,
+    // so it would never have reached the dead zone.
+    engines: ["google.com", "foo", "https://google.com", "pas un domaine"],
+    shortcuts: [
+      { id: "aaaaaaaa-1111-4111-8111-111111111111", key: "ABC",
+        baseUrl: "https://a.atlassian.net", consent: { armed: true, acknowledged: [] } },
+    ],
+  };
+
+  const restored = g.JumpPolicy.restore(document);
+  assert.equal(restored.ok, true, "the document is admitted, not refused as a whole");
+  assert.deepEqual(restored.policy.engineIds(), ["google.com"], "the readable id survives alone");
+  assert.equal(restored.policy.shortcuts().length, 1, "and the shortcuts are untouched");
+  assert.equal(restored.policy.armed(), true, "as is the arming state");
+  assert.equal(restored.quarantine.length, 0, "nothing is quarantined: no ENTRY was unreadable");
+  // SAID, not swallowed. The refused ids travel as document-scoped facts, which is
+  // the whole point of the register that used to be declared too late.
+  assert.equal(restored.unreadable.length, 3, "one fact per refused id");
+  for (const fact of restored.unreadable) {
+    assert.equal(fact.code, "ENGINE_ID_SHAPE", `refused for its shape, got ${fact.code}`);
+    assert.equal(typeof fact.message, "string", "and it carries a message");
+  }
+
+  const imported = g.JumpPolicy.proposeImport(document);
+  assert.equal(imported.ok, true, "the import door admits it too");
+  assert.deepEqual(imported.policy.engineIds(), ["google.com"], "with the same reading");
+  assert.equal(imported.policy.armed(), false, "and disarmed, as every import is");
+});
+
+/**
+ * A DOCUMENT WHOSE ENGINE LIST IS ENTIRELY UNREADABLE IS STILL A DOCUMENT.
+ *
+ * The degenerate case of the one above, and the one a hostile sync would write: it
+ * must come back as a policy with no engine ticked -- which installs no rule and
+ * is repairable in one click -- never as an exception.
+ */
+test("a wholly unreadable engine list leaves a repairable policy, not a throw", () => {
+  const restored = g.JumpPolicy.restore({
+    schemaVersion: 1, armed: true, engines: ["x", "y"], shortcuts: [],
+  });
+  assert.equal(restored.ok, true);
+  assert.deepEqual(restored.policy.engineIds(), []);
+  assert.equal(restored.unreadable.length, 2);
+});
+
+/**
+ * A CUSTOM DOMAIN IS BOUNDED BY AN RE2 BUDGET, not by tidiness.
+ *
+ * re2-budget.js names the case in writing -- "a CUSTOM engine domain of sixty
+ * characters adds sixty units and more to an envelope this scalar was calibrated
+ * against Google for [...] It is also the first real client of forEnvelope()" --
+ * and forEnvelope still has no caller: rule-installer.js hands every engine the
+ * same conservative budget. So the bound lives on the INPUT, and it is pinned
+ * against the budget rather than restated as a number.
+ */
+test("a custom domain cannot spend the whole alternation budget", () => {
+  assert.ok(
+    g.CustomEngine.MAX_HOST_LENGTH < g.Re2Budget.MAX_ALTERNATION_COST,
+    "a single domain must not be able to consume the guards' entire budget"
+  );
+  // And it still admits a real intranet domain, which is what the bound is for.
+  const ok = g.CustomEngine.parse({ host: "search.intranet.example.org", shape: "search-q" });
+  assert.equal(ok.ok, true, "a plausible internal search domain is still accepted");
+
+  const long = "a".repeat(g.CustomEngine.MAX_HOST_LENGTH) + ".example.org";
+  const refused = g.CustomEngine.parse({ host: long, shape: "search-q" });
+  assert.equal(refused.ok, false);
+  assert.equal(refused.code, "HOST_TOO_LONG");
+});

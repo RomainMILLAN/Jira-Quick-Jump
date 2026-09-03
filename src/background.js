@@ -410,10 +410,33 @@
       // either way, which is correct: after a refused disarm-all nothing changed;
       // after a disarm-all whose sync() threw, it MUST change.
       if (command !== "disarm-all") return false;
-      await PolicyRepository.apply((stored) => {
-        const policy = stored.policy();
-        return global.MutationResult.ok(stored.withPolicy(policy.armed() ? policy.disarm() : policy.arm()));
-      });
+      /**
+       * IT DISARMS. IT DOES NOT TOGGLE.
+       *
+       * This body used to read `policy.armed() ? policy.disarm() : policy.arm()`
+       * -- under a command named `disarm-all`, in a file that calls it THE KILL
+       * SWITCH five times. Two presses of Alt+Shift+J therefore re-armed
+       * everything, the catch-all included.
+       *
+       * No acknowledgement was ever bypassed (_isLive still excludes a shortcut
+       * whose warnings are unacknowledged, and activeBindings filters before any
+       * rule exists), so this was never a hole. It was worse in a different way: a
+       * gesture whose repetition CANCELS the emergency, on the one control a user
+       * reaches when they have decided something is wrong and do not have time to
+       * read a screen. A hand that presses twice because nothing seemed to happen
+       * is the normal way to use an emergency stop.
+       *
+       * Re-arming is a decision that belongs to the interface, where the
+       * destinations are on screen and the badge says what state one is leaving.
+       *
+       * ABSOLUTE, HENCE IDEMPOTENT -- which is also what the compare-and-set
+       * requires: VersionedEntry replays this intention up to three times, and
+       * `disarm()` replayed is still disarmed where a toggle replayed comes back
+       * armed. The previous form was a latent lost-update bug as well as a bad
+       * affordance.
+       */
+      await PolicyRepository.apply((stored) =>
+        global.MutationResult.ok(stored.withPolicy(stored.policy().disarm())));
       return true;
     }));
   }

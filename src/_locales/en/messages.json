@@ -87,7 +87,7 @@
     "message": "It used to point to"
   },
   "commandDisarmAll": {
-    "message": "Arm or disarm Jira Quick Jump"
+    "message": "Disarm Jira Quick Jump"
   },
   "delete": {
     "message": "Delete"
@@ -436,6 +436,9 @@
   },
   "refuseConflict": {
     "message": "Another window changed the configuration at the same time. Try again."
+  },
+  "refusePolicyUnreadable": {
+    "message": "The saved configuration could not be read, so nothing is redirecting."
   },
   "refuseQuota": {
     "message": "There is no room left to save this."

@@ -87,7 +87,7 @@
     "message": "Elle pointait vers"
   },
   "commandDisarmAll": {
-    "message": "Armer ou désarmer Quick Jump for Jira"
+    "message": "Désarmer Quick Jump for Jira"
   },
   "delete": {
     "message": "Supprimer"
@@ -436,6 +436,9 @@
   },
   "refuseConflict": {
     "message": "Une autre fenêtre a modifié la configuration en même temps. Réessayez."
+  },
+  "refusePolicyUnreadable": {
+    "message": "La configuration enregistrée n'a pas pu être lue : plus rien ne redirige."
   },
   "refuseQuota": {
     "message": "Il n'y a plus de place pour enregistrer ceci."

@@ -748,3 +748,32 @@ test("a projection that cannot be refreshed leaves a fact behind", async () => {
   assert.ok(after.entries.some((e) => e.type === "ProjectionStale"),
     `no ProjectionStale among ${JSON.stringify(after.entries.map((e) => e.type))}`);
 });
+
+test("7quinquies. the kill switch DISARMS, and pressing it twice does not re-arm", async () => {
+  // IT USED TO TOGGLE, under a command named `disarm-all`, in a file that calls it
+  // THE KILL SWITCH five times. No acknowledgement was ever bypassed -- _isLive
+  // still excludes a shortcut whose warnings are unacknowledged -- so this was
+  // never a hole. It was worse in a different way: a gesture whose repetition
+  // CANCELS the emergency, on the one control a user reaches when they have decided
+  // something is wrong and do not have time to read a screen. A hand that presses
+  // twice because nothing seemed to happen is the normal way to use a stop button.
+  //
+  // It is also what the compare-and-set requires: VersionedEntry replays this
+  // intention up to three times, and `disarm()` replayed is still disarmed where a
+  // toggle replayed comes back armed.
+  await seedPolicy(armedCatchAll());
+  await bg.sync();
+  assert.ok(store.rules().length > 0, "precondition: armed and installed");
+
+  await fire.command("disarm-all");
+  assert.equal(store.rules().length, 0, "the first press stops everything");
+  assert.equal(store.badge(), "off", "and the badge says so");
+
+  await fire.command("disarm-all");
+  assert.equal(store.rules().length, 0, "and the second press does NOT bring them back");
+  assert.equal(store.badge(), "off", "the emergency stop stays closed");
+
+  // IDEMPOTENT, hence replay-safe: a third press is still the same state.
+  await fire.command("disarm-all");
+  assert.equal(store.rules().length, 0, "n presses mean the same thing as one");
+});

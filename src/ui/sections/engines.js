@@ -8,7 +8,16 @@
   "use strict";
 
   const { Dom, MutationResult, SearchEngineCatalog, RefusalPresentation } = global;
-  const { el, t, label, toggle, icon } = global.SectionParts;
+  // TRASH IS DESTRUCTURED, and it was not. `icon(TRASH, 12)` below sat on the
+  // branch reached ONLY for a custom domain, so a bare undeclared identifier
+  // threw `ReferenceError: TRASH is not defined` in strict mode the moment a
+  // user added one: renderOnce caught it, section.fail() painted the alarming
+  // state, and the whole section went inert -- no engine tickable, and the
+  // domain just added no longer removable from the interface.
+  //
+  // `toggle` is gone with it: this file never used it. An unused import is what
+  // made the missing one hard to see in a one-line destructuring.
+  const { el, t, label, icon, TRASH } = global.SectionParts;
 
   const Engines = {
 

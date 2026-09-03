@@ -31,6 +31,20 @@
     //     Dom.dragHandle below. Keeping it out of the list is what stops a
     //     <li draggable> from hijacking text selection inside a field.
     "aria-disabled", "aria-atomic",
+    // aria-expanded, and it was MISSING while a caller already relied on it:
+    // the "Add a domain" disclosure in sections/engines.js sets it on EVERY
+    // render, so Dom.el threw `refusing to set attribute "aria-expanded"` and
+    // the whole Engines section went inert for every user, always -- no engine
+    // tickable, no domain addable. The allow-list did its job (it refused what
+    // it did not know, which is the right direction); what was wrong is that a
+    // legitimate ARIA STATE had never been added to it.
+    //
+    // It is admitted on the same ground as its neighbours above: this list
+    // exists to keep URL-bearing and handler-bearing attributes out (href,
+    // src, on*), never to ration ARIA. aria-expanded carries a boolean token
+    // and nothing a scheme could hide in -- and a disclosure that does not
+    // announce whether it is open is a WCAG 4.1.2 failure, not a nicety.
+    "aria-expanded",
     "width", "height", "viewBox", "fill", "stroke", "stroke-width",
     "stroke-linecap", "stroke-linejoin", "d",
   ]);

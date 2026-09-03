@@ -86,14 +86,24 @@ trade rather than leave stale rules firing under a badge that says `off`.
   that engine's catch-all with it. The final set is checked prefix by prefix, per
   engine — never merely "an allow is present", which stopped being equivalent the
   day there was more than one.
-- **A DATED BET, and it is the only debt no test can see.** The cut is budgeted at 60
+- **A DATED BET, and it is the only debt no test can see.** The cut is budgeted at 50
   units of alternation cost (sum of lengths plus count) against a real RE2 limit
-  measured on Chrome, 2026-09-01, to lie somewhere in (70, 107] — unknown. The last
-  measured-good point costs exactly 70, so the eleven units of margin pay for an
-  engine envelope the measurement never covered; a custom domain of sixty characters
-  is the real worst case, not Google. **If Google ever refuses at 60, drop to 50 —
-  never raise the key bound, which is a domain decision.** Re-measure before touching
-  either number: no test in this repository executes RE2.
+  measured on Chrome, 2026-09-01, to lie somewhere in (70, 107] — unknown. It was 60,
+  and the bet came due: closing the query-parameter hole added one alternation of two
+  to every engine's envelope, Chrome refused the guards, and the documented remedy —
+  drop to 50, five runs instead of four — was applied for the documented reason.
+  **Never widen the query pattern back, and never raise the key bound, which is a
+  domain decision.** Re-measure before touching either number: no test in this
+  repository executes RE2.
+- **A custom search domain is bounded at 40 characters, and that bound is an RE2
+  budget rather than tidiness.** The margin above pays for an engine envelope the
+  measurement never covered, and a user-typed domain spends it: the worst case was
+  never Google. `Re2Budget.forEnvelope()` exists for exactly this and still has no
+  caller — `rule-installer.js` hands every engine the same conservative budget — so
+  the bound lives on the input, where it is checkable by eye. What it costs if it is
+  ever wrong is sound but silent: `isRegexSupported` refuses a guard, its unit falls
+  with it, and that engine's catch-all is not installed. Nothing leaks, because a
+  catch-all can never outlive its guards; the failure is availability, per engine.
 - **A key-scoped acknowledgement never travels.** Accepting a catch-all's warning
   is recorded in local storage, outside the configuration, so a compromised sync
   account cannot accept a universal redirect on your behalf. The limit, stated:
@@ -101,10 +111,15 @@ trade rather than leave stale rules firing under a badge that says `off`.
   record just as easily as the configuration itself. Same limit as the journal.
 - **The change detector tells an act from a discovery.** A change somebody
   claimed at the commit is recorded without raising anything; only a divergence
-  nobody claims raises the banner. The claim is an IDENTITY -- which revision,
-  written by whom -- never a height, because a height is a number the hostile
-  writer chooses. The residual window is narrowed, not closed: an attribution
-  landing after a divergence has been written is not caught.
+  nobody claims raises the banner. The claim is a FINGERPRINT OF THE CONTENT --
+  never a height, because a height is a number the hostile writer chooses, and no
+  longer an envelope identity either: `{revision, writer}` was tried and defeated,
+  because the token is written into the SAME envelope as the value, so an adversary
+  holding the sync channel reads it before copying it. A fingerprint cannot be
+  forged, not because it is secret, but because matching one means producing a state
+  a LOCAL door already claimed — and the journal never leaves local storage. The
+  residual window is narrowed, not closed: an attribution landing after a divergence
+  has been written is not caught.
 - **The change detector survives a restart.** The last installed policy is kept
   locally and compared on every wake-up, so a write pushed while the service
   worker was dead is still reported. Its absence is treated as a change, never as
@@ -150,6 +165,18 @@ CI never clones an external repository, runs with least-privilege tokens, pins
 every action by commit SHA, installs with `--ignore-scripts`, and never exposes a
 secret to pull-request code. Releases attest their provenance and publish SHA-256
 sums; publication waits behind a protected environment with a human reviewer.
+
+The release workflow also **denies every outbound connection it did not declare**
+(`egress-policy: block`), with a separate allowlist per job: the build job can
+reach the npm registry and Sigstore and not the stores, the publish job can reach
+the stores and not Sigstore. Two limits, stated rather than implied. It is a
+control against an **unwitting** exfiltration — a dependency phoning a host nobody
+declared — and not a wall: domain filtering is bypassable by tunnelling, so it does
+not stop code that is already running and trying. And the allowlists are derived
+from the steps and from the shipped code of the tools they run, not observed from a
+real run; if a release ever fails on a blocked endpoint, the run summary names it.
+Pull requests stay in audit mode on purpose: a guessed list there would break them
+while protecting nothing that ships.
 
 ## Supported versions
 
