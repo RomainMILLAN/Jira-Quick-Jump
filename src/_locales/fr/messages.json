@@ -419,6 +419,45 @@
   "refuseUnknownField": {
     "message": "Ce fichier contient un champ inconnu de cette version."
   },
+  "refuseNotJson": {
+    "message": "Ce fichier n'est pas du JSON valide."
+  },
+  "refuseMaliciousKey": {
+    "message": "Ce fichier contient des clés qui ne sont jamais légitimes."
+  },
+  "refuseNotADocument": {
+    "message": "Ce fichier ne contient pas de configuration."
+  },
+  "refuseSchemaMissing": {
+    "message": "Cette configuration n'indique pas dans quel format elle est écrite."
+  },
+  "refuseSchemaTooNew": {
+    "message": "Cette configuration a été écrite par une version plus récente de cette extension."
+  },
+  "refuseShortcutsNotAList": {
+    "message": "La liste des raccourcis de ce fichier n'a pas pu être lue."
+  },
+  "refuseTooManyShortcuts": {
+    "message": "Cette configuration contient plus de raccourcis que cette extension n'en conserve."
+  },
+  "refuseEnginesNotAList": {
+    "message": "La liste des moteurs de recherche de ce fichier n'a pas pu être lue."
+  },
+  "refuseTooManyEngines": {
+    "message": "Cette configuration coche plus de moteurs de recherche qu'il ne peut en exister."
+  },
+  "refuseCustomEnginesNotAList": {
+    "message": "La liste des domaines ajoutés de ce fichier n'a pas pu être lue."
+  },
+  "refuseTooManyCustomEngines": {
+    "message": "Cette configuration contient plus de domaines ajoutés que cette extension n'en conserve."
+  },
+  "refuseEntryNotAnObject": {
+    "message": "Cette entrée n'a pas pu être lue comme un raccourci."
+  },
+  "refuseMissingFreshId": {
+    "message": "Cette entrée a besoin d'un nouvel identifiant avant de pouvoir être rétablie."
+  },
   "refuseHostShape": {
     "message": "Saisissez un simple nom de domaine, sans schéma ni chemin."
   },

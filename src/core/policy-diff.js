@@ -100,7 +100,7 @@
         }
         // ARMING IS THE GESTURE THE ATTACKER NEEDS LAST.
         //
-        // key-acknowledgements.js describes the whole attack -- a sync account
+        // local-acknowledgements.js describes the whole attack -- a sync account
         // writing `armed: true` against a host already granted -- and the diff
         // was blind to exactly that transition. Only false -> true is a fact:
         // disarming installs nothing, and reporting it would make the kill switch
@@ -162,7 +162,7 @@
       // and only the shortcut was compared. So: the user presses the emergency
       // stop, a compromised sync writes `armed: true` back, EVERY rule returns,
       // and the diff emitted nothing at all. ShortcutArmed was added citing the
-      // attack described in key-acknowledgements.js; this is the cheapest variant
+      // attack described in local-acknowledgements.js; this is the cheapest variant
       // of that same attack.
       //
       // `false -> true` only, for the same reason as its per-shortcut twin:

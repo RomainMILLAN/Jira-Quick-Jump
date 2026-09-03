@@ -240,7 +240,7 @@
     // `armed: raw.armed` let "false", 0, null and {} through, and `restore` armed
     // on anything that was not exactly `false`. A switch has two positions, and
     // "I cannot read the position" is not a third one -- it is the ABSENCE of
-    // consent to be armed. Same words as key-acknowledgements.js: "ABSENT OR
+    // consent to be armed. Same words as local-acknowledgements.js: "ABSENT OR
     // CORRUPT MEANS NOT ACKNOWLEDGED. Fail closed, never we-assume-so."
     //
     // A FIELD-SCOPED REFUSAL, never a refusal of the document. `shortcuts` not
@@ -363,6 +363,33 @@
   /**
    * Storage door. Always yields a policy plus whatever could not be re-read.
    *
+   * `trustsSavedConsent` IS THE FIX FOR A REAL HOLE, AND IT FAILS CLOSED.
+   *
+   * This door used to hand the entry's own consent straight through, on the
+   * sentence "the saved consent is ours: it was written by this extension, on
+   * this machine, after the user read the warning". Every clause of that is true
+   * of storage.local and FALSE of storage.sync -- and this extension offers a
+   * switch that moves the configuration into sync. So a compromised browser
+   * account could write `consent: { armed: true, acknowledged:
+   * ["INSECURE_SCHEME"] }` and get an ACTIVE binding with no screen and no
+   * click, pre-approving a HIGH-severity warning. Measured; see Consent.toJSON.
+   *
+   * IT DEFAULTS TO `false`, AND THE DEFAULT IS THE POINT.
+   *
+   * rule-installer.js argues that `source` must have NO default, because both of
+   * its values are meaningful and an omission would fabricate one. That reasoning
+   * does not transfer here, and the difference is worth naming: these two values
+   * are NOT symmetric. `false` costs an acknowledgement the user gives again
+   * while looking at the destination; `true` is the one that can arm a
+   * high-severity warning on somebody else's word. So an omission must land on
+   * `false` -- the same shape as `armed` in readDocument below, where "I cannot
+   * read the position" is the ABSENCE of consent rather than a third value.
+   *
+   * A caller that forgets the argument therefore loses a click, never a control.
+   *
+   * A BOOLEAN AND NOT AN AREA NAME: the core must not learn that storage areas
+   * exist. What it needs is the answer, not the reason.
+   *
    * QUARANTINE, NEVER DESTRUCTION: an entry we refuse is MOVED aside, not
    * refused. Otherwise the first apply -- ticking an engine, arming a shortcut --
    * would rewrite storage from an amputated policy and erase, permanently, a
@@ -370,7 +397,7 @@
    * hardened validator rejects entries that were legitimate before, and it hits
    * the self-hosted user first.
    */
-  JumpPolicy.restore = function (raw) {
+  JumpPolicy.restore = function (raw, { trustsSavedConsent = false } = {}) {
     const document = readDocument(raw);
     if (!document.ok) return document;
 
@@ -383,9 +410,14 @@
     const walked = admitAll(document.value, start, {
       // QUARANTINE, NEVER DESTRUCTION: what we cannot read is moved aside.
       quarantines: true,
-      // The saved consent is ours: it was written by this extension, on this
-      // machine, after the user read the warning.
-      consentFor: (consent) => consent,
+      // BELIEVED ONLY WHERE IT WAS WRITTEN. On the area this browser writes
+      // locally, the record genuinely is ours and carrying it is what stops an
+      // upgrade from making every user re-tick every warning. On a synced
+      // document it is an attacker's claim about a screen nobody saw, so the
+      // arming survives and the attestations do not -- and a shortcut armed with
+      // an unacknowledged warning cannot fire.
+      consentFor: (consent) =>
+        trustsSavedConsent === true ? consent : consent.withoutAcknowledgements(),
     });
     return {
       ok: true,

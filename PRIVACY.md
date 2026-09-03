@@ -50,10 +50,19 @@ Two records live in **local storage only**, never synced and never exported, for
 the same reason the journal does — *a control that travels by the channel it is
 meant to watch is worthless*:
 
-- **Which catch-all warnings you accepted.** Keyed by the shortcut, its
+- **Which warnings you accepted — all of them.** Keyed by the shortcut, its
   destination and its nature. It stays local so that a compromised browser
-  account cannot accept a universal redirect on your behalf. The consequence is
-  visible: on a second device you accept the warning again.
+  account cannot accept a universal redirect, *or an insecure or look-alike
+  destination*, on your behalf. The consequence is visible: on a second device
+  you accept the warning again.
+  This used to hold the catch-all's warning only. The others — that a
+  destination is plain `http`, that its host name uses non-ASCII characters that
+  may imitate another, that it is an IP address or a private one — were written
+  *into* the configuration, so they travelled to your browser account the moment
+  you turned sync on. A configuration written there claiming you had accepted
+  them produced a live, accepted shortcut with no screen and no click. All four
+  now live here, beside the catch-all's, and a configuration read from sync is
+  believed about *what* it points at and never about *what you were shown*.
 - **The last policy that was installed**, so that a change made while the
   extension was not running still raises a banner. It holds the same Jira host
   names as your configuration, which means those host names exist in two local

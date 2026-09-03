@@ -33,7 +33,8 @@
         // through the one door — re-submitting the same rejected bytes would just
         // reproduce the same refusal, which is honest and useless.
         //
-        // `ltr-isolate` IS NOT DECORATION HERE, IT IS THE CONTROL.
+        // `Dom.visibleText` IS THE CONTROL. `ltr-isolate` IS NOT, AND USED TO BE
+        // BELIEVED TO BE.
         //
         // These two fields are THE ONLY SURFACE IN THE PROJECT that displays a
         // string the parser REFUSED. Everywhere else a host on screen has survived
@@ -44,18 +45,22 @@
         // the value to decide whether to readmit it. structure.test.js already says
         // why that matters: "what the user checks is not where the traffic goes".
         //
-        // The class was the FIRST selector of the shared rule in sections.css and
-        // had NO reader at all — an opt-in hook nobody had ever plugged in, the
-        // "trap that reads as an offer" this project reproaches elsewhere. It has
-        // one now, and it is the surface the rule was cut for.
+        // AND `unicode-bidi: isolate` DID NOT STOP IT. The class was cut for this
+        // surface, with eighteen lines in sections.css calling itself a security
+        // control -- and it isolates a sequence from its NEIGHBOURS without
+        // annulling the overrides INSIDE it. Measured in Chromium: with the class
+        // applied, `"https://jira." + U+202E + "moc.live/"` still displays as
+        // `https://jira./evil.com`, exactly as with no rule at all. See
+        // Dom.visibleText, which removes the characters instead.
         //
-        // Deliberately NOT `input.f` added to the CSS rule: the five other
-        // selectors are there for a DIFFERENT reason ("this selector prints a
-        // validated host"), and widening the rule to every field in the extension
-        // would blur what it means.
-        const key = el("input", { class: "f key ltr-isolate", value: String((raw && raw.key) ?? ""),
+        // THE CLASS STAYS, demoted to what it actually does: isolating the value
+        // from the labels around it. It is deliberately NOT widened to `input.f`
+        // in the CSS -- the other selectors are there for a DIFFERENT reason
+        // ("this selector prints a validated host"), and blurring the two is how
+        // the wrong control got trusted here in the first place.
+        const key = el("input", { class: "f key ltr-isolate", value: Dom.visibleText(raw && raw.key),
           "aria-label": t("key", "Key") });
-        const url = el("input", { class: "f ltr-isolate", value: String((raw && raw.baseUrl) ?? ""),
+        const url = el("input", { class: "f ltr-isolate", value: Dom.visibleText(raw && raw.baseUrl),
           "aria-label": t("destination", "Destination") });
         this.body.appendChild(el("div", { class: "row is-pending" }, [
           el("div", { class: "f-key" }, [key]),
@@ -93,7 +98,16 @@
       // Struck ONCE, before the compare-and-set, so a replayed attempt reuses it
       // instead of inventing a second identity.
       const freshId = crypto.randomUUID();
-      const untouched = String((raw && raw.key) ?? "") === rawKey;
+      // COMPARED AGAINST WHAT THE USER WAS SHOWN, not against the stored bytes.
+      //
+      // The field is filled through Dom.visibleText, so an entry whose key holds
+      // a bidi control is DISPLAYED with a U+FFFD in its place. Comparing to the
+      // raw string would then read "the user edited it" for a field nobody
+      // touched, and send the untouched value down the typed-key path -- where
+      // ProjectKey.parse refuses the replacement character as KEY_SHAPE. The
+      // readmit path re-parses the ORIGINAL key instead, and refuses it as
+      // KEY_CONTROL_CHARS: the same refusal, naming the actual fault.
+      const untouched = Dom.visibleText(raw && raw.key) === rawKey;
       if (untouched) {
         const result = await ctx.apply((s) => s.readmit(fingerprint, instance.value, freshId));
         this.showOutcome(result, message);

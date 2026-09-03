@@ -64,7 +64,7 @@
       "versioned-entry.js",
       "install-outcome.js",
       "stored-policy.js",
-      "key-acknowledgements.js",
+      "local-acknowledgements.js",
       "installed-projection.js",
       "policy-repository.js",
       "destination-journal.js",

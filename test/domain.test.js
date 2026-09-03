@@ -763,7 +763,7 @@ test("the detector sees a key repointed at constant identity", () => {
 });
 
 test("the detector sees a shortcut being switched on, and stays quiet when it is switched off", () => {
-  // key-acknowledgements.js describes the whole attack -- a sync account writing
+  // local-acknowledgements.js describes the whole attack -- a sync account writing
   // armed: true against a host already granted -- and the diff was blind to that
   // exact transition. The reverse must stay silent: reporting a disarm would make
   // the kill switch raise the alarm it exists to silence.

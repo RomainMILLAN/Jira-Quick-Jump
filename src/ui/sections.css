@@ -396,16 +396,33 @@ input.f[aria-invalid="true"] {
   border-color: var(--red);
 }
 
-/* A HOST NAME IS NEVER REORDERED BY ITS OWN CONTENT.
+/* A HOST NAME IS NEVER REORDERED BY THE TEXT AROUND IT.
 
-   A security control, not a typographic nicety: an RTL override inside a host
-   name makes the displayed destination read backwards, so what the user checks
-   is not where the traffic goes -- and this product's second principle is that
-   every surface shows where a shortcut sends you.
+   NOT A SECURITY CONTROL, AND IT USED TO CLAIM TO BE ONE. This comment read "a
+   security control, not a typographic nicety: an RTL override inside a host name
+   makes the displayed destination read backwards" -- and `unicode-bidi` cannot
+   deliver that. It decides how a sequence relates to its NEIGHBOURS; the
+   explicit formatting characters INSIDE the sequence still apply. Measured in
+   Chromium on the stored string `"https://jira." + U+202E + "moc.live/"`, by
+   reading glyph positions back with Range.getBoundingClientRect:
 
-   It was copied into four rules with no shared class, so the fifth place to
-   display a host would have forgotten it. One class, listed with the four
-   selectors that need it today. */
+     no rule at all         ->  https://jira./evil.com
+     isolate (what shipped) ->  https://jira./evil.com
+     bidi-override          ->  https://jira./evil.com
+     the character removed  ->  https://jira.<U+FFFD>moc.live/
+
+   So the control is Dom.visibleText, which REMOVES those characters, and it is
+   applied on the one surface that displays a string the parsers refused (the
+   quarantine rows). Everywhere else the value on screen has already survived
+   JiraInstance.parse, hence /^[\x21-\x7e]+$/, and cannot contain an override at
+   all.
+
+   WHAT THIS RULE IS STILL FOR, honestly: keeping a host name from being
+   reordered by the LABELS and sentences around it, in an RTL interface. That is
+   worth having, it is what `isolate` actually does, and it is why the rule stays
+   -- demoted to typography, with its five selectors unchanged. Do not re-promote
+   it in a comment, and do not widen it to every field on the grounds that it
+   protects them. */
 .ltr-isolate,
 .mono-token,
 .dest,

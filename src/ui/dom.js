@@ -57,7 +57,66 @@
   // before.
   const SVG_TAGS = new Set(["svg", "path"]);
 
+  /**
+   * THE BIDI CONTROLS, REMOVED RATHER THAN ISOLATED -- and this replaces a
+   * control that did not work.
+   *
+   * sections.css carried `.ltr-isolate { unicode-bidi: isolate }` under eighteen
+   * lines calling itself "a security control, not a typographic nicety: an RTL
+   * override inside a host name makes the displayed destination read backwards".
+   * The sentence is right about the danger and wrong about the remedy.
+   * `unicode-bidi` decides how a sequence relates to its NEIGHBOURS; it does not
+   * annul the explicit formatting characters INSIDE it. Measured in Chromium, on
+   * the stored string `"https://jira." + U+202E + "moc.live/"`, by reading glyph
+   * positions back with Range.getBoundingClientRect:
+   *
+   *   no rule at all        ->  https://jira./evil.com
+   *   unicode-bidi: isolate ->  https://jira./evil.com      <- what shipped
+   *   unicode-bidi: bidi-override -> https://jira./evil.com
+   *   U+202E removed        ->  https://jira.<U+FFFD>moc.live/
+   *
+   * NO value of `unicode-bidi` fixes it. Only removing the character does, so
+   * that is what this does -- and it REPLACES the character rather than deleting
+   * it, because a silent deletion makes the field the user is asked to repair
+   * differ from the bytes that are stored, which is the gap the two parsers spend
+   * their headers refusing. U+FFFD says "something was here".
+   *
+   * WHERE IT IS NEEDED, and it is exactly one place: the quarantine rows, the
+   * only surface in this project that displays a string the parser REFUSED. A
+   * host on any other screen has survived JiraInstance.parse, hence
+   * /^[\x21-\x7e]+$/, so no override can be in it. `.ltr-isolate` STAYS on those
+   * fields -- isolating the value from the labels around it is still worth
+   * having, it was simply never the control the comment claimed.
+   *
+   * WRITTEN AS ESCAPES, NEVER AS THE CHARACTERS THEMSELVES -- hence a RegExp
+   * built from a string, like INVISIBLE in core/project-shortcut.js and for the
+   * same reason. A regex LITERAL holding invisible characters cannot be reviewed,
+   * cannot be grepped, and is the one place in this project where a hand edit
+   * could drop a range without leaving a trace in a diff.
+   *
+   * The set: the two marks plus the Arabic one (U+200E LRM, U+200F RLM,
+   * U+061C ALM), the legacy embeddings and overrides (U+202A-U+202E), and the
+   * four isolates Unicode 6.3 added to replace them (U+2066-U+2069) -- the same
+   * ranges the parser refuses at the door.
+   */
+  const BIDI_CONTROLS = new RegExp(
+    "[\\u200e\\u200f\\u061c\\u202a-\\u202e\\u2066-\\u2069]",
+    "g"
+  );
+
   const Dom = {
+    /**
+     * A string safe to SHOW, for the one surface that shows what the parsers
+     * refused. See BIDI_CONTROLS above for why CSS could not do this.
+     *
+     * It is `Dom`'s and not the section's for the usual reason: the next surface
+     * to display untrusted text must find a door, not a recipe -- the same
+     * argument as downloadFile and dragHandle below.
+     */
+    visibleText(raw) {
+      return String(raw ?? "").replace(BIDI_CONTROLS, "�");
+    },
+
     el(tag, props = {}, children = []) {
       const node = SVG_TAGS.has(tag)
         ? document.createElementNS(SVG_NS, tag)

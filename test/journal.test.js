@@ -115,8 +115,8 @@ test("a key-scoped acknowledgement is written and read back, and an orphan row i
     policy = policy.registerCatchAll("star", instance).value;
     policy = policy.acknowledge("star", "CATCH_ALL").value;
 
-    await g.KeyAcknowledgements.record(policy);
-    const rows = await g.KeyAcknowledgements.read();
+    await g.LocalAcknowledgements.record(policy);
+    const rows = await g.LocalAcknowledgements.read();
     assert.deepEqual(rows.kindsFor(policy.shortcuts()[0]), ["CATCH_ALL"]);
 
     // The row is bound to id + destination + nature, so pointing the catch-all
@@ -127,22 +127,38 @@ test("a key-scoped acknowledgement is written and read back, and an orphan row i
 
     // And removing the shortcut lapses its row: an attestation whose triple no
     // longer exists has no object any more.
-    await g.KeyAcknowledgements.record(policy.remove("star").value);
-    assert.equal(Object.keys((await g.KeyAcknowledgements.read()).toJSON()).length, 0);
+    await g.LocalAcknowledgements.record(policy.remove("star").value);
+    assert.equal(Object.keys((await g.LocalAcknowledgements.read()).toJSON()).length, 0);
   });
 });
 
 test("an absent or corrupt acknowledgement store means NOT acknowledged", async () => {
   await withJournal(async (area) => {
-    assert.equal(Object.keys((await g.KeyAcknowledgements.read()).toJSON()).length, 0, "absent");
+    const rows = async () => Object.keys((await g.LocalAcknowledgements.read()).toJSON());
+    assert.deepEqual(await rows(), [], "absent");
     await area.set({ keyAcknowledgements: { rev: 1, value: "not an object" } });
-    assert.equal(Object.keys((await g.KeyAcknowledgements.read()).toJSON()).length, 0, "corrupt");
-    await area.set({ keyAcknowledgements: { rev: 2, value: { [JSON.stringify(["x", "y", "named"])]: ["INSECURE_SCHEME"] } } });
-    assert.equal(
-      Object.keys((await g.KeyAcknowledgements.read()).toJSON()).length,
-      0,
-      "a destination-scoped kind cannot sneak in, and a row left empty is no row"
-    );
+    assert.deepEqual(await rows(), [], "corrupt");
+
+    // A DESTINATION-SCOPED KIND IS NOW ADMITTED HERE, and this assertion is
+    // INVERTED from what it used to say.
+    //
+    // It read "a destination-scoped kind cannot sneak in" and required zero rows
+    // -- because this entry deliberately held one scope out of two, the other
+    // living in the configuration itself. That WAS the storage half of a real
+    // hole: the configuration goes to storage.sync the moment the user ticks
+    // "Sync across devices", so INSECURE_SCHEME and PUNYCODE travelled by exactly
+    // the channel this file's header forbids. The entry now holds every scope,
+    // and refusing one here would send it back where it came from.
+    const row = JSON.stringify(["x", "y", "named"]);
+    await area.set({ keyAcknowledgements: { rev: 2, value: { [row]: ["INSECURE_SCHEME"] } } });
+    assert.deepEqual(await rows(), [row], "a destination-scoped kind is filed HERE now, not in the document");
+
+    // WHAT STILL CANNOT SNEAK IN: a kind no build knows. That check was always
+    // the load-bearing half, and it is counted rather than silently filtered --
+    // see the `unknownKinds` note in admitting().
+    await area.set({ keyAcknowledgements: { rev: 3, value: { [row]: ["NOT_A_KIND_ANY_BUILD_KNOWS"] } } });
+    assert.deepEqual(await rows(), [], "an unknown kind cannot sneak in, and a row left empty is no row");
+    assert.equal((await g.LocalAcknowledgements.read()).losses().unknownKinds, 1, "and the loss is counted");
   });
 });
 
@@ -162,12 +178,12 @@ test("a commit never forgets an attestation it was not told about", async () => 
 
     // The other surface attests, and commits first.
     const theirs = mine.acknowledge("star", "CATCH_ALL").value;
-    await g.KeyAcknowledgements.record(theirs);
+    await g.LocalAcknowledgements.record(theirs);
 
     // We commit an unrelated edit from a policy that never saw that click.
-    await g.KeyAcknowledgements.record(mine);
+    await g.LocalAcknowledgements.record(mine);
 
-    const rows = await g.KeyAcknowledgements.read();
+    const rows = await g.LocalAcknowledgements.read();
     assert.deepEqual(
       rows.kindsFor(mine.shortcuts()[0]),
       ["CATCH_ALL"],
@@ -182,12 +198,12 @@ test("the bound refuses to admit rather than un-acknowledging afterwards", async
   // is the only place a hostile size actually arrives.
   await withJournal(async (area) => {
     const inflated = {};
-    for (let i = 0; i < g.KeyAcknowledgements.MAX_ENTRIES + 50; i += 1) {
+    for (let i = 0; i < g.LocalAcknowledgements.MAX_ENTRIES + 50; i += 1) {
       inflated[JSON.stringify([`id${i}`, "https://x.example.org", "named"])] = ["CATCH_ALL"];
     }
     await area.set({ keyAcknowledgements: { rev: 1, value: inflated } });
-    const rows = await g.KeyAcknowledgements.read();
-    assert.equal(Object.keys(rows.toJSON()).length, g.KeyAcknowledgements.MAX_ENTRIES, "the excess never enters");
+    const rows = await g.LocalAcknowledgements.read();
+    assert.equal(Object.keys(rows.toJSON()).length, g.LocalAcknowledgements.MAX_ENTRIES, "the excess never enters");
   });
 });
 
@@ -420,7 +436,7 @@ test("a full table of lapsed rows never costs the user the click they just made"
   // understand" on the catch-all warning and it never arms.
   await withJournal(async (area) => {
     const lapsed = {};
-    for (let i = 0; i < g.KeyAcknowledgements.MAX_ENTRIES; i += 1) {
+    for (let i = 0; i < g.LocalAcknowledgements.MAX_ENTRIES; i += 1) {
       lapsed[JSON.stringify([`ghost${i}`, "https://gone.example.org", "catch-all"])] = ["CATCH_ALL"];
     }
     await area.set({ keyAcknowledgements: { rev: 1, value: lapsed } });
@@ -429,9 +445,9 @@ test("a full table of lapsed rows never costs the user the click they just made"
     policy = policy.registerCatchAll("star", g.JiraInstance.parse("https://catchall.atlassian.net").value).value;
     policy = policy.acknowledge("star", "CATCH_ALL").value;
 
-    await g.KeyAcknowledgements.record(policy);
+    await g.LocalAcknowledgements.record(policy);
 
-    const rows = await g.KeyAcknowledgements.read();
+    const rows = await g.LocalAcknowledgements.read();
     assert.deepEqual(
       rows.kindsFor(policy.shortcuts()[0]),
       ["CATCH_ALL"],
@@ -445,9 +461,9 @@ test("the attestations cannot be mutated through what they hand out", async () =
     let policy = g.JumpPolicy.empty().withEngines(["google.com"]).value;
     policy = policy.registerCatchAll("star", g.JiraInstance.parse("https://catchall.atlassian.net").value).value;
     policy = policy.acknowledge("star", "CATCH_ALL").value;
-    await g.KeyAcknowledgements.record(policy);
+    await g.LocalAcknowledgements.record(policy);
 
-    const rows = await g.KeyAcknowledgements.read();
+    const rows = await g.LocalAcknowledgements.read();
     rows.kindsFor(policy.shortcuts()[0]).push("INJECTED");
     assert.deepEqual(rows.kindsFor(policy.shortcuts()[0]), ["CATCH_ALL"], "the value lends nothing it owns");
   });
@@ -908,5 +924,128 @@ test("the platform refusing the whole update is a named failure, never a silent 
       "and the cause travels: " + JSON.stringify(report.skipped));
     // FAIL CLOSED: the previous programme must not be left running.
     assert.equal(dnr.rules().length, 0, "nothing is left firing under a policy that failed");
+  });
+});
+
+test("a stored fact is rebuilt field by field, so a surplus field cannot ride along", async () => {
+  // THE ENVELOPE REFUSED A SPREAD AND THE ENTRIES KEPT ONE. JournalState.restore
+  // spends a paragraph on "A WHITELIST, never a spread of the stored object" --
+  // and entryOf did `{ ...raw, type, source }` five lines away, on the half that
+  // reaches the screen: sentences.js paints fact.key and fact.newBaseUrl into the
+  // banner whose whole job is to be believed.
+  //
+  // A LOCAL attacker only, as the header of this file states about itself. What
+  // this closes is not a new adversary, it is an UNBOUNDED and UNSPECIFIED shape
+  // on a surface he can reach.
+  await withJournal(async (area) => {
+    await area.set({
+      destinationJournal: {
+        rev: 1,
+        value: {
+          entries: [{
+            type: "DestinationChanged",
+            source: "UNKNOWN",
+            shortcutId: "x",
+            key: "ABC",
+            oldBaseUrl: "https://a.example.org",
+            newBaseUrl: "https://b.example.org",
+            when: 7,
+            // Everything below is what a writer added and no fact ever carries.
+            surplus: "written back for ever by some paths and dropped by others",
+            onclick: "not that it would ever run, but it has no business here",
+            nested: { deep: [1, 2, 3] },
+          }],
+          acknowledged: false,
+        },
+      },
+    });
+    const [fact] = (await g.DestinationJournal.read()).entries;
+    assert.equal(fact.key, "ABC", "what a fact does carry survives");
+    assert.equal(fact.newBaseUrl, "https://b.example.org");
+    assert.equal(fact.when, 7);
+    assert.equal("surplus" in fact, false, "a field no fact carries does not travel");
+    assert.equal("onclick" in fact, false);
+    assert.equal("nested" in fact, false);
+  });
+});
+
+test("a fact's text is bounded, or twenty of them freeze the banner for good", async () => {
+  await withJournal(async (area) => {
+    await area.set({
+      destinationJournal: {
+        rev: 1,
+        value: {
+          entries: [{
+            type: "DestinationChanged",
+            source: "UNKNOWN",
+            key: "A".repeat(50_000),
+            newBaseUrl: "https://" + "b".repeat(50_000) + ".example.org",
+            affectedKeys: Array.from({ length: 500 }, (_, i) => "K" + i),
+          }],
+          acknowledged: false,
+        },
+      },
+    });
+    const [fact] = (await g.DestinationJournal.read()).entries;
+    assert.equal(fact.key.length, 256, "text is truncated, not merely accepted");
+    assert.equal(fact.newBaseUrl.length, 256);
+    assert.equal(fact.affectedKeys.length, 32, "and so is a list");
+  });
+});
+
+test("a corrupt `seen` reads as NOT seen, so the banner never goes quiet on a bad byte", async () => {
+  await withJournal(async (area) => {
+    await area.set({
+      destinationJournal: {
+        rev: 1,
+        value: {
+          // `seen: "yes"` was truthy through the spread. The banner filters on
+          // `entry.seen !== true`, so the direction matters: an unreadable flag
+          // must mean unseen, never acknowledged.
+          entries: [{ type: "CatchAllAppeared", source: "UNKNOWN", baseUrl: "https://evil.example.org", seen: "yes" }],
+          acknowledged: false,
+        },
+      },
+    });
+    const journal = await g.DestinationJournal.read();
+    assert.equal(journal.entries[0].seen, false);
+    assert.equal(journal.unseen.length, 1, "it is still owed to the user");
+  });
+});
+
+test("every field PolicyDiff emits survives the round trip through storage", async () => {
+  // THE LIST IS THE RISK. entryOf now names the fields it carries, so a fact type
+  // gaining a field would have it silently dropped between the commit and the
+  // banner -- and the banner would render `undefined` where it owed a host name,
+  // which is the exact defect its own sentences.js header describes.
+  await withJournal(async () => {
+    const instance = g.JiraInstance.parse("https://a.example.org").value;
+    const other = g.JiraInstance.parse("https://b.example.org").value;
+    const id = "44444444-4444-4444-8444-444444444444";
+
+    let before = g.JumpPolicy.empty().withEngines(["google.com"]).value;
+    before = before.register(id, g.ProjectKey.parse("ABC").value, instance).value;
+    let after = before.withBaseUrlFor(id, other).value;
+    after = after.armShortcut(id).value;
+    after = after.registerCatchAll("star", instance).value;
+    after = after.withKeyFor(id, g.ProjectKey.parse("ABD").value).value;
+
+    const facts = g.PolicyDiff.between(before, after);
+    assert.ok(facts.length > 0, "the fixture must actually produce facts");
+    await g.DestinationJournal.recordUnclaimed(facts, "fp-round-trip", Date.now());
+
+    const stored = (await g.DestinationJournal.read()).entries;
+    assert.equal(stored.length, facts.length, "every fact came back");
+    for (const emitted of facts) {
+      const read = stored.find((e) => e.type === emitted.type);
+      assert.ok(read, `${emitted.type} did not survive`);
+      for (const [field, value] of Object.entries(emitted)) {
+        assert.deepEqual(
+          read[field],
+          value,
+          `${emitted.type}.${field} was dropped: add it to entryOf's field lists`,
+        );
+      }
+    }
   });
 });

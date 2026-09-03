@@ -77,9 +77,26 @@
   // saying "invalid character" about characters nobody can see is unusable, so
   // this gets its own code. Bidi overrides matter on their own: they let a host
   // name be displayed backwards in the UI.
+  //
+  // THE ISOLATES WERE MISSING, and they are the MODERN spelling of the very
+  // attack the paragraph above names. U+202A-U+202E were here; U+2066-U+2069
+  // (LRI, RLI, FSI, PDI) are what Unicode 6.3 added to replace them, and
+  // U+061C (ALM) is the Arabic mark that does the same job for one character.
+  //
+  // NOTHING WAS EXPLOITABLE THROUGH THE GAP, and saying so is what stops the
+  // next reader from treating this list as the only rampart: measured on all
+  // three doors, every uncovered character was already refused downstream --
+  // BASE_NOT_A_URL or BASE_NOT_CANONICAL for a base URL, KEY_SHAPE for a key,
+  // HOST_SHAPE for a custom domain. What the omission cost was the ERROR
+  // MESSAGE: the user was told "this is not a valid URL" about a string whose
+  // only fault was a character nobody can see, which is the one sentence this
+  // code exists to avoid.
+  //
+  // U+00AD (SHY) and U+180E join for the same reason and with the same status:
+  // caught downstream by the canonicality post-condition, refused here by name.
   const INVISIBLE = new RegExp(
-    "[\\u0000-\\u0020\\u007f\\u00a0\\u200b-\\u200f\\u2028\\u2029" +
-      "\\u202a-\\u202e\\u2060-\\u2064\\ufeff]"
+    "[\\u0000-\\u0020\\u007f\\u00a0\\u00ad\\u180e\\u200b-\\u200f\\u2028\\u2029" +
+      "\\u202a-\\u202e\\u2060-\\u2064\\u2066-\\u2069\\u061c\\ufeff]"
   );
 
   class ProjectKey {
@@ -312,6 +329,40 @@
   ]);
   const LINK_LOCAL = /^(169\.254\.|\[fe80:|\[fd00:ec2)/i;
 
+  /**
+   * THE ADDRESS, NOT ITS SPELLING -- and the claim above ("removes the whole
+   * class") was false without this.
+   *
+   * `new URL()` canonises the decimal, octal and hexadecimal forms of an IPv4
+   * literal back to the dotted one, so `http://2852039166` and `http://0xA9FEA9FE`
+   * both arrived as `169.254.169.254` and were refused. What it does NOT do is
+   * unwrap an IPv4-MAPPED IPv6 address: `[::ffff:169.254.169.254]` comes out as
+   * `[::ffff:a9fe:a9fe]`, in hexadecimal, matching neither the list nor
+   * LINK_LOCAL. Measured, before this function existed:
+   *
+   *   http://169.254.169.254            -> BASE_FORBIDDEN_HOST
+   *   http://[::ffff:169.254.169.254]   -> BASE_NOT_CANONICAL   (the post-condition)
+   *   http://[::ffff:a9fe:a9fe]         -> ACCEPTED
+   *
+   * The middle line is why this was only ever a defence-in-depth hole rather
+   * than an open door: the canonicality post-condition catches the readable
+   * spelling. It does not catch the one an attacker would actually write in a
+   * shared configuration file, and `[::ffff:a9fe:a9fe]` is unreadable to every
+   * reviewer -- which is the whole point of using it.
+   *
+   * IT RETURNS THE DOTTED FORM, so ONE list and ONE regex keep deciding. Adding
+   * hexadecimal twins to FORBIDDEN_HOSTS would have meant maintaining every
+   * entry twice, in two notations, and getting the second one wrong.
+   */
+  const IPV4_MAPPED = /^\[::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})\]$/i;
+  const asAddress = (hostname) => {
+    const mapped = IPV4_MAPPED.exec(hostname);
+    if (!mapped) return hostname;
+    const high = parseInt(mapped[1], 16);
+    const low = parseInt(mapped[2], 16);
+    return `${high >> 8}.${high & 0xff}.${low >> 8}.${low & 0xff}`;
+  };
+
   const refuse = (code, message) => ({ ok: false, code, message });
 
   class JiraInstance {
@@ -322,6 +373,22 @@
     baseUrl() { return this._baseUrl; }
     protocol() { return this._url.protocol; }
     hostname() { return this._url.hostname; }
+    /**
+     * THE ENDPOINT THIS HOSTNAME DENOTES, which is not always how it is written.
+     *
+     * Asked of the instance rather than recomputed by whoever needs it: the
+     * judgement "is this host private" (shortcut-warning.js) and the refusal
+     * "is this host forbidden" (parse, below) are two different questions about
+     * ONE fact, and that fact belongs here -- unwrapping an IPv4-mapped IPv6
+     * literal is URL knowledge, exactly like the origin/path split next door.
+     *
+     * Written this way, `[::ffff:0a00:0001]` reaches PRIVATE_V4 as `10.0.0.1`
+     * instead of slipping past it. It used to slip: only isLiteralIp caught it,
+     * so the row was warned about being an IP and never about being on a private
+     * network -- the less specific of the two sentences, on the one screen where
+     * the user decides whether to trust a destination.
+     */
+    address() { return asAddress(this._url.hostname); }
     /**
      * The ONLY owner of the origin/path split. Without it the first implementer
      * writes `new URL(baseUrl).origin` inside a rendering function -- taking
@@ -410,7 +477,11 @@
     if (url.username !== "" || url.password !== "") {
       return refuse("BASE_USERINFO", "A base URL cannot contain credentials.");
     }
-    if (FORBIDDEN_HOSTS.has(url.hostname) || LINK_LOCAL.test(url.hostname)) {
+    // THE ADDRESS the hostname denotes, never the hostname as written: see
+    // asAddress. An IPv4-mapped IPv6 literal is the same endpoint under another
+    // spelling, and this list decides about endpoints.
+    const address = asAddress(url.hostname);
+    if (FORBIDDEN_HOSTS.has(address) || LINK_LOCAL.test(address)) {
       return refuse("BASE_FORBIDDEN_HOST", "This address is a cloud metadata or link-local endpoint.");
     }
     if (url.port !== "") {

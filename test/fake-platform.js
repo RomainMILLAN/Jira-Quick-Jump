@@ -50,6 +50,18 @@ export const permissionState = { granted: true, asked: [] };
 export const i18nCatalogue = {};
 
 const local = new Map();
+/**
+ * THE SYNC AREA, and it did not exist.
+ *
+ * The fake modelled a browser WITHOUT storage.sync, so `Platform.storageAreaFor`
+ * fell back to local, `storageAreaName()` could never answer "sync", and NO TEST
+ * COULD REACH the sync path at all -- not migrateTo, not the area filter on
+ * onPolicyChanged, not the door that decides whether a saved acknowledgement is
+ * believable. Three controls whose whole subject is "which area is this?" were
+ * unreachable by construction, in the file that exists to make the worker's
+ * claims falsifiable.
+ */
+const synced = new Map();
 const badge = { text: undefined, calls: 0, reject: false };
 let installedRules = [];
 const asked = [];
@@ -148,21 +160,32 @@ const passGate = async (on, name) => {
   }
 };
 
-/** The three calls VersionedEntry actually makes, behind a Map. */
-const area = {
+/**
+ * The three calls VersionedEntry actually makes, behind a Map.
+ *
+ * A FACTORY NOW, because there are two areas -- and both objects are built ONCE
+ * at module level, so the stable object identity the header of this file demands
+ * is unchanged. reset() clears the CONTENT of each map, never the containers.
+ *
+ * The injected fault flags stay per-area: `store.failWrites()` is about
+ * storage.local, which is where every entry this project protects actually
+ * lives, and a fault switch that silently governed both areas would make a test
+ * about one of them pass for the other's reason.
+ */
+const areaOver = (bucketMap, areaName) => ({
   async get(name) {
     await passGate("get", name);
-    if (local.get("__rejectGet") === true) throw new Error("storage.local.get rejected");
-    return local.has(name) ? { [name]: local.get(name) } : {};
+    if (bucketMap.get("__rejectGet") === true) throw new Error(`storage.${areaName}.get rejected`);
+    return bucketMap.has(name) ? { [name]: bucketMap.get(name) } : {};
   },
   async set(entry) {
     for (const name of Object.keys(entry)) await passGate("set", name);
-    if (local.get("__rejectSet") === true) throw new Error("QUOTA_BYTES quota exceeded");
+    if (bucketMap.get("__rejectSet") === true) throw new Error("QUOTA_BYTES quota exceeded");
     // TARGETED, because the browser's quota is not all-or-nothing: a large entry
     // can be refused where a small one still fits. A fake that only fails
     // wholesale cannot express "the projection was refused but the journal was
     // written", which is the case worth testing -- the projection is the big one.
-    const only = local.get("__rejectSetFor");
+    const only = bucketMap.get("__rejectSetFor");
     if (only && Object.keys(entry).includes(only)) throw new Error("QUOTA_BYTES quota exceeded");
     const changes = {};
     for (const [k, v] of Object.entries(entry)) {
@@ -170,20 +193,25 @@ const area = {
       // when the stored value actually differs. Nothing fired at all here, so
       // every test that cared about the notification had to RING THE BELL ITSELF
       // -- simulating the one link worth proving.
-      const before = JSON.stringify(local.get(k));
-      local.set(k, v);
+      const before = JSON.stringify(bucketMap.get(k));
+      bucketMap.set(k, v);
       if (JSON.stringify(v) !== before) changes[k] = { newValue: v };
     }
-    if (Object.keys(changes).length > 0) await fireAll(buckets.onChanged, changes, "local");
+    // THE AREA IT REALLY CAME FROM. Hard-coded "local" here would have made the
+    // area filter untestable in the one direction that matters.
+    if (Object.keys(changes).length > 0) await fireAll(buckets.onChanged, changes, areaName);
   },
   async remove(name) {
     // A REMOVE CAN FAIL. It could not, so InstallOutcome.forget()'s try/catch --
     // whose whole contract is "it never throws" -- was never entered, and the test
     // that claimed to prove it passed because nothing could throw.
-    if (local.get("__rejectRemove")) throw new Error("remove rejected");
-    local.delete(name);
+    if (bucketMap.get("__rejectRemove")) throw new Error("remove rejected");
+    bucketMap.delete(name);
   },
-};
+});
+
+const area = areaOver(local, "local");
+const syncArea = areaOver(synced, "sync");
 
 const chrome = {
   runtime: {
@@ -196,6 +224,7 @@ const chrome = {
   _openedOptions: 0,
   storage: {
     local: area,
+    sync: syncArea,
     onChanged: hub(buckets.onChanged),
   },
   permissions: {
@@ -267,6 +296,7 @@ export function installPlatform() {
 export function reset() {
   gate = null;
   local.clear();
+  synced.clear();
   installedRules = [];
   asked.length = 0;
   badge.text = undefined;
@@ -285,6 +315,15 @@ export function reset() {
 export const store = {
   /** What the platform believes is installed, priorities included. */
   rules: () => installedRules,
+  /** The OTHER area, for the three controls whose subject is "which area?". */
+  sync: {
+    raw: synced,
+    entry: (name) => synced.get(name),
+    put: (name, value) => synced.set(name, value),
+  },
+  /** Puts storage.sync in charge, the way SectionStorage's chip does -- through
+   *  the entry the facade reads, never by reaching past it. */
+  inCharge: (areaName) => local.set("storageArea", areaName),
   /** Raw entries, to forge one or to read one back. */
   raw: local,
   entry: (name) => local.get(name),

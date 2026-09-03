@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { loadCore } from "./load-core.js";
 import { HOSTILE_KEYS, VALID_KEYS } from "./fixtures/hostile-keys.js";
 import { HOSTILE_BASE_URLS, VALID_BASE_URLS } from "./fixtures/hostile-base-urls.js";
+import { readFileSync } from "node:fs";
 
 const g = await loadCore();
 
@@ -224,8 +225,15 @@ test("the reserved prefixes have one owner, and every entry is key-shaped", () =
 test("a forged storage entry cannot pre-acknowledge a catch-all, so it produces no rule at all", () => {
   // The cheapest sync attack: point a catch-all at a host the user has already
   // granted, and acknowledge the warning on their behalf. Consent.parse drops the
-  // key-scoped acknowledgement, the entry is still ADMITTED (quarantining it would
-  // hit the legitimate path on every device), and activeBindings excludes it.
+  // key-scoped acknowledgement UNCONDITIONALLY -- no door has ever had a reason to
+  // believe a document about the catch-all, which is why this one kind is refused
+  // in the parse and not left to the door's `trustsSavedConsent`. The entry is
+  // still ADMITTED (quarantining it would hit the legitimate path on every
+  // device), and activeBindings excludes it.
+  //
+  // ASSERTED ON THE TRUSTING DOOR, deliberately: the default would pass this test
+  // for the wrong reason once the destination scopes started depending on the
+  // door, and the catch-all's protection must not become a side effect of that.
   const restored = g.JumpPolicy.restore({
     schemaVersion: 1,
     armed: true,
@@ -236,7 +244,7 @@ test("a forged storage entry cannot pre-acknowledge a catch-all, so it produces 
       baseUrl: "https://already-granted.atlassian.net",
       consent: { armed: true, acknowledged: ["CATCH_ALL"] },
     }],
-  });
+  }, { trustsSavedConsent: true });
   assert.equal(restored.ok, true, "the entry must be admitted, not quarantined");
   assert.equal(restored.quarantine.length, 0, "quarantine is for what we cannot READ");
   const shortcut = restored.policy.shortcuts()[0];
@@ -246,29 +254,122 @@ test("a forged storage entry cannot pre-acknowledge a catch-all, so it produces 
   assert.deepEqual(rules, []);
 });
 
-test("a destination-scoped acknowledgement still travels, because it was always destination-bound", () => {
-  const restored = g.JumpPolicy.restore({
-    schemaVersion: 1,
-    armed: true,
-    engines: ["google.com"],
-    shortcuts: [{
-      id: "22222222-2222-4222-8222-222222222222",
-      key: "ABC",
-      baseUrl: "http://intra.example.org/jira",
-      consent: { armed: true, acknowledged: ["INSECURE_SCHEME", "INTERNAL_HOST"] },
-    }],
-  });
+/**
+ * THIS TEST USED TO ASSERT THE HOLE, and it is worth saying so rather than
+ * quietly rewriting it.
+ *
+ * It was called "a destination-scoped acknowledgement still travels, because it
+ * was always destination-bound", and it required exactly what an attacker
+ * needed: a document claiming `acknowledged: ["INSECURE_SCHEME"]` came back with
+ * zero unacknowledged warnings. "Destination-bound" is true and answers a
+ * different question -- WHICH acknowledgements a change of destination forgets --
+ * while the question that decides whether a rule installs is WHO SAID SO. The
+ * configuration lives in storage.sync as soon as the user ticks "Sync across
+ * devices", so the answer was "a browser account", for two HIGH-severity
+ * warnings.
+ *
+ * The door is now told whether it may believe the document, and this test asserts
+ * both answers -- because a fix that only ever checks the refusing branch cannot
+ * see the day the trusting one stops working, and that branch is the migration
+ * every existing profile walks through.
+ */
+const SAVED_WITH_ACKS = () => ({
+  schemaVersion: 1,
+  armed: true,
+  engines: ["google.com"],
+  shortcuts: [{
+    id: "22222222-2222-4222-8222-222222222222",
+    key: "ABC",
+    baseUrl: "http://jira.corp/jira",
+    consent: { armed: true, acknowledged: ["INSECURE_SCHEME", "INTERNAL_HOST"] },
+  }],
+});
+
+test("a synced document cannot pre-acknowledge a destination warning, so its rule stays inert", () => {
+  const restored = g.JumpPolicy.restore(SAVED_WITH_ACKS(), { trustsSavedConsent: false });
+  assert.equal(restored.ok, true, "the entry is admitted, not quarantined");
+  assert.equal(restored.quarantine.length, 0, "quarantine is for what we cannot READ");
+  const shortcut = restored.policy.shortcuts()[0];
+  assert.equal(shortcut.consent().acknowledged("INSECURE_SCHEME"), false, "the attestation did not travel");
+  assert.deepEqual(
+    shortcut.unacknowledgedWarnings().map((w) => w.kind).sort(),
+    ["INSECURE_SCHEME", "INTERNAL_HOST"],
+    "both warnings are owed again, on this machine",
+  );
+  // THE ARMING SURVIVES, and that is deliberate: withoutAcknowledgements is not
+  // Consent.fresh(). What the user sees on screen is the switch that was saved,
+  // and nothing fires until the warnings are accepted.
+  assert.equal(shortcut.armed(), true, "the arming is not the attestation");
+  assert.equal(restored.policy.activeBindings().length, 0, "an unacknowledged shortcut installs nothing");
+});
+
+test("a locally saved document keeps its acknowledgements, or every upgrade re-asks for all of them", () => {
+  // The migration branch. An older build wrote these into the configuration, and
+  // on storage.local that record genuinely is this browser's -- a local attacker
+  // who could forge it can forge the local acknowledgement entry just as easily,
+  // which is the limit local-acknowledgements.js states about itself.
+  const restored = g.JumpPolicy.restore(SAVED_WITH_ACKS(), { trustsSavedConsent: true });
   assert.equal(restored.ok, true);
   const shortcut = restored.policy.shortcuts()[0];
   assert.equal(shortcut.consent().acknowledged("INSECURE_SCHEME"), true);
-  assert.equal(shortcut.unacknowledgedWarnings().length, 0);
+  assert.equal(shortcut.unacknowledgedWarnings().length, 0, "no warning is owed twice");
+  assert.equal(restored.policy.activeBindings().length, 1, "and it installs");
 });
 
-test("a key-scoped acknowledgement is never projected into the document", () => {
+test("the door DEFAULTS to distrusting, because an omission must cost a click and never a control", () => {
+  // rule-installer.js refuses a default for `source` on the grounds that both
+  // values are meaningful. These two are not symmetric: `false` costs an
+  // acknowledgement given again while looking at the destination, `true` can arm
+  // a high-severity warning on somebody else's word. So the omission lands on
+  // `false`, like `armed` in readDocument.
+  const shortcut = g.JumpPolicy.restore(SAVED_WITH_ACKS()).policy.shortcuts()[0];
+  assert.equal(shortcut.consent().acknowledged("INSECURE_SCHEME"), false);
+  assert.equal(
+    g.JumpPolicy.restore(SAVED_WITH_ACKS(), {}).policy.shortcuts()[0].unacknowledgedWarnings().length,
+    2,
+    "an empty option bag is an omission too",
+  );
+});
+
+test("NO acknowledgement is ever projected into the document, whatever its scope", () => {
   const consent = g.Consent.fresh().acknowledging("CATCH_ALL").acknowledging("INSECURE_SCHEME");
-  assert.deepEqual(consent.toJSON().acknowledged, ["INSECURE_SCHEME"]);
-  // It survives in memory, which is what lets the local store carry it.
+  // `acknowledged` is GONE from the projection, not emptied: a field that is
+  // sometimes there is the meaningful absence this project bans, and an empty
+  // array would read as "nothing was ever accepted" rather than "this is not
+  // where that is recorded".
+  assert.deepEqual(Object.keys(consent.toJSON()), ["armed"]);
+  // Both survive in memory, which is what lets the local store carry them.
   assert.equal(consent.acknowledged("CATCH_ALL"), true);
+  assert.equal(consent.acknowledged("INSECURE_SCHEME"), true);
+  // And the round trip through the configuration loses both, on every scope.
+  const reparsed = g.Consent.parse(consent.toJSON());
+  assert.equal(reparsed.ok, true);
+  assert.deepEqual(reparsed.value.acknowledgedKinds(), []);
+});
+
+test("every acknowledgeable kind is filed in the local entry, none is left to the document", () => {
+  // THE WHOLE CATALOGUE, walked rather than sampled. The hole was one scope out
+  // of two, and a test naming two kinds by hand is what let that stand: the day a
+  // sixth warning is added, this goes red unless its home is the local entry.
+  const instance = g.JiraInstance.parse("http://jira.corp/jira").value;
+  let policy = g.JumpPolicy.empty();
+  const id = "33333333-3333-4333-8333-333333333333";
+  policy = policy.registerCatchAll(id, instance).value;
+  for (const kind of g.ShortcutWarning.KINDS) {
+    const next = policy.acknowledge(id, kind);
+    if (next.ok) policy = next.value;
+  }
+  const filed = g.LocalAcknowledgements.Acknowledgements.attestedBy(policy);
+  const rows = Object.values(filed.toJSON());
+  assert.equal(rows.length, 1, "one row for the shortcut");
+  const shortcut = policy.shortcuts()[0];
+  assert.deepEqual(
+    rows[0].slice().sort(),
+    shortcut.consent().acknowledgedKinds().slice().sort(),
+    "everything the shortcut holds is filed locally",
+  );
+  // The other half: nothing at all is left in the configuration.
+  assert.deepEqual(Object.keys(shortcut.toJSON().consent), ["armed"]);
 });
 
 test("editing a destination forgets the destination acknowledgements and keeps the key one", () => {
@@ -396,18 +497,18 @@ test("a baseUrl carrying a backreference is refused, never emitted", () => {
 test("the consent airlock counts both of its silent losses", () => {
   const overflowing = {};
   for (let at = 0; at < 420; at += 1) overflowing[`row-${at}`] = ["CATCH_ALL"];
-  const spilled = g.KeyAcknowledgements.Acknowledgements.admitting(overflowing);
+  const spilled = g.LocalAcknowledgements.Acknowledgements.admitting(overflowing);
   assert.equal(spilled.losses().overflowed, 20, "the rows past the ceiling are counted");
   assert.equal(spilled.losses().unknownKinds, 0);
 
-  const future = g.KeyAcknowledgements.Acknowledgements.admitting({
+  const future = g.LocalAcknowledgements.Acknowledgements.admitting({
     "row-a": ["CATCH_ALL", "A_KIND_FROM_A_LATER_BUILD", "ANOTHER"],
   });
   assert.equal(future.losses().unknownKinds, 2,
     "an unknown kind is counted, not swallowed by a filter");
   assert.equal(future.losses().overflowed, 0);
 
-  const clean = g.KeyAcknowledgements.Acknowledgements.admitting({ "row-a": ["CATCH_ALL"] });
+  const clean = g.LocalAcknowledgements.Acknowledgements.admitting({ "row-a": ["CATCH_ALL"] });
   assert.deepEqual(clean.losses(), { overflowed: 0, unknownKinds: 0 },
     "and an honest store loses nothing");
 });
@@ -497,4 +598,77 @@ test("a private host is warned about, whatever its flavour of private", () => {
     g.JiraInstance.parse("https://jira.lan").value).value;
   assert.equal(policy.armShortcut(ID).code, "UNACKNOWLEDGED_WARNING",
     "an internal host must be acknowledged before the shortcut can arm");
+});
+
+// ------------------------------------------- invisible and bidi characters
+
+test("every explicit bidi formatting character is refused BY NAME, not by a downstream shape check", () => {
+  // THE LIST WAS MISSING THE MODERN SPELLING. U+202A-U+202E were refused;
+  // U+2066-U+2069 -- the isolates Unicode 6.3 added to REPLACE them -- and
+  // U+061C were not.
+  //
+  // NOTHING WAS EXPLOITABLE THROUGH THE GAP, and this test asserts the thing that
+  // actually was wrong: the CODE. Measured before the fix, every uncovered
+  // character was already refused downstream -- BASE_NOT_A_URL or
+  // BASE_NOT_CANONICAL, KEY_SHAPE, HOST_SHAPE -- so the user was told "this is not
+  // a valid URL" about a string whose only fault was a character nobody can see.
+  // That sentence is the one project-shortcut.js exists to avoid, and a test on
+  // `ok === false` would have stayed green through the whole defect.
+  const invisible = [
+    "‎", "‏", "؜",
+    "‪", "‫", "‬", "‭", "‮",
+    "⁦", "⁧", "⁨", "⁩",
+    "­", "᠎", "​", "﻿", " ", " ",
+  ];
+  for (const ch of invisible) {
+    const at = `U+${ch.codePointAt(0).toString(16).toUpperCase().padStart(4, "0")}`;
+    assert.equal(
+      g.JiraInstance.parse(`https://jira.corp.example${ch}/jira`).code,
+      "BASE_CONTROL_CHARS",
+      `${at} in a base URL must be named, not blamed on the URL shape`,
+    );
+    assert.equal(
+      g.ProjectKey.parse(`AB${ch}C`).code,
+      "KEY_CONTROL_CHARS",
+      `${at} in a key must be named, not blamed on the key shape`,
+    );
+  }
+});
+
+test("the refusal catalogue covers every code the import and repair doors can produce", () => {
+  // THE FALLBACK IS `result.message`, i.e. the domain's hard-coded ENGLISH, so a
+  // missing entry means a French build reading English on the one screen that
+  // tells the user something went wrong. ui.test.js pins the three TYPED-input
+  // parsers; this pins the other path, which is the one a shared configuration
+  // file walks.
+  //
+  // WHAT WAS ALREADY SAFE, so the next reader does not re-derive it: no
+  // attacker-authored text ever reached the banner. The two messages that
+  // interpolate a value from the file -- UNKNOWN_FIELD and UNKNOWN_WARNING_KIND --
+  // were among the few already present, so the generic sentence won.
+  //
+  // DERIVED FROM THE SOURCE, never a hand-kept list: a list would drift the day a
+  // new refusal is added, which is precisely how the gap opened.
+  //
+  // `\\(\\s*` IS LOAD-BEARING. Without it the scan missed every refusal whose
+  // code sits on the line AFTER the opening parenthesis -- MutationResult.refused(
+  // is written that way in stored-policy.js -- so MISSING_FRESH_ID was invisible
+  // to a test whose whole job is to find what is missing. A scan with a blind spot
+  // is worse than no scan: it reports zero and is believed.
+  const doors = ["src/core/admission.js", "src/stored-policy.js"];
+  const emitted = new Set();
+  for (const door of doors) {
+    const source = readFileSync(new URL(`../${door}`, import.meta.url), "utf8");
+    for (const m of source.matchAll(/(?:refuse|refused|rejectEntry)\(\s*(?:[^,]+,\s*)?"([A-Z_0-9]+)"/g)) {
+      emitted.add(m[1]);
+    }
+  }
+  // ARMING_STATE_UNREADABLE is deliberately excluded: it travels in `unreadable`,
+  // which policy-repository.js states has NO reader on screen yet -- named debt.
+  // An entry for it would be the dead catalogue row this project condemns.
+  emitted.delete("ARMING_STATE_UNREADABLE");
+
+  assert.ok(emitted.size > 10, `the scan found only ${emitted.size} codes, so it is broken`);
+  const missing = [...emitted].filter((code) => g.RefusalPresentation.sentence({ ok: false, code }) === code);
+  assert.deepEqual(missing, [], "these codes fall back to the raw code or to English");
 });

@@ -45,6 +45,27 @@
   const UNCLAIMED = "UNKNOWN";
 
   /**
+   * WHAT A FACT MAY CARRY, and how long. See entryOf for why this is a list and
+   * not a spread.
+   *
+   * The three groups are the three shapes PolicyDiff emits: text a fact names
+   * (a key, a destination), counts it summarises, and the two flags the journal
+   * itself owns. Anything else a writer added does not travel.
+   */
+  const MAX_FACT_TEXT = 256;
+  const MAX_FACT_LIST = 32;
+  const TEXT_FIELDS = [
+    "shortcutId", "catchAllId", "code",
+    "key", "oldKey", "newKey",
+    "baseUrl", "oldBaseUrl", "newBaseUrl", "catchAllBaseUrl",
+  ];
+  const COUNT_FIELDS = ["changedCount", "engineCount", "shortcutCount"];
+  const LIST_FIELDS = ["kinds", "affectedKeys"];
+
+  const text = (value) =>
+    typeof value === "string" ? value.slice(0, MAX_FACT_TEXT) : undefined;
+
+  /**
    * ONE PLACE DECIDES THE SPECIES OF AN ENTRY, and it decides it once.
    *
    * It was decided in `read()` and NOT in the mutation path, so the two
@@ -59,14 +80,60 @@
    * kept longest -- so twenty junk values became a permanent saturation weapon,
    * and each of them rendered an empty sentence in the banner. Over-signalling is
    * for a doubtful FACT; it is not for a string.
+   *
+   * AND ONE FACT IS REBUILT FIELD BY FIELD -- never `{ ...raw }`.
+   *
+   * JournalState.restore, thirty lines below, refuses exactly this geste in
+   * exactly these words: "A WHITELIST, never a spread of the stored object.
+   * `{ ...empty, ...value }` let any surplus field a hostile writer added travel
+   * through, and some paths then wrote it back for ever while others dropped it".
+   * The argument was right and was applied to the ENVELOPE only; the ENTRIES
+   * inside it kept the spread, and they are the half that reaches the screen --
+   * sentences.js reads fact.key, fact.newBaseUrl, fact.affectedKeys and paints
+   * them in the banner whose whole job is to be believed.
+   *
+   * TWO THINGS THIS CLOSES, and neither is an injection (everything goes through
+   * textContent): a surplus field written back for ever, and a field with NO
+   * BOUND -- a 5 MB `newBaseUrl` freezes the banner, and twenty of them freeze it
+   * for good, on the one surface that reports a compromise.
+   *
+   * THE LIMIT IS UNCHANGED AND STATED: the journal never leaves storage.local,
+   * so only a LOCAL attacker writes here, and such an attacker already holds the
+   * projection and the receipt. This adds no defence against him; it removes an
+   * unbounded, unspecified shape from the surface he can reach.
+   *
+   * A NON-OBJECT IS NOT AN ENTRY, and it is DROPPED rather than promoted --
+   * unchanged, and the reason still holds: turning a corrupt byte into a
+   * synthetic UNKNOWN made noise inevictable, since evidence is kept longest.
+   *
+   * The fields are `undefined` when absent, which is what sentences.js already
+   * expects: `fact.key || t("catchAllKey", …)`.
    */
   const entryOf = (raw) => {
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
-    const type = typeof raw.type === "string" ? raw.type : "DestinationChanged";
-    // Entries written before the split carry no species. UNKNOWN is the safe
-    // reading: a detector must fail by over-signalling.
-    const source = raw.source === CLAIMED ? CLAIMED : UNCLAIMED;
-    return { ...raw, type, source };
+    const entry = {
+      // Entries written before the split carry no species. UNKNOWN is the safe
+      // reading: a detector must fail by over-signalling.
+      type: typeof raw.type === "string" ? raw.type.slice(0, MAX_FACT_TEXT) : "DestinationChanged",
+      source: raw.source === CLAIMED ? CLAIMED : UNCLAIMED,
+      // `seen` is the journal's own flag, and ABSENT MEANS NOT SEEN: the banner
+      // filters on `entry.seen !== true`, so a corrupt value must never read as
+      // acknowledged.
+      seen: raw.seen === true,
+      when: Number.isFinite(raw.when) ? raw.when : undefined,
+      // The journal's other own flag, carried by QuarantinedReadmitted.
+      renamed: raw.renamed === true,
+    };
+    for (const field of TEXT_FIELDS) entry[field] = text(raw[field]);
+    for (const field of COUNT_FIELDS) {
+      entry[field] = Number.isInteger(raw[field]) ? raw[field] : undefined;
+    }
+    for (const field of LIST_FIELDS) {
+      entry[field] = Array.isArray(raw[field])
+        ? raw[field].map(text).filter((value) => value !== undefined).slice(0, MAX_FACT_LIST)
+        : undefined;
+    }
+    return entry;
   };
 
   const isEvidence = (entry) => entry.source === UNCLAIMED;

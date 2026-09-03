@@ -1,5 +1,5 @@
 /**
- * Where a key-scoped acknowledgement lives: storage.local, ALWAYS.
+ * Where EVERY acknowledgement lives: storage.local, ALWAYS.
  *
  * A CONTROL THAT TRAVELS BY THE CHANNEL IT IS MEANT TO WATCH IS WORTHLESS. The
  * journal already says that about itself; the same argument applies here, and it
@@ -8,9 +8,25 @@
  * Without it, a compromised sync account writes
  *   { key: <the catch-all form>, consent: { armed: true, acknowledged: ["CATCH_ALL"] } }
  * against a host the user has already granted, and the extension installs a
- * universal redirector with no screen, no click and no banner. Consent.toJSON
- * therefore projects destination-scoped acknowledgements only, and Consent.parse
- * silently drops the rest.
+ * universal redirector with no screen, no click and no banner.
+ *
+ * IT USED TO HOLD ONE SCOPE OUT OF TWO, and that was the hole. Consent.toJSON
+ * projected the DESTINATION-scoped acknowledgements into the configuration
+ * itself, so INSECURE_SCHEME, PUNYCODE, LITERAL_IP and INTERNAL_HOST travelled
+ * in storage.sync the moment a user ticked "Sync across devices" -- by exactly
+ * the channel the sentence above forbids, for four warnings two of which are
+ * HIGH severity. The argument was applied to the catch-all and stopped there.
+ * Measured: a synced document carrying `acknowledged: ["INSECURE_SCHEME"]` and
+ * `armed: true` produced an ACTIVE binding with no screen and no click. So the
+ * scope distinction is gone from the STORAGE decision -- every kind is filed
+ * here -- and it survives only where it is a domain fact (which warnings a
+ * change of destination forgets).
+ *
+ * WHAT STILL READS THE DOCUMENT, and why that is not a hole: an OLDER build
+ * wrote those acknowledgements into the policy, and JumpPolicy.restore carries
+ * them when -- and only when -- the area is `local`, where the record genuinely
+ * is this browser's. That is a named migration: the first write afterwards files
+ * them here, and toJSON never writes them again. On `sync` they are dropped.
  *
  * THE KEY OF AN ENTRY IS id + baseUrl + nature, not the id alone. An
  * acknowledgement bound to the id recycles: delete the catch-all, reuse its id
@@ -20,9 +36,10 @@
  *
  * ABSENT OR CORRUPT MEANS NOT ACKNOWLEDGED. Fail closed, never "we assume so".
  * Which also means: turning sync on loses the acknowledgements on the other
- * devices, so the catch-all disarms itself there. That is the right sense of
- * failure -- every machine sees the warning once, exactly like everything
- * imported arriving disarmed.
+ * devices, so the shortcut disarms itself there -- the catch-all and, since this
+ * batch, the destination warnings too. That is the right sense of failure --
+ * every machine sees the warning once, exactly like everything imported arriving
+ * disarmed -- and it is now the SAME sentence for all four kinds instead of one.
  *
  * The limit, stated rather than hidden: a LOCAL attacker writes this entry too.
  * This control does not separate the local attacker, it separates the SYNC
@@ -37,12 +54,36 @@
   "use strict";
 
   const { Platform, VersionedEntry } = global;
+  /**
+   * THE STORAGE KEY IS FROZEN, AND THE MODULE'S NAME IS NOT.
+   *
+   * This was `KeyAcknowledgements`, which stopped being true the day it took
+   * every scope rather than the key one: a name that lies is what let the
+   * destination scopes sit in the configuration under a header forbidding exactly
+   * that. So the module is `LocalAcknowledgements` -- named for the property that
+   * carries the security, which is WHERE it lives and never WHICH kinds it holds.
+   *
+   * The ENTRY string stays `keyAcknowledgements` because renaming it would
+   * REVOKE EVERY ATTESTATION on every existing profile: the old key would be
+   * orphaned, the new one absent, and absent means not acknowledged -- so every
+   * catch-all would disarm itself and every user would be asked again. Fail-safe,
+   * and a pointless cost for a cosmetic edit. A schema name is a contract with
+   * data already written; a module name is a contract with the next reader. They
+   * are allowed to disagree, and this comment is what stops the disagreement from
+   * looking like an oversight.
+   */
   const ENTRY = "keyAcknowledgements";
   // Bounded, because the one entry whose job is to say "no" must not grow
-  // unwatched -- and bounded AT THE READING DOOR. What this project writes back
-  // holds AT MOST ONE row (one key-scoped kind, one catch-all per policy), so
-  // this number does not govern us: it governs what a local writer may have put
-  // there before we read. See Acknowledgements.admitting.
+  // unwatched -- and bounded AT THE READING DOOR.
+  //
+  // WHAT WE WRITE BACK IS STILL WELL UNDER IT, and the arithmetic changed with
+  // the scopes: it used to be AT MOST ONE row (one key-scoped kind, one
+  // catch-all per policy); it is now at most ONE ROW PER SHORTCUT, and
+  // JumpPolicy.MAX_SHORTCUTS is 200. The kinds of a shortcut share its row, so
+  // four warnings do not make four rows. 400 therefore still does not govern
+  // us -- it governs what a local writer may have put there before we read --
+  // and it keeps a factor of two over the domain's own ceiling.
+  // See Acknowledgements.admitting.
   const MAX_ENTRIES = 400;
 
   /**
@@ -148,7 +189,12 @@
           // a future build, a tampered local store -- vanished disguised as a
           // filter. `undefined` is the null this repository bans everywhere else.
           if (scope === undefined) { unknownKinds += 1; continue; }
-          if (scope === "key") kept.push(kind);
+          // EVERY KNOWN SCOPE IS KEPT. It used to be `if (scope === "key")`,
+          // which was the storage half of the hole: a destination-scoped kind
+          // read here was DISCARDED, because its home was the configuration --
+          // i.e. storage.sync. `scope` is still read, because an unknown kind
+          // must still be counted rather than filtered away in silence.
+          kept.push(kind);
         }
         if (kept.length > 0) rows.set(key, [...new Set(kept)]);
       }
@@ -165,7 +211,13 @@
         const kinds = shortcut
           .consent()
           .acknowledgedKinds()
-          .filter((kind) => global.ShortcutWarning.scopeOf(kind) === "key");
+          // EVERY KNOWN KIND, matching admitting() above. The `=== "key"` filter
+          // that stood here is what made this entry hold one scope out of two --
+          // and it is also what completes the migration: a destination-scoped
+          // acknowledgement carried out of an older local document is filed here
+          // by the first commit that follows, after which toJSON never writes it
+          // into the configuration again.
+          .filter((kind) => global.ShortcutWarning.scopeOf(kind) !== undefined);
         if (kinds.length > 0) rows.set(rowKey(shortcut), [...kinds]);
       }
       return new Acknowledgements(rows);
@@ -202,7 +254,7 @@
     }
   }
 
-  const KeyAcknowledgements = {
+  const LocalAcknowledgements = {
     ENTRY,
     MAX_ENTRIES,
     // rowKey is NOT exported. Its last outside caller was PolicyRepository._merge,
@@ -249,5 +301,5 @@
     },
   };
 
-  global.KeyAcknowledgements = KeyAcknowledgements;
+  global.LocalAcknowledgements = LocalAcknowledgements;
 })(globalThis);

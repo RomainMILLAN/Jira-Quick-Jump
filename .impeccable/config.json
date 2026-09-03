@@ -1,0 +1,17 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "side-tab",
+        "value": "*",
+        "files": [
+          "src/ui/sections.css"
+        ],
+        "createdAt": "2026-09-03T14:05:57.090Z",
+        "reason": "Not a card side accent: .row.is-drop-before/.is-drop-after are TRANSIENT drop-position indicators on a reorderable list, added and removed by ui/row-reorder.js (lines 131-132, 77) for the duration of a drag only. The side IS the information -- a line on the top edge means the dragged row lands above this one, on the bottom edge below it -- so it is a literal, domain-appropriate use rather than decoration. The CSS comment above them already argues why the three drag states use three DIFFERENT properties (a dashed border belongs to .row.is-shadowed, so borrowing it would make a healthy dragged row look like one that never fires). Pre-existing code, untouched by the current batch."
+      }
+    ]
+  }
+}

@@ -10,6 +10,16 @@ const g = await loadCore();
 const ROOT = new URL("..", import.meta.url).pathname;
 const read = (p) => readFileSync(join(ROOT, p), "utf8");
 
+/** Every .js under a directory, so a test can walk the real tree instead of
+ *  restating a list that drifts. */
+const walkJs = (dir, out = []) => {
+  for (const entry of readdirSync(join(ROOT, dir), { withFileTypes: true })) {
+    if (entry.isDirectory()) walkJs(join(dir, entry.name), out);
+    else if (entry.name.endsWith(".js")) out.push(join(dir, entry.name));
+  }
+  return out;
+};
+
 /**
  * The source WITHOUT its prose.
  *
@@ -1024,39 +1034,93 @@ test("a spacing class is never silently outranked on the same element", () => {
   }
 });
 
-test("the bidi isolation covers every surface that prints a host, and is written once", () => {
-  // A security control, not a typographic nicety: an RTL override inside a host
-  // name makes the displayed destination read BACKWARDS, so what the user checks
-  // is not where the traffic goes. It was copied into four rules with no shared
-  // class -- the fifth place to display a host would have forgotten it.
-  const css = read("src/ui/sections.css");
-  const blocks = css.match(/unicode-bidi:\s*isolate/g) || [];
-  assert.equal(blocks.length, 1, "written once, or it drifts");
+test("a refused string is shown with its bidi controls REMOVED, not merely isolated", async () => {
+  // THIS TEST USED TO ATTEST THE WRONG CONTROL, and it went green for it.
+  //
+  // It asserted that `.ltr-isolate` (unicode-bidi: isolate) covered every surface
+  // printing a host, calling that "a security control, not a typographic nicety".
+  // Measured in Chromium, by reading glyph positions back with
+  // Range.getBoundingClientRect, on the stored string
+  // `"https://jira." + U+202E + "moc.live/"`:
+  //
+  //   no rule at all  ->  https://jira./evil.com
+  //   isolate         ->  https://jira./evil.com     <- identical
+  //   bidi-override   ->  https://jira./evil.com     <- identical
+  //   U+202E removed  ->  https://jira.<U+FFFD>moc.live/
+  //
+  // `unicode-bidi` decides how a sequence relates to its NEIGHBOURS. The explicit
+  // formatting characters INSIDE the sequence still apply, under every value of
+  // the property. So the control is the removal, and this test attests the
+  // removal. The CSS rule survives as typography and is checked as typography.
+  // Every explicit bidi formatting character, and the two marks. A value that
+  // survives here reorders the field it is displayed in.
+  const dangerous = [
+    "\\u200e", "\\u200f", "\\u061c",
+    "\\u202a", "\\u202b", "\\u202c", "\\u202d", "\\u202e",
+    "\\u2066", "\\u2067", "\\u2068", "\\u2069",
+  ].map((escaped) => JSON.parse(`"${escaped}"`));
+  for (const ch of dangerous) {
+    const shown = g.Dom.visibleText("https://jira." + ch + "moc.live/");
+    assert.equal(
+      shown.includes(ch),
+      false,
+      `U+${ch.codePointAt(0).toString(16).padStart(4, "0")} survives Dom.visibleText`,
+    );
+    // REPLACED, never deleted: a silent deletion makes the field the user is
+    // asked to repair differ from the bytes on file, which is the gap both
+    // parsers spend their headers refusing.
+    assert.ok(shown.includes("�"), "something must say a character was there");
+  }
+  // And it does not mangle what is legitimate.
+  assert.equal(g.Dom.visibleText("https://jira.corp.example/jira"), "https://jira.corp.example/jira");
+  assert.equal(g.Dom.visibleText(undefined), "", "a missing field shows as empty, never as \"undefined\"");
 
+  // THE TWO QUARANTINE FIELDS GO THROUGH IT. They are THE ONLY surface in the
+  // project that displays a string the parser REFUSED: everywhere else the value
+  // on screen has passed JiraInstance.parse and its ASCII-printable
+  // post-condition, so no override can be in it. Here the entry is in quarantine
+  // precisely BECAUSE the override was refused.
+  const quarantine = read("src/ui/sections/quarantine.js");
+  const sanitised = quarantine.match(/value: Dom\.visibleText\(/g) || [];
+  assert.equal(sanitised.length, 2, "both quarantine fields must be sanitised, not one");
+  assert.equal(
+    /value: String\(/.test(quarantine),
+    false,
+    "a raw String() into a quarantine field is the bug this test exists for",
+  );
+
+  // AND THE CONTROL HAS ONE OWNER. A second regex spelled anywhere else is how
+  // the two drift, and a section that rolls its own is a section that forgets a
+  // character.
+  const owners = [];
+  for (const file of walkJs("src")) {
+    if (/\\u202e|\\u2066/i.test(read(file))) owners.push(file);
+  }
+  assert.deepEqual(
+    owners.sort(),
+    ["src/core/project-shortcut.js", "src/ui/dom.js"].sort(),
+    "only the parser's refusal list and Dom own the bidi character set",
+  );
+
+  // The CSS rule, now checked as what it is: typography, so a host name is not
+  // reordered by the LABELS around it in an RTL interface.
+  const css = read("src/ui/sections.css");
+  const blocks = css.match(/^\s*unicode-bidi:\s*isolate;/gm) || [];
+  assert.equal(blocks.length, 1, "written once, or it drifts");
   const rule = /((?:^|\n)(?:\.[\w-]+,\n)*\.[\w-]+\s*\{[^}]*unicode-bidi:\s*isolate[^}]*\})/.exec(css);
   assert.ok(rule, "the shared rule exists");
   for (const selector of [".dest", ".origin", ".preview", ".signature-domain", ".ltr-isolate"]) {
-    assert.ok(rule[1].includes(selector), `${selector} prints a host and must be isolated`);
+    assert.ok(rule[1].includes(selector), `${selector} prints a host and must be isolated from its neighbours`);
   }
-  assert.ok(rule[1].includes("direction: ltr"), "isolation without a direction is half the control");
+  assert.ok(rule[1].includes("direction: ltr"), "isolation without a direction is half the typography");
 
-  // AND THE OPT-IN HOOK HAS A READER. `.ltr-isolate` sat first in that rule with
-  // no user anywhere in src/ -- a hook nobody had plugged in. Its one client is
-  // the quarantine repair screen, which is THE ONLY surface that displays a string
-  // the parser REFUSED: everywhere else a host on screen has passed
-  // JiraInstance.parse and its ASCII-printable post-condition, so no bidi override
-  // can be in it. There, the entry is in quarantine precisely BECAUSE the override
-  // was refused.
-  //
-  // Asserted on the section rather than by widening the CSS rule to every
-  // `input.f`: the risk exists only where a refused string is shown, and the five
-  // other selectors are in that rule for a different reason.
-  const quarantine = read("src/ui/sections/quarantine.js");
-  const isolated = quarantine.match(/class: "f[^"]*ltr-isolate[^"]*"/g) || [];
+  // AND THE COMMENT NO LONGER PROMISES WHAT THE PROPERTY CANNOT DO. This is the
+  // half of the fix a code change alone does not carry: the previous comment was
+  // what made the wrong control trusted, here and in the section.
   assert.equal(
-    isolated.length,
-    2,
-    "the two quarantine fields display a REFUSED string and must carry ltr-isolate",
+    /A security control, not a typographic nicety/.test(css),
+    false,
+    "the CSS rule must not call itself a security control again",
   );
 });
 
@@ -1476,14 +1540,14 @@ test("warning wording lives in the interface, and covers every kind", () => {
  * This is the whole reason that context is separate: an acknowledgement that
  * replicated through sync could be granted on your behalf by a compromised browser
  * account -- the named adversary of this project's threat model -- and the control
- * would be worthless. PRIVACY.md promises it in prose, key-acknowledgements.js says
+ * would be worthless. PRIVACY.md promises it in prose, local-acknowledgements.js says
  * "ALWAYS local" in a comment, and NOTHING went red if someone changed it.
  *
  * The frontier map calls this the one row with an empty control column. It is not
  * empty any more.
  */
 test("the consent store is local-only, and cannot quietly become synced", () => {
-  const body = codeOf(read("src/key-acknowledgements.js"));
+  const body = codeOf(read("src/local-acknowledgements.js"));
   assert.equal(/storage\.sync/.test(body), false,
     "key-scoped consent reached storage.sync: a control that travels by the channel " +
     "it watches is worthless");

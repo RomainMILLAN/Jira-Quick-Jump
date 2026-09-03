@@ -73,6 +73,26 @@ trade rather than leave stale rules firing under a badge that says `off`.
 - **The destination path is fixed.** A shortcut always resolves to
   `<base>/browse/<KEY-N>`, so an attacker who controls a destination cannot choose
   a more convincing or more dangerous path.
+- **Cloud metadata and link-local endpoints are a hard refusal, judged on the
+  ADDRESS and not on its spelling.** No Jira is hosted at `169.254.169.254` or
+  `metadata.google.internal`, so those are refused outright rather than warned
+  about. `new URL()` already canonised the decimal, octal and hexadecimal forms of
+  an IPv4 literal back to the dotted one — but not the IPv4-**mapped IPv6** form,
+  so `http://[::ffff:a9fe:a9fe]` *is* `169.254.169.254` and used to be accepted
+  while the dotted spelling was refused. That is the spelling an attacker would
+  put in a shared configuration file, because no reviewer can read it. The
+  mapping is now unwrapped before the list is consulted, and the same address
+  feeds the private-network warning, so a mapped RFC 1918 host is called private
+  for the right reason instead of incidentally.
+- **A string the parsers refused is displayed with its bidi controls removed.**
+  The quarantine repair screen is the only surface that shows a value validation
+  rejected, and an RTL override inside a host name makes the displayed
+  destination read backwards — so what you check is not where the traffic would
+  go. This used to rest on `unicode-bidi: isolate` in the stylesheet, which
+  **does not do that**: measured in Chromium, the rendering with the rule is
+  character-for-character the rendering without it, and no value of the property
+  helps. The characters are stripped and replaced with `U+FFFD` at render time
+  instead; the CSS rule stays as what it always was, typography.
 - **Reordering goes through one door, whatever the affordance.** The arrows and the
   drag handle share a single write path: an absolute intention carrying the whole
   ordered list, settled by a compare-and-set that refuses any mismatch of the id
@@ -125,11 +145,28 @@ trade rather than leave stale rules firing under a badge that says `off`.
   catch-all can never outlive its guards; the cost is availability, per engine.
   A domain long enough to reach that point is also refused at the door it is typed
   at, which is the only place a sentence can still help.
-- **A key-scoped acknowledgement never travels.** Accepting a catch-all's warning
-  is recorded in local storage, outside the configuration, so a compromised sync
-  account cannot accept a universal redirect on your behalf. The limit, stated:
-  this separates the **sync channel**, not a local attacker — who could write that
-  record just as easily as the configuration itself. Same limit as the journal.
+- **No acknowledgement travels with the configuration. Not one.** Accepting a
+  warning — the catch-all's, or a destination's — is recorded in local storage,
+  outside the configuration, so a compromised sync account cannot accept a
+  universal redirect *or an insecure destination* on your behalf. The limit,
+  stated: this separates the **sync channel**, not a local attacker — who could
+  write that record just as easily as the configuration itself. Same limit as the
+  journal.
+  **This used to be true of the catch-all only, and that was a hole.** The
+  destination warnings — `INSECURE_SCHEME`, `PUNYCODE`, `LITERAL_IP`,
+  `INTERNAL_HOST`, two of them high severity — were written *into* the
+  configuration, so they travelled through `storage.sync` the moment you ticked
+  "Sync across devices". A document claiming `acknowledged: ["INSECURE_SCHEME"]`
+  with `armed: true` produced a live, acknowledged shortcut with no screen and no
+  click; measured, and it falsified the sentence that justified accepting `http:`
+  at all ("the traffic never leaves in clear text without someone having said
+  so"). What still bounded it was the host permission (the rule installs inert)
+  and the change journal (the banner fires) — neither of which is this control.
+  Reading a document saved **locally** still honours its acknowledgements, because
+  there that record genuinely is your browser's and a local attacker could forge
+  the local entry just as easily; on a synced document they are dropped and the
+  warning is owed again, on the machine in front of you. The arming survives, so
+  what you see on screen is the switch that was saved.
 - **The change detector tells an act from a discovery.** A change somebody
   claimed at the commit is recorded without raising anything; only a divergence
   nobody claims raises the banner. The claim is a FINGERPRINT OF THE CONTENT --

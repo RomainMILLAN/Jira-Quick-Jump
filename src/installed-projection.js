@@ -42,7 +42,15 @@
       try {
         const { value, rev } = await VersionedEntry.read(Platform.api.storage.local, ENTRY);
         if (!value || typeof value !== "object") return { policy: undefined, rev: rev || 0 };
-        const restored = JumpPolicy.restore(value.policy === undefined ? value : value.policy);
+        const restored = JumpPolicy.restore(value.policy === undefined ? value : value.policy, {
+          // This entry is storage.local, ALWAYS -- the file header says so twice
+          // -- so the saved consent is genuinely this browser's. It also could
+          // not matter here: PolicyDiff compares ids, keys, destinations and
+          // arming, never an acknowledgement. Passed explicitly all the same,
+          // because a door that stays silent about trust is the door that
+          // reopened this hole once.
+          trustsSavedConsent: true,
+        });
         return { policy: restored.ok ? restored.policy : undefined, rev: rev || 0 };
       } catch {
         return { policy: undefined, rev: 0 };

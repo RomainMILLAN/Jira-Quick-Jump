@@ -51,7 +51,7 @@ const named = (key, host) => {
  */
 const seedPolicy = async (policy, rev = 1) => {
   store.put("policy", { rev, value: new g.StoredPolicy(policy, []).toJSON() });
-  await g.KeyAcknowledgements.record(policy);
+  await g.LocalAcknowledgements.record(policy);
 };
 
 /** What the projection holds, as background.js writes it. */
@@ -331,6 +331,50 @@ test("the doorbell FILTERS the area, or a sync writer would wake every open page
 
   await fire.storageChanged({ installOutcome: {} }, "local");
   assert.equal(rings, 1, "storage.local can");
+});
+
+test("the policy subscription filters the area too, or an unread entry still costs a full sync", async () => {
+  // THE ASYMMETRY WITH ITS NEIGHBOUR ABOVE WAS UNINTENTIONAL, and it had a price.
+  //
+  // onPolicyChanged fired on `policy` changing in EITHER area, justified by "it
+  // must not care which area an entry came from". True of READING -- load() asks
+  // the facade which area is in charge -- and false of WAKING: on a profile
+  // storing locally, a write to sync["policy"] changes nothing we will ever read
+  // and was still starting the worker, reloading, and REPLACING EVERY DYNAMIC
+  // RULE. That is a free wake-up per write, from the one channel this whole
+  // module models as hostile.
+  let woken = 0;
+  g.PolicyRepository.onPolicyChanged(() => { woken += 1; });
+
+  // `storageArea` is absent, so the facade answers "local" -- the default.
+  await fire.storageChanged({ policy: {} }, "sync");
+  assert.equal(woken, 0, "a write to the area we do not read must not wake anything");
+
+  await fire.storageChanged({ policy: {} }, "local");
+  assert.equal(woken, 1, "the area in charge still wakes it");
+
+  // A change to ANOTHER entry in the right area is still not our business.
+  await fire.storageChanged({ installOutcome: {} }, "local");
+  assert.equal(woken, 1, "only the policy entry");
+});
+
+test("switching areas is felt, because the filter would otherwise silence the migration", async () => {
+  // migrateTo's own header describes the window this closes: the copy INTO the
+  // target area fires onChanged before `storageArea` names the target, so sync()
+  // reloaded from the area being LEFT and reinstalled its rules. With the filter
+  // that wake is correctly ignored -- which is why the deliberate second put,
+  // AFTER the switch, is the one that has to land. Without it the area would
+  // change and the worker would go on serving the old rules until the next edit.
+  let woken = 0;
+  g.PolicyRepository.onPolicyChanged(() => { woken += 1; });
+
+  await seedPolicy(armedCatchAll());
+  woken = 0;
+
+  const outcome = await g.PolicyRepository.migrateTo("sync");
+  assert.equal(outcome.ok, true, `migration refused: ${outcome.code}`);
+  assert.equal(await g.Platform.storageAreaName(), "sync", "the switch happened");
+  assert.ok(woken > 0, "the worker must be told, or it keeps serving the area we left");
 });
 
 test("read() reconstructs: a forged `rules` or `applied` cannot ride along", async () => {
@@ -776,4 +820,85 @@ test("7quinquies. the kill switch DISARMS, and pressing it twice does not re-arm
   // IDEMPOTENT, hence replay-safe: a third press is still the same state.
   await fire.command("disarm-all");
   assert.equal(store.rules().length, 0, "n presses mean the same thing as one");
+});
+
+test("a synced policy cannot arrive with its destination warnings already accepted", async () => {
+  // F-01 AT THE REPOSITORY LAYER. security.test.js pins the DOOR; this pins the
+  // wiring, which is the half that was actually wrong: the door always had a
+  // `consentFor` hook, and PolicyRepository handed the document's consent through
+  // it unconditionally because nobody told the door where the document came from.
+  //
+  // The attack, in one write: a browser account the user has lost control of puts
+  // an armed shortcut in storage.sync with the http warning already ticked.
+  store.inCharge("sync");
+  assert.equal(await g.Platform.storageAreaName(), "sync", "the fixture must really be on sync");
+
+  const hostile = {
+    schemaVersion: 1,
+    armed: true,
+    engines: ["google.com"],
+    customEngines: [],
+    shortcuts: [{
+      id: "55555555-5555-4555-8555-555555555555",
+      key: "ABC",
+      baseUrl: "http://jira.attacker.example",
+      consent: { armed: true, acknowledged: ["INSECURE_SCHEME"] },
+    }],
+  };
+  store.sync.put("policy", { rev: 1, value: { policy: hostile, quarantine: [] } });
+
+  const loaded = await g.PolicyRepository.load();
+  assert.equal(loaded.ok, true, "the entry is admitted, not quarantined");
+  const shortcut = loaded.stored.policy().shortcuts()[0];
+  assert.deepEqual(
+    shortcut.unacknowledgedWarnings().map((w) => w.kind),
+    ["INSECURE_SCHEME"],
+    "the warning is owed again, on this machine",
+  );
+  assert.equal(shortcut.armed(), true, "the arming is not the attestation");
+  assert.equal(loaded.stored.policy().activeBindings().length, 0, "so nothing installs");
+});
+
+test("a locally saved policy keeps its acknowledgements, and the next write files them outside it", async () => {
+  // The migration branch, end to end. An older build wrote the acknowledgement
+  // INTO the configuration; on storage.local that record is this browser's, so it
+  // is honoured -- and the first commit afterwards moves it to the local
+  // acknowledgement entry, after which toJSON never writes it into the policy
+  // again. Without that second half the migration would be re-run on every read
+  // for ever, which works but leaves the fix resting on the old shape.
+  const saved = {
+    schemaVersion: 1,
+    armed: true,
+    engines: ["google.com"],
+    customEngines: [],
+    shortcuts: [{
+      id: "66666666-6666-4666-8666-666666666666",
+      key: "ABC",
+      baseUrl: "http://jira.corp/jira",
+      consent: { armed: true, acknowledged: ["INSECURE_SCHEME", "INTERNAL_HOST"] },
+    }],
+  };
+  store.put("policy", { rev: 1, value: { policy: saved, quarantine: [] } });
+
+  const loaded = await g.PolicyRepository.load();
+  const shortcut = loaded.stored.policy().shortcuts()[0];
+  assert.equal(shortcut.unacknowledgedWarnings().length, 0, "no warning is owed twice");
+  assert.equal(loaded.stored.policy().activeBindings().length, 1, "and it installs");
+
+  // Any commit at all completes the migration.
+  const applied = await g.PolicyRepository.apply((s) => g.MutationResult.ok(s));
+  assert.equal(applied.ok, true, `commit refused: ${applied.code}`);
+
+  const written = store.entry("policy").value.policy.shortcuts[0].consent;
+  assert.deepEqual(Object.keys(written), ["armed"], "the configuration no longer carries attestations");
+  const filed = await g.LocalAcknowledgements.read();
+  assert.deepEqual(
+    filed.kindsFor(loaded.stored.policy().shortcuts()[0]).sort(),
+    ["INSECURE_SCHEME", "INTERNAL_HOST"],
+    "they were moved to the local entry, not lost",
+  );
+
+  // And the reload after the migration still finds them, from their new home.
+  const again = await g.PolicyRepository.load();
+  assert.equal(again.stored.policy().shortcuts()[0].unacknowledgedWarnings().length, 0);
 });

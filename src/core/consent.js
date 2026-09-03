@@ -59,21 +59,68 @@
     }
 
     /**
-     * ONLY the destination-scoped acknowledgements are persisted here.
+     * THE ARMING IS KEPT, THE ATTESTATIONS ARE NOT.
      *
-     * A key-scoped acknowledgement never travels with the configuration: it
-     * would let a compromised sync account write acknowledged:["CATCH_ALL"] and
-     * install a universal redirector without a single screen or click. Same
-     * argument as the journal -- A CONTROL THAT TRAVELS BY THE CHANNEL IT IS
-     * MEANT TO WATCH IS WORTHLESS. Its home is a separate storage.local entry
-     * (see key-acknowledgements.js), merged back in at reconstitution.
+     * For a door that has no reason to believe what the document claims to have
+     * been shown to somebody -- which is every door except a read from the area
+     * the user's own browser writes locally. See JumpPolicy.restore.
+     *
+     * NOT `Consent.fresh()`: that would also disarm, and disarming is a
+     * DIFFERENT decision made by a different door for a different reason
+     * (proposeImport disarms because a file must not arm; a synced document's
+     * `armed` is already read through the kill-switch guard in readDocument).
+     * Collapsing the two would make one door silently do the other's job, and
+     * the shortcut would then need re-arming as well as re-acknowledging.
+     *
+     * A shortcut left armed with an unacknowledged warning cannot fire --
+     * JumpPolicy._isLive excludes it -- so this is fail-closed without being
+     * destructive: the user acknowledges once, on this machine, looking at the
+     * destination, and the arming they see on screen is the one that was saved.
+     */
+    withoutAcknowledgements() {
+      return new Consent(this._armed, new Set());
+    }
+
+    /**
+     * NO ACKNOWLEDGEMENT IS PERSISTED HERE ANY MORE. NOT ONE.
+     *
+     * This used to write the destination-scoped ones and hold back the key-scoped
+     * one, on this argument: "a key-scoped acknowledgement never travels with the
+     * configuration: it would let a compromised sync account write
+     * acknowledged:['CATCH_ALL'] and install a universal redirector without a
+     * single screen or click. Same argument as the journal -- A CONTROL THAT
+     * TRAVELS BY THE CHANNEL IT IS MEANT TO WATCH IS WORTHLESS."
+     *
+     * THE ARGUMENT WAS RIGHT AND WAS APPLIED TO ONE SCOPE OUT OF TWO. The
+     * configuration lives in storage.sync as soon as the user ticks "Sync across
+     * devices", so INSECURE_SCHEME, PUNYCODE, LITERAL_IP and INTERNAL_HOST
+     * travelled by exactly the channel the sentence above forbids. Measured, on
+     * a document a compromised sync account can write:
+     *
+     *   { armed: true, shortcuts: [{ id: …, key: "ABC",
+     *     baseUrl: "http://jira.attacker.example",
+     *     consent: { armed: true, acknowledged: ["INSECURE_SCHEME", …] } }] }
+     *
+     *   -> restore ok, quarantine 0, refused 0
+     *   -> unacknowledged warnings: []   status: ACTIVE   active bindings: 1
+     *
+     * No screen, no click. INSECURE_SCHEME is a HIGH-severity warning, and
+     * project-shortcut.js justified accepting `http:` at all on the sentence "the
+     * traffic never leaves in clear text without someone having said so" -- which
+     * that document falsifies. What still bounded it was the host permission (the
+     * rule installs inert) and the change journal (the banner fires); neither is
+     * this control, and neither was the one being claimed.
+     *
+     * So every acknowledgement now lives where the catch-all's already did: a
+     * storage.local entry that never syncs (see local-acknowledgements.js),
+     * merged back in at reconstitution.
+     *
+     * WHAT THIS DOES NOT DO, said plainly: it does not separate a LOCAL attacker,
+     * who writes that entry as easily as this one. Same limit as the journal, and
+     * the same reason it is still worth doing -- it separates the SYNC CHANNEL.
      */
     toJSON() {
-      const scoped = global.ShortcutWarning.kindsInScope("destination");
-      return {
-        armed: this._armed,
-        acknowledged: this.acknowledgedKinds().filter((k) => scoped.includes(k)),
-      };
+      return { armed: this._armed };
     }
   }
 
@@ -101,22 +148,34 @@
       return { ok: false, code: "CONSENT_NOT_A_LIST", message: "`acknowledged` must be a list." };
     }
     // What a document may say about acknowledgements, as a table -- because the
-    // two halves ("refuse the key scope" and "admit the entry anyway") read in
+    // two halves ("refuse a scope" and "admit the entry anyway") read in
     // opposite directions, and the wrong direction is a self-quarantine loop:
     // the user acknowledges, toJSON writes, storage.onChanged wakes sync(),
     // restore refuses, and the entry the user just authorised lands in
     // quarantine seconds later -- on every device, every time, unrepairable.
     //
-    //   destination scope -> KEPT
-    //   key scope         -> DROPPED SILENTLY, the entry is still admitted
-    //   unknown           -> HARD REFUSAL (a misspelled acknowledgement stays a
-    //                        silent failure of a security control)
+    //   known kind    -> CARRIED, and it is the DOOR that decides whether to
+    //                    believe it (see JumpPolicy.restore's `trustsSavedConsent`)
+    //   key scope     -> DROPPED HERE, unconditionally: no door has ever had a
+    //                    reason to believe a document about the catch-all
+    //   unknown       -> HARD REFUSAL (a misspelled acknowledgement stays a
+    //                    silent failure of a security control)
     //
-    // Quarantine is for what we cannot READ. Here we read perfectly well; we
-    // refuse to BELIEVE.
+    // WHY THE DESTINATION SCOPE IS NO LONGER DROPPED *HERE* while toJSON has
+    // stopped writing it: a document written by an OLDER build still carries it,
+    // and on a profile stored locally that record is genuinely ours. Dropping it
+    // in this parse would make every existing user re-tick every destination
+    // warning on upgrade. Carrying it lets the door decide -- trusted when the
+    // area is local, refused when it is sync -- and the first write afterwards
+    // promotes it into the local entry, where it belongs from now on. A named
+    // migration, not a permission.
+    //
+    // Quarantine is for what we cannot READ. Here we read perfectly well; the
+    // question of whether to BELIEVE belongs one layer up, because it depends on
+    // WHERE the document came from -- which the core must not know.
     // Two sets, because they answer two questions: `declared` is what the
     // document claimed (so a repeat is a malformed document), `seen` is what we
-    // agree to believe.
+    // agree to carry.
     const declared = new Set();
     const seen = new Set();
     for (const kind of kinds) {

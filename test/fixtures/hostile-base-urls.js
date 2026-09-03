@@ -14,6 +14,23 @@ export const HOSTILE_BASE_URLS = [
   ["https://metadata.google.internal", "BASE_FORBIDDEN_HOST"],
   ["http://0.0.0.0", "BASE_FORBIDDEN_HOST"],
   ["http://100.100.100.200", "BASE_FORBIDDEN_HOST"],
+  // THE SAME ENDPOINTS UNDER A SPELLING THE LIST DID NOT RECOGNISE.
+  //
+  // `new URL()` canonises the decimal, octal and hexadecimal forms of an IPv4
+  // literal back to the dotted one, so those were already refused. What it does
+  // NOT do is unwrap an IPv4-MAPPED IPv6 address: `[::ffff:169.254.169.254]`
+  // comes out as `[::ffff:a9fe:a9fe]`, in hexadecimal, matching neither
+  // FORBIDDEN_HOSTS nor LINK_LOCAL -- and the readable spelling was caught only
+  // by the canonicality post-condition, not by the list that claims to "remove
+  // the whole class". `[::ffff:a9fe:a9fe]` is what an attacker would actually
+  // write in a shared configuration file, and it is unreadable to any reviewer.
+  // See JiraInstance.address.
+  ["http://[::ffff:a9fe:a9fe]", "BASE_FORBIDDEN_HOST"],
+  ["https://[::ffff:a9fe:a9fe]", "BASE_FORBIDDEN_HOST"],
+  // 100.100.100.200 (Alibaba Cloud metadata), mapped.
+  ["http://[::ffff:6464:64c8]", "BASE_FORBIDDEN_HOST"],
+  // 0.0.0.0, mapped. Refused by the list rather than by the shape.
+  ["http://[::ffff:0:0]", "BASE_FORBIDDEN_HOST"],
   ["https://example.org/%2e%2e", "BASE_PERCENT"],
   ["https://example.org/%00", "BASE_PERCENT"],
   ["https://example.org/a%20b", "BASE_PERCENT"],

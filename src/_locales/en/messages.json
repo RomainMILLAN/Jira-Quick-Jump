@@ -419,6 +419,45 @@
   "refuseUnknownField": {
     "message": "That file contains a field this version does not know."
   },
+  "refuseNotJson": {
+    "message": "That file is not valid JSON."
+  },
+  "refuseMaliciousKey": {
+    "message": "That file contains keys that are never legitimate."
+  },
+  "refuseNotADocument": {
+    "message": "That file does not contain a configuration."
+  },
+  "refuseSchemaMissing": {
+    "message": "That configuration does not say which format it is written in."
+  },
+  "refuseSchemaTooNew": {
+    "message": "That configuration was written by a newer version of this extension."
+  },
+  "refuseShortcutsNotAList": {
+    "message": "The list of shortcuts in that file could not be read."
+  },
+  "refuseTooManyShortcuts": {
+    "message": "That configuration holds more shortcuts than this extension keeps."
+  },
+  "refuseEnginesNotAList": {
+    "message": "The list of search engines in that file could not be read."
+  },
+  "refuseTooManyEngines": {
+    "message": "That configuration ticks more search engines than can exist."
+  },
+  "refuseCustomEnginesNotAList": {
+    "message": "The list of added domains in that file could not be read."
+  },
+  "refuseTooManyCustomEngines": {
+    "message": "That configuration holds more added domains than this extension keeps."
+  },
+  "refuseEntryNotAnObject": {
+    "message": "That entry could not be read as a shortcut."
+  },
+  "refuseMissingFreshId": {
+    "message": "That entry needs a new identifier before it can be brought back."
+  },
   "refuseHostShape": {
     "message": "Enter a plain domain name, with no scheme and no path."
   },

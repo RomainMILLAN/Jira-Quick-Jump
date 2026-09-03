@@ -45,11 +45,27 @@ const ORDER = [
   "versioned-entry.js",
   "install-outcome.js",
   "stored-policy.js",
-  "key-acknowledgements.js",
+  "local-acknowledgements.js",
   "installed-projection.js",
   "policy-repository.js",
   "destination-journal.js",
   "rule-installer.js",
+  // AFTER platform.js, because it calls t() -- and after core/diagnosis.js, whose
+  // catalogue it reads AT LOAD TIME to refuse an incomplete table. It touches
+  // neither document nor window, like row-reorder.js below, which is what makes
+  // both safe to load in a bare Node process.
+  //
+  // NOT in the manifest, and correctly so: background.scripts carries no ui/*.
+  // They sit at the END so the shared prefix above stays IDENTICAL to what ships,
+  // which is what the structure test compares.
+  // FIRST OF THE UI TAIL, mirroring both pages -- and it is here because
+  // Dom.visibleText is the bidi control the CSS could not be, so a test has to
+  // be able to call it. What it does NOT do is touch `document` AT LOAD: the
+  // IIFE builds three constants and an object literal, and every document call
+  // sits inside a method. That is the property that matters for a bare Node
+  // process, and it is weaker than the "neither document nor window" the note
+  // below claims of its neighbours -- said, rather than blurred into them.
+  "ui/dom.js",
   // AFTER platform.js, because it calls t() -- and after core/diagnosis.js, whose
   // catalogue it reads AT LOAD TIME to refuse an incomplete table. It touches
   // neither document nor window, like row-reorder.js below, which is what makes

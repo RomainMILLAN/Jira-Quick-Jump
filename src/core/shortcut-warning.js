@@ -103,7 +103,25 @@
     {
       kind: "INTERNAL_HOST",
       severity: "medium",
-      appliesTo: (instance) => isInternal(instance.hostname()),
+      // `address()`, NOT `hostname()`, AND THE GAIN IS NOT WHAT IT LOOKS LIKE.
+      //
+      // PRIVATE_V4 is written in dotted notation, so `[::ffff:a00:1]` -- which
+      // IS 10.0.0.1 -- never matched it. The warning fired anyway, and measured:
+      // it fired through `!hostname.includes(".")`, because a bracketed IPv6
+      // literal contains no dot. So this is NOT a missing warning being added;
+      // it is a warning that was reaching the user for a reason unrelated to
+      // privacy.
+      //
+      // Why that is worth a line of code: the no-dot rule is about single-label
+      // intranet names (`http://jira`), and it catches every bracketed address as
+      // a side effect. Narrow it one day -- which is a reasonable thing to
+      // want -- and every mapped RFC 1918 address silently stops being called
+      // private. Reading the ADDRESS makes PRIVATE_V4 the reason, so the rule
+      // that answers is the rule that means it.
+      //
+      // The entity owns the unwrapping (see JiraInstance.address) so this file
+      // keeps only the judgement.
+      appliesTo: (instance) => isInternal(instance.address()),
     },
     {
       kind: "LITERAL_IP",

@@ -36,7 +36,23 @@
   /** The most alarming tone, for a code this table has never heard of. */
   const WORST = "bad";
 
-  const ENTRIES = {
+  /**
+   * NO PROTOTYPE, like every other table in this project indexed by a string.
+   *
+   * sentences.js says it twice and refusal-presentation.js uses a Map for the
+   * same reason: `ENTRIES["constructor"]` on a plain literal answers the `Object`
+   * FUNCTION, which is truthy -- so the three guards below (`entry ? … : …`)
+   * would all take the reassuring branch and then throw on `entry.sentence()`.
+   * Status.render catches that, paints section.fail(), and the status line
+   * reports a TypeError where it owed a diagnosis.
+   *
+   * UNREACHABLE TODAY, and that is not the argument: `code` comes from
+   * Diagnosis.of, a frozen closed vocabulary. refusal-presentation.js already
+   * wrote the rule this closes -- "The codes are ours today; the rule holds
+   * whether or not this particular set is trusted, or it is not a rule" -- and
+   * this was the one table in the project that did not keep it.
+   */
+  const ENTRIES = Object.assign(Object.create(null), {
     DISARMED: {
       tone: "off",
       sentence: () => t("diagDisarmed", "Every shortcut is off. Searches behave normally."),
@@ -122,7 +138,7 @@
       sentence: () => t("diagReady", "Ready."),
       label: () => t("tagReady", "Ready"),
     },
-  };
+  });
 
   /**
    * THE COMPLETENESS REFERENCE IS JumpPolicy.DIAGNOSES -- exported and, until now,

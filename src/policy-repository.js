@@ -11,10 +11,21 @@
 
   const PolicyRepository = {
     async load() {
-      const area = await Platform.storageArea();
+      // WHICH AREA, ASKED ONCE. It used to be two calls -- storageArea() and
+      // storageAreaName() -- and storageArea() is itself storageAreaFor(await
+      // storageAreaName()), so that was two reads of the same storage key on a
+      // path the debounce walks at every keystroke. The NAME is the primitive
+      // answer; the handle derives from it, through the facade that owns both.
+      //
+      // It also removes a window that was small and real: two independent reads
+      // could straddle a migration and hand _restore the handle of one area with
+      // the name of the other -- which is precisely the pair whose disagreement
+      // decides whether a saved acknowledgement is believed.
+      const areaName = await Platform.storageAreaName();
+      const area = Platform.storageAreaFor(areaName);
       // READ ONCE, BEFORE any compare-and-set. _restore is synchronous and runs
       // inside a replayed mutate closure, so it can never await this itself.
-      const acknowledgements = await global.KeyAcknowledgements.read();
+      const acknowledgements = await global.LocalAcknowledgements.read();
       // THE REVISION TRAVELS. It was refused here, so reconcile received a
       // waterline it could only rewrite, never compare against -- which is why
       // `loggedRev` was decorative and every ordinary edit produced a duplicate
@@ -25,7 +36,7 @@
       // JumpPolicy.fingerprint. A revision and a writer token are fields the
       // hostile channel can read and copy, which is exactly how the first version
       // of this guard was defeated.
-      return this._restore(value, acknowledgements);
+      return this._restore(value, acknowledgements, areaName);
     },
 
     /**
@@ -44,9 +55,23 @@
     // an offer that crashes whoever accepts it, exactly like the SVG tags that
     // had no attributes. An empty Acknowledgements says what the file already
     // says: absent means not attested.
-    _restore(value, acknowledgements = global.KeyAcknowledgements.Acknowledgements.admitting(undefined)) {
+    _restore(
+      value,
+      acknowledgements = global.LocalAcknowledgements.Acknowledgements.admitting(undefined),
+      // THE AREA, and it DEFAULTS TO "sync" -- the distrusting answer. Same
+      // shape as trustsSavedConsent's own default: a caller that forgets loses a
+      // click, never a control. Spelled as an area rather than a boolean because
+      // that is what this layer holds; the core receives the answer, never the
+      // reason.
+      areaName = "sync"
+    ) {
       if (value === undefined) return { ok: true, stored: StoredPolicy.empty(), refused: [], unreadable: [] };
-      const restored = JumpPolicy.restore(value.policy === undefined ? value : value.policy);
+      const restored = JumpPolicy.restore(value.policy === undefined ? value : value.policy, {
+        // ONLY THE LOCAL AREA IS BELIEVED about what a user was shown. A synced
+        // document is written by an account, not by this browser: see
+        // Consent.toJSON for the measured attack this closes.
+        trustsSavedConsent: areaName === "local",
+      });
       if (!restored.ok) return restored;
       const merged = this._merge(restored.policy, acknowledgements);
       // THE CAP APPLIES TO WHAT COMES FROM STORAGE TOO.
@@ -107,11 +132,13 @@
      * resurrect the entry the other one just deleted.
      */
     async apply(intention) {
-      const area = await Platform.storageArea();
-      const acknowledgements = await global.KeyAcknowledgements.read();
+      // ONE read, and the handle derived from it: see load() above.
+      const areaName = await Platform.storageAreaName();
+      const area = Platform.storageAreaFor(areaName);
+      const acknowledgements = await global.LocalAcknowledgements.read();
       let committed;
       const result = await VersionedEntry.update(area, ENTRY, (value) => {
-        const restored = this._restore(value, acknowledgements);
+        const restored = this._restore(value, acknowledgements, areaName);
         if (!restored.ok) return restored;
         const outcome = intention(restored.stored);
         if (!outcome.ok) return outcome;
@@ -124,7 +151,7 @@
       });
       // Written AFTER the winning commit, by the same single writer as the
       // journal: a key-scoped acknowledgement never travels with the policy.
-      if (result.ok && committed) await global.KeyAcknowledgements.record(committed.policy());
+      if (result.ok && committed) await global.LocalAcknowledgements.record(committed.policy());
       // THE COMMITTED FOLDER TRAVELS OUT. The caller claims a fingerprint before
       // committing -- speculatively, against its own stale snapshot -- and the CAS
       // may replay the intention on a fresher base and commit something else. Then
@@ -170,7 +197,10 @@
       if (fromName === target) return MutationResult.ok(target);
       const from = await Platform.storageArea();
       const { value } = await VersionedEntry.read(from, ENTRY);
-      const to = await Platform.storageAreaFor(target);
+      // NOT awaited: storageAreaFor is synchronous, and the two call sites above
+      // now say so. An `await` on a plain value is harmless and reads as a
+      // promise the facade does not return.
+      const to = Platform.storageAreaFor(target);
 
       // COPY FIRST, SWITCH AFTER. A reader arriving mid-migration must find the
       // old area still in charge, never an empty new one.
@@ -225,10 +255,47 @@
       return MutationResult.ok(target);
     },
 
+    /**
+     * THE AREA IN CHARGE, AND ONLY IT.
+     *
+     * This used to fire on `policy` changing in EITHER area, with the reason
+     * "it must not care which area an entry came from". That is right about
+     * READING -- load() asks the facade which area is in charge and reads only
+     * that one -- and wrong about WAKING: an entry in the area we do not use
+     * changes nothing we will read, and it was still starting the service
+     * worker, reloading the policy, and REPLACING EVERY DYNAMIC RULE.
+     *
+     * So, on a profile storing locally (the default), the compromised sync
+     * account this whole module models could write `sync["policy"]` in a loop
+     * and get, per write and for free: a worker wake-up, a getDynamicRules, a
+     * wholesale updateDynamicRules, three storage.local writes (projection,
+     * receipt, journal), and a full re-render of every open surface through the
+     * InstallOutcome doorbell. No confidentiality or integrity loss -- nothing
+     * it wrote is ever read -- but battery, write quota and an interface that
+     * will not sit still, from the one channel named hostile.
+     *
+     * InstallOutcome.onRecorded filters its area with these very words ("without
+     * the filter, any writer of storage.sync would wake every open page"). This
+     * is the same filter, and the asymmetry was unintentional.
+     *
+     * AND IT REPAIRS migrateTo RATHER THAN BREAKING IT. That method's own header
+     * describes the window this closes: the copy into the target area fires
+     * onChanged BEFORE `storageArea` names the target, so sync() reloaded from
+     * the area being LEFT and reinstalled its rules. With this filter that wake
+     * is correctly ignored, and the deliberate second put -- after the switch,
+     * already there -- becomes the one that lands. The `from.remove(ENTRY)` that
+     * follows is ignored too, which is right: it is the area we just left.
+     *
+     * THE READ IS AWAITED INSIDE THE LISTENER, so a change is dropped only after
+     * the facade has answered. storage.local.get on one key is not a cost worth
+     * caching against a stale answer: the area can change under us, and the
+     * facade is the single owner of that question.
+     */
     onPolicyChanged(listener) {
-      Platform.api.storage.onChanged.addListener((changes, areaName) => {
-        if (changes[ENTRY]) return listener(areaName);
-        return undefined;
+      Platform.api.storage.onChanged.addListener(async (changes, areaName) => {
+        if (!changes[ENTRY]) return;
+        if (areaName !== (await Platform.storageAreaName())) return;
+        listener(areaName);
       });
     },
   };

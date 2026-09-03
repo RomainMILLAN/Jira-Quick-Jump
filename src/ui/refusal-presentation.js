@@ -86,6 +86,39 @@
     HOST_SHAPE: t("refuseHostShape", "Enter a plain domain name, with no scheme and no path."),
     HOST_TOO_LONG: t("refuseHostTooLong", "That domain name is too long."),
 
+    // THE IMPORT PATH, at document level -- the codes the fallback used to cover
+    // in English.
+    //
+    // transfer.js hands parseJson's and proposeImport's refusals straight to
+    // sentence(), and none of them was in this table: a French build read
+    // "This file is not valid JSON." on the one screen whose whole job is to be
+    // believed. The header above already claimed the French build no longer shows
+    // English "on EVERY validation error"; this is the half of that claim the
+    // typed-input pass did not reach.
+    //
+    // WHAT WAS ALREADY SAFE, and it is worth writing down rather than
+    // rediscovering: no attacker-authored text ever reached the banner. The two
+    // messages that interpolate a value from the file -- UNKNOWN_FIELD
+    // (`Unknown field "${field}"`) and UNKNOWN_WARNING_KIND -- were the two
+    // already present, so the generic sentence won and the file's own words never
+    // rendered. That was the right coverage priority; it was simply not the whole
+    // of it.
+    NOT_JSON: t("refuseNotJson", "That file is not valid JSON."),
+    MALICIOUS_KEY: t("refuseMaliciousKey", "That file contains keys that are never legitimate."),
+    NOT_A_DOCUMENT: t("refuseNotADocument", "That file does not contain a configuration."),
+    SCHEMA_MISSING: t("refuseSchemaMissing", "That configuration does not say which format it is written in."),
+    SCHEMA_TOO_NEW: t("refuseSchemaTooNew", "That configuration was written by a newer version of this extension."),
+    SHORTCUTS_NOT_A_LIST: t("refuseShortcutsNotAList", "The list of shortcuts in that file could not be read."),
+    TOO_MANY_SHORTCUTS: t("refuseTooManyShortcuts", "That configuration holds more shortcuts than this extension keeps."),
+    ENGINES_NOT_A_LIST: t("refuseEnginesNotAList", "The list of search engines in that file could not be read."),
+    TOO_MANY_ENGINES: t("refuseTooManyEngines", "That configuration ticks more search engines than can exist."),
+    CUSTOM_ENGINES_NOT_A_LIST: t("refuseCustomEnginesNotAList", "The list of added domains in that file could not be read."),
+    TOO_MANY_CUSTOM_ENGINES: t("refuseTooManyCustomEngines", "That configuration holds more added domains than this extension keeps."),
+    ENTRY_NOT_AN_OBJECT: t("refuseEntryNotAnObject", "That entry could not be read as a shortcut."),
+    // The quarantine repair door, reached from the Fix button when the entry
+    // carries an identifier this build cannot use.
+    MISSING_FRESH_ID: t("refuseMissingFreshId", "That entry needs a new identifier before it can be brought back."),
+
     // Limits and concurrency
     SHORTCUT_LIMIT: t("refuseShortcutLimit", "That would create more shortcuts than this extension keeps."),
     BINDING_LIMIT: t("refuseBindingLimit", "That would create more redirect rules than the browser allows."),
