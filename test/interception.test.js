@@ -65,16 +65,16 @@ test("the anchor seam is locked against a literal expectation", () => {
   // which is what actually locks the seam.
   assert.equal(
     g.SearchEngineCatalog.find("duckduckgo.com").searchUrlPattern("FRAGMENT"),
-    "^https://(?:www\\.)?duckduckgo\\.com/\\?(?:.*&)?q=FRAGMENT(?:&|$)"
+    "^https://(?:www\\.)?duckduckgo\\.com/\\?(?:(?:[^=&q][^=&]*|q[^=&]+)?=[^&]*&)*q=FRAGMENT(?:&|$)"
   );
   assert.equal(
     g.SearchEngineCatalog.find("google.com").searchUrlPattern("FRAGMENT"),
-    "^https://(?:www\\.)?google\\.com/search\\?(?:.*&)?q=FRAGMENT(?:&|$)"
+    "^https://(?:www\\.)?google\\.com/search\\?(?:(?:[^=&q][^=&]*|q[^=&]+)?=[^&]*&)*q=FRAGMENT(?:&|$)"
   );
   const rules = delivered(policy);
   assert.equal(
     rules[0].condition.regexFilter,
-    "^https://(?:www\\.)?google\\.com/search\\?(?:.*&)?q=ABC(?:-|\\+|%20)(\\d+)(?:&|$)"
+    "^https://(?:www\\.)?google\\.com/search\\?(?:(?:[^=&q][^=&]*|q[^=&]+)?=[^&]*&)*q=ABC(?:-|\\+|%20)(\\d+)(?:&|$)"
   );
 });
 
@@ -344,7 +344,7 @@ test("the whole rule set is locked against a literal expectation", () => {
       id: 1, priority: 3,
       action: { type: "redirect", redirect: { regexSubstitution: "https://example.atlassian.net/browse/ABC-\\1" } },
       condition: {
-        regexFilter: "^https://(?:www\\.)?google\\.com/search\\?(?:.*&)?q=ABC(?:-|\\+|%20)(\\d+)(?:&|$)",
+        regexFilter: "^https://(?:www\\.)?google\\.com/search\\?(?:(?:[^=&q][^=&]*|q[^=&]+)?=[^&]*&)*q=ABC(?:-|\\+|%20)(\\d+)(?:&|$)",
         isUrlFilterCaseSensitive: false, resourceTypes: ["main_frame"],
       },
     },
@@ -352,7 +352,7 @@ test("the whole rule set is locked against a literal expectation", () => {
       id: 2, priority: 3,
       action: { type: "redirect", redirect: { regexSubstitution: "https://ops.example.com/jira/browse/OPS-\\1" } },
       condition: {
-        regexFilter: "^https://(?:www\\.)?google\\.com/search\\?(?:.*&)?q=OPS(?:-|\\+|%20)(\\d+)(?:&|$)",
+        regexFilter: "^https://(?:www\\.)?google\\.com/search\\?(?:(?:[^=&q][^=&]*|q[^=&]+)?=[^&]*&)*q=OPS(?:-|\\+|%20)(\\d+)(?:&|$)",
         isUrlFilterCaseSensitive: false, resourceTypes: ["main_frame"],
       },
     },
@@ -362,7 +362,7 @@ test("the whole rule set is locked against a literal expectation", () => {
       condition: {
         // The claimed length, not the validator's: RE2 refuses {1,19} outright.
         // Built from its owner so the shape cannot be pasted wrong here.
-        regexFilter: "^https://(?:www\\.)?google\\.com/search\\?(?:.*&)?q=(" +
+        regexFilter: "^https://(?:www\\.)?google\\.com/search\\?(?:(?:[^=&q][^=&]*|q[^=&]+)?=[^&]*&)*q=(" +
           g.ProjectKey.caseInsensitiveShape(g.CatchAllKey.only().claimsKeysUpTo()) + ")-(\\d+)(?:&|$)",
         isUrlFilterCaseSensitive: false, resourceTypes: ["main_frame"],
       },
@@ -378,7 +378,7 @@ test("the whole rule set is locked against a literal expectation", () => {
         id: 1001 + i, priority: 2,
         action: { type: "allow" },
         condition: {
-          regexFilter: "^https://(?:www\\.)?google\\.com/search\\?(?:.*&)?q=(?:" +
+          regexFilter: "^https://(?:www\\.)?google\\.com/search\\?(?:(?:[^=&q][^=&]*|q[^=&]+)?=[^&]*&)*q=(?:" +
             run.join("|") + ")-\\d+(?:&|$)",
           isUrlFilterCaseSensitive: false, resourceTypes: ["main_frame"],
         },
@@ -796,4 +796,34 @@ test("a sealed rule set cannot be rewritten under its readers", () => {
   const before = rule.condition.regexFilter;
   try { rule.condition.regexFilter = ".*"; } catch { /* strict mode throws, also fine */ }
   assert.equal(set.rules()[0].condition.regexFilter, before, "the pattern cannot be swapped after sealing");
+});
+
+/**
+ * A THIRD-PARTY PAGE CANNOT AIM THE REDIRECT.
+ *
+ * `\?(?:.*&)?q=` used to build the rule, and `.*&` swallowed `q=hello&` in
+ * `?q=hello&q=ABC-1` -- so the rule fired on the SECOND `q`, the one every
+ * search engine ignores. Any page could then navigate a visitor to
+ * `<their Jira>/browse/ABC-1`, and with a catch-all armed to `/browse/ANYTHING`,
+ * with no search performed and the address bar never used.
+ *
+ * This runs the DELIVERED regexFilter against real URLs rather than comparing it
+ * to a literal: the changelock above locks the spelling, this locks the
+ * consequence, and only one of the two would survive someone "simplifying" it.
+ */
+test("the rule fires on the parameter the engine reads, never a later one", () => {
+  const rule = delivered(policy).find((r) => r.condition.regexFilter.includes("google"));
+  const re = new RegExp(rule.condition.regexFilter);
+
+  assert.equal(re.test("https://www.google.com/search?q=ABC-1"), true,
+    "the ordinary search must still be rewritten");
+  assert.equal(re.test("https://www.google.com/search?source=hp&q=ABC-1"), true,
+    "a parameter before the query is normal and must not break interception");
+  assert.equal(re.test("https://www.google.com/search?qx=z&q=ABC-1"), true,
+    "a DIFFERENT parameter that starts with the same letter is not the query");
+
+  assert.equal(re.test("https://www.google.com/search?q=hello&q=ABC-1"), false,
+    "a second q is the one the engine ignores: firing on it lets any page aim the redirect");
+  assert.equal(re.test("https://www.google.com/search?q=&q=ABC-1"), false,
+    "an empty first q is still the one the engine reads");
 });

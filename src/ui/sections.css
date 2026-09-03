@@ -407,12 +407,24 @@ input.f[aria-invalid="true"] {
    display a host would have forgotten it. One class, listed with the four
    selectors that need it today. */
 .ltr-isolate,
+.mono-token,
 .dest,
 .origin,
 .preview,
 .signature-domain {
   unicode-bidi: isolate;
   direction: ltr;
+}
+
+/* A MONOSPACED TOKEN THAT IS NOT A DESTINATION: a key, or a phrase standing in
+   for one. `.dest` used to paint all three, so a rule written for "where the
+   traffic goes" silently governed the word next to it -- and the class name lied
+   on two screens out of three. Same look, honest name. */
+.mono-token {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  color: var(--text);
+  word-break: break-all;
 }
 
 .dest {
@@ -569,7 +581,18 @@ input.f[aria-invalid="true"] {
   margin-top: 3px;
   line-height: 1.55;
 }
-.alert-s .dest {
+.alert-s /* A MONOSPACED TOKEN THAT IS NOT A DESTINATION: a key, or a phrase standing in
+   for one. `.dest` used to paint all three, so a rule written for "where the
+   traffic goes" silently governed the word next to it -- and the class name lied
+   on two screens out of three. Same look, honest name. */
+.mono-token {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  color: var(--text);
+  word-break: break-all;
+}
+
+.dest {
   font-size: 11.5px;
 }
 

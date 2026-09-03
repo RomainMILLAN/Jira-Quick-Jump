@@ -61,13 +61,13 @@
         const old = was.get(id);
         if (!old) {
           facts.push(
-            shortcut.key().isCatchAll()
-              ? { type: "CatchAllAppeared", shortcutId: id, baseUrl: shortcut.instance().baseUrl() }
+            shortcut.isCatchAll()
+              ? { type: "CatchAllAppeared", shortcutId: id, baseUrl: shortcut.destination() }
               : {
                   type: "ShortcutAppeared",
                   shortcutId: id,
-                  key: shortcut.key().toString(),
-                  baseUrl: shortcut.instance().baseUrl(),
+                  key: shortcut.keyText(),
+                  baseUrl: shortcut.destination(),
                 }
           );
           continue;
@@ -75,13 +75,13 @@
         // The whole baseUrl, never the origin: with a path allowed in the base
         // URL, .../jira -> .../jira-fake shares an origin and would be a
         // non-event.
-        const oldBaseUrl = old.instance().baseUrl();
-        const newBaseUrl = shortcut.instance().baseUrl();
+        const oldBaseUrl = old.destination();
+        const newBaseUrl = shortcut.destination();
         if (oldBaseUrl !== newBaseUrl) {
           facts.push({
             type: "DestinationChanged",
             shortcutId: id,
-            key: shortcut.key().toString(),
+            key: shortcut.keyText(),
             oldBaseUrl,
             newBaseUrl,
           });
@@ -93,8 +93,8 @@
         // trust model promises to surface a change of destination before the next
         // jump; a key silently repointed sends a different set of references to
         // the same host, which is the same promise broken from the other side.
-        const oldKey = old.key().toString();
-        const newKey = shortcut.key().toString();
+        const oldKey = old.keyText();
+        const newKey = shortcut.keyText();
         if (oldKey !== newKey) {
           facts.push({ type: "KeyChanged", shortcutId: id, oldKey, newKey, baseUrl: newBaseUrl });
         }
@@ -113,13 +113,13 @@
       for (const [id, shortcut] of was) {
         if (is.has(id)) continue;
         facts.push(
-          shortcut.key().isCatchAll()
-            ? { type: "CatchAllRemoved", shortcutId: id, baseUrl: shortcut.instance().baseUrl() }
+          shortcut.isCatchAll()
+            ? { type: "CatchAllRemoved", shortcutId: id, baseUrl: shortcut.destination() }
             : {
                 type: "ShortcutRemoved",
                 shortcutId: id,
-                key: shortcut.key().toString(),
-                baseUrl: shortcut.instance().baseUrl(),
+                key: shortcut.keyText(),
+                baseUrl: shortcut.destination(),
               }
         );
       }
@@ -140,19 +140,19 @@
        * trust model promises "naming the old and new host". A catch-all always has
        * a destination, so no optional field is introduced.
        */
-      const shadowedBefore = new Set(before.registry().shadowedIds());
-      const shadowedAfter = after.registry().shadowedIds();
+      const shadowedBefore = new Set(before.shadowedIds());
+      const shadowedAfter = after.shadowedIds();
       const newlyShadowed = shadowedAfter.filter((id) => !shadowedBefore.has(id));
       const catchAll = after.catchAllShortcut();
       if (newlyShadowed.length > 0 && catchAll) {
         facts.push({
           type: "ShadowingChanged",
           catchAllId: catchAll.id(),
-          catchAllBaseUrl: catchAll.instance().baseUrl(),
+          catchAllBaseUrl: catchAll.destination(),
           affectedKeys: newlyShadowed
-            .map((id) => after.registry().find(id))
+            .map((id) => after.shortcutFor(id))
             .filter((shortcut) => shortcut !== undefined)
-            .map((shortcut) => shortcut.key().toString()),
+            .map((shortcut) => shortcut.keyText()),
         });
       }
 

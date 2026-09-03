@@ -155,7 +155,12 @@
           ? t("previewMatchedCatchAll", "Matched the catch-all.")
           : t("previewMatchedShortcut", "Matched a named shortcut."),
       }));
-      if (report.skipped && report.skipped.length > 0) {
+      // NO PRESENCE TEST. `report.skipped` is total: both factories of `reality`
+      // guarantee an array, so a `&&` here would be the hedge this project bans
+      // (structure.test.js bans `section.blank?.()` for the same reason -- "the
+      // member is TOTAL, not optional"). It is also the WITNESS of that guarantee:
+      // with the guard back, nothing goes red the day a factory forgets the field.
+      if (report.skipped.length > 0) {
         this.why.appendChild(el("span", {
           class: "row-msg pending",
           text: t("installDiffers", "The installed configuration differs from the one you see."),

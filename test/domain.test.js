@@ -47,16 +47,16 @@ test("arming and disarming are absolute, so replaying them is safe", () => {
   // both surfaces would RE-ARM it after the conflict replay.
   let policy = armedPolicy();
   for (let i = 0; i < 3; i += 1) policy = policy.disarmShortcut(ID).value;
-  assert.equal(policy.registry().find(ID).armed(), false);
+  assert.equal(policy.shortcutFor(ID).armed(), false);
   for (let i = 0; i < 3; i += 1) policy = policy.armShortcut(ID).value;
-  assert.equal(policy.registry().find(ID).armed(), true);
+  assert.equal(policy.shortcutFor(ID).armed(), true);
 });
 
 test("a consent is given to a destination: changing it forgets the acknowledgements", () => {
   const policy = armedPolicy();
   const moved = policy.withBaseUrlFor(ID, instance("http://jira:8080")).value;
   assert.deepEqual(
-    moved.registry().find(ID).unacknowledgedWarnings().map((w) => w.kind),
+    moved.shortcutFor(ID).unacknowledgedWarnings().map((w) => w.kind),
     ["INSECURE_SCHEME", "INTERNAL_HOST"]
   );
 });
@@ -64,7 +64,7 @@ test("a consent is given to a destination: changing it forgets the acknowledgeme
 test("a shortcut with pending warnings leaves activeBindings even while armed", () => {
   // arm() guards the front door; withBaseUrlFor changes the state from inside.
   const policy = armedPolicy().withBaseUrlFor(ID, instance("http://jira:8080")).value;
-  assert.equal(policy.registry().find(ID).armed(), true);
+  assert.equal(policy.shortcutFor(ID).armed(), true);
   assert.equal(policy.activeBindings().length, 0);
   assert.equal(policy.armShortcut(ID).code, "UNACKNOWLEDGED_WARNING");
 });
@@ -228,8 +228,13 @@ test("both UNKNOWN ranks are pinned, or the guards become ornaments", () => {
   // NOTHING_TO_INSTALL joined it when ALL_SHORTCUTS_SHADOWED stopped doubling as
   // the "otherwise" clause: a name that asserts a precise cause must be able to
   // prove it, so the honest fallback got its own rank underneath.
-  assert.equal(g.JumpPolicy.DIAGNOSES.length, 15, "fifteen ranks");
-  assert.equal(new Set(g.JumpPolicy.DIAGNOSES).size, 14, "fourteen codes: PARTIAL_POLICY sits twice");
+  // TWO LISTS, because they answer two questions. RANKS is the arbitration --
+  // fifteen rungs, PARTIAL_POLICY on two of them. CODES is the published
+  // vocabulary, and a vocabulary does not repeat itself: every reader used to have
+  // to dedupe it, or count wrong.
+  assert.equal(g.Diagnosis.RANKS.length, 15, "fifteen ranks");
+  assert.equal(g.JumpPolicy.DIAGNOSES.length, 14, "fourteen codes");
+  assert.equal(new Set(g.JumpPolicy.DIAGNOSES).size, 14, "each said once");
 });
 
 test("every mutation returns the same shape, with events always present", () => {
@@ -266,21 +271,21 @@ test("register appends, so the admission door never rewrites the persisted order
   // A customs officer stamps or refuses; he does not rearrange the suitcases.
   // restore replays register entry by entry, so a register that placed rows would
   // silently change an effective destination on every read.
-  assert.deepEqual(ordered().registry().orderedIds(), [ORDER_A, STAR, ORDER_B]);
+  assert.deepEqual(ordered().orderedIds(), [ORDER_A, STAR, ORDER_B]);
 });
 
 test("the order round-trips through toJSON and restore, catch-all in first position included", () => {
   const moved = ordered().withOrder([STAR, ORDER_A, ORDER_B]).value;
   const restored = g.JumpPolicy.restore(moved.toJSON());
   assert.equal(restored.ok, true);
-  assert.deepEqual(restored.policy.registry().orderedIds(), [STAR, ORDER_A, ORDER_B]);
+  assert.deepEqual(restored.policy.orderedIds(), [STAR, ORDER_A, ORDER_B]);
 });
 
 test("editing a destination does not move the row", () => {
   // Map.set on an existing key preserves the position, which is what makes the
   // round trip true BY CONSTRUCTION rather than by luck.
   const edited = ordered().withBaseUrlFor(ORDER_A, instance("https://moved.example.org")).value;
-  assert.deepEqual(edited.registry().orderedIds(), [ORDER_A, STAR, ORDER_B]);
+  assert.deepEqual(edited.orderedIds(), [ORDER_A, STAR, ORDER_B]);
 });
 
 test("withOrder is absolute, so replaying it three times lands in the same place", () => {
@@ -289,7 +294,7 @@ test("withOrder is absolute, so replaying it three times lands in the same place
   const target = [ORDER_B, ORDER_A, STAR];
   let p = ordered();
   for (let i = 0; i < 3; i += 1) p = p.withOrder(target).value;
-  assert.deepEqual(p.registry().orderedIds(), target);
+  assert.deepEqual(p.orderedIds(), target);
 });
 
 test("withOrder written against a stale set is refused rather than applied to a different one", () => {
@@ -301,11 +306,11 @@ test("withOrder written against a stale set is refused rather than applied to a 
 
 test("a catch-all may sit anywhere, and everything after it is shadowed", () => {
   const p = ordered();
-  assert.deepEqual(p.shadowedShortcuts().map((s) => s.key().toString()), ["JUL"]);
+  assert.deepEqual(p.shadowedShortcuts().map((s) => s.keyText()), ["JUL"]);
   const last = p.withOrder([ORDER_A, ORDER_B, STAR]).value;
   assert.deepEqual(last.shadowedShortcuts(), []);
   const first = p.withOrder([STAR, ORDER_A, ORDER_B]).value;
-  assert.deepEqual(first.shadowedShortcuts().map((s) => s.key().toString()), ["ECR", "JUL"]);
+  assert.deepEqual(first.shadowedShortcuts().map((s) => s.keyText()), ["ECR", "JUL"]);
 });
 
 test("a shadowed shortcut produces no binding at all, and comes back when the catch-all goes", () => {
@@ -332,7 +337,7 @@ test("a catch-all cannot be renamed, and a shortcut cannot become a catch-all", 
   assert.equal(p.withKeyFor(ORDER_A, g.CatchAllKey.only()).code, "KEY_NATURE_IMMUTABLE");
   // And the entity refuses on its own, because guarding in the registry does not
   // protect the entity.
-  assert.throws(() => p.registry().find(STAR).withKey(g.ProjectKey.parse("ABC").value));
+  assert.throws(() => p.shortcutFor(STAR).withKey(g.ProjectKey.parse("ABC").value));
   // Renaming between two named keys stays legal.
   assert.equal(p.withKeyFor(ORDER_A, g.ProjectKey.parse("XYZ").value).ok, true);
 });
@@ -341,7 +346,7 @@ test("a new named shortcut is placed above the catch-all, so it is never born sh
   // The convenience is an APPLICATION intention, and it lives inside the
   // membrane -- restore never borrows this door.
   const p = ordered().registerAboveCatchAll("eeeeeeee-5555-4555-8555-555555555555", g.ProjectKey.parse("NEW").value, instance("https://e.example.org")).value;
-  assert.deepEqual(p.registry().orderedIds(), [ORDER_A, "eeeeeeee-5555-4555-8555-555555555555", STAR, ORDER_B]);
+  assert.deepEqual(p.orderedIds(), [ORDER_A, "eeeeeeee-5555-4555-8555-555555555555", STAR, ORDER_B]);
   assert.equal(p.statusOf("eeeeeeee-5555-4555-8555-555555555555"), "DISARMED");
 });
 
@@ -496,7 +501,7 @@ test("the aggregate answers for the order and for one row, so nobody reaches pas
   // registerAboveCatchAll.
   const p = withCatchAllInside();
   assert.deepEqual(p.orderedIds(), REACH);
-  assert.equal(p.shortcutFor(REACH[1]).key().isCatchAll(), true);
+  assert.equal(p.shortcutFor(REACH[1]).isCatchAll(), true);
   assert.equal(p.shortcutFor("nope"), undefined);
 });
 
@@ -541,7 +546,7 @@ test("every order is reachable without ever PICKING UP the catch-all", () => {
 
 test("dropping a named key below the catch-all shadows it, and nothing above it", () => {
   let p = withCatchAllInside().withOrder([REACH[0], REACH[1], REACH[2], REACH[3]]).value;
-  assert.deepEqual(p.shadowedShortcuts().map((s) => s.key().toString()), ["BBB", "DDD"]);
+  assert.deepEqual(p.shadowedShortcuts().map((s) => s.keyText()), ["BBB", "DDD"]);
   assert.equal(p.statusOf(REACH[0]), "DISARMED", "the row above is untouched");
   assert.equal(p.statusOf(REACH[2]), "SHADOWED");
   // And it comes back when the catch-all goes.
@@ -564,15 +569,15 @@ test("at a constant id set, the status after a reorder depends on nothing but th
 
   for (const id of REACH) {
     assert.equal(
-      plain.registry().isShadowed(id),
-      reordered.registry().isShadowed(id),
+      plain.isShadowed(id),
+      reordered.isShadowed(id),
       `${id}: shadowing must not depend on arming`
     );
   }
   // And the status the UI reads agrees with it, because SHADOWED is the FIRST test
   // of the chain -- which is what lets one call answer both questions.
   assert.equal(reordered.statusOf(REACH[0]), "SHADOWED");
-  assert.equal(plain.statusOf(REACH[0]) === "SHADOWED", plain.registry().isShadowed(REACH[0]));
+  assert.equal(plain.statusOf(REACH[0]) === "SHADOWED", plain.isShadowed(REACH[0]));
 });
 
 test("which half of a row the pointer is in is three numbers, so it is tested like anything else", () => {
@@ -687,7 +692,7 @@ test("a long named key below the catch-all stays shadowed, and that is deliberat
   p = p.armShortcut(LONG).value;
 
   assert.equal(p.statusOf(LONG), "SHADOWED");
-  assert.equal(p.registry().isShadowed(LONG), true);
+  assert.equal(p.isShadowed(LONG), true);
   // …and the catch-all does NOT claim it. The three assertions together ARE the
   // statement "deliberate overapproximation".
   assert.equal(
@@ -937,9 +942,20 @@ test("the storage door reads an old engine spelling without leaving the core", (
   // `interception/` -- the exact inversion rule-factory.js forbids in the other
   // direction ("the core only holds opaque engine ids"), invisible because both
   // modules meet on globalThis.
-  assert.equal(g.EngineId.current("google"), "google.com");
-  assert.equal(g.EngineId.current("custom:intra.example.org"), "custom:intra.example.org",
-    "an unknown spelling passes through: it may be a custom domain");
+  // A VALUE, not a string: it migrates an old spelling, refuses what cannot be an
+  // engine identity at all, and owns the `custom:` prefix that CustomEngine used
+  // to spell and the catalogue used to read back by hand.
+  assert.equal(g.EngineId.parse("google").value.toString(), "google.com");
+  const custom = g.EngineId.parse("custom:intra.example.org").value;
+  assert.equal(custom.isCustom(), true);
+  assert.equal(custom.host(), "intra.example.org", "the prefix has ONE owner");
+  assert.equal(g.EngineId.parse("google.com").value.equals(g.EngineId.parse("google").value), true,
+    "an old spelling and its current form are the same engine");
+
+  // What cannot be an identity is refused -- a bare string accepted anything.
+  for (const hostile of [null, "", "NOPE", "a b", "https://google.com/", "../etc"]) {
+    assert.equal(g.EngineId.parse(hostile).ok, false, `${JSON.stringify(hostile)} is not an engine id`);
+  }
 
   const restored = g.JumpPolicy.restore({
     schemaVersion: 1,
@@ -959,4 +975,43 @@ test("a bound that protects the import lives with the other bounds, not on the s
   for (const bound of ["MAX_QUARANTINE", "MAX_CUSTOM_ENGINES", "MAX_ENGINES", "MAX_TRANSFER_BYTES"]) {
     assert.equal(typeof g.ShortcutAdmission[bound], "number", `${bound} belongs to the door`);
   }
+});
+
+/**
+ * WHY THE THREE ERROR PATHS MAY KEEP WRITING `coverageSatisfied: false`.
+ *
+ * An audit point held that background.js and rule-installer.js coerce an UNKNOWN
+ * coverage into `false`, short-circuiting COVERAGE_STATE_UNKNOWN. Measured, that is
+ * not what happens, and this test pins the three reasons so the point is not
+ * reopened and "fixed" into something worse:
+ *
+ *   1. Both background.js paths write `installed: false` alongside it, and
+ *      INSTALL_FAILED outranks every coverage verdict -- the field is never read.
+ *   2. rule-installer.js's catch purges before resolving, so nothing IS installed:
+ *      `false` there is a FACT, not a coercion.
+ *   3. The only path that reports `installed: true` computes the real value from
+ *      the rule set, so it never omits the field either.
+ *
+ * COVERAGE_STATE_UNKNOWN is therefore alive and reachable exactly where it should
+ * be: an absent or older receipt, which is the case its guard was written for.
+ */
+test("an unknown coverage is only reachable where the receipt is silent", () => {
+  const ID = "aaaaaaaa-1111-4111-8111-111111111111";
+  let p = g.JumpPolicy.empty().withEngines(["google.com"]).value;
+  p = p.register(ID, g.CatchAllKey.only(), g.JiraInstance.parse("https://j.example.org").value).value;
+  p = p.acknowledge(ID, "CATCH_ALL").value.armShortcut(ID).value.arm();
+  const granted = { originsGranted: true, quarantinedCount: 0 };
+
+  // 1. A failed install hides the coverage question entirely, either way.
+  assert.equal(p.diagnose({ ...granted, installed: false, coverageSatisfied: false }),
+    "INSTALL_FAILED", "the coverage field is not read when the install failed");
+  assert.equal(p.diagnose({ ...granted, installed: false }), "INSTALL_FAILED",
+    "and omitting it changes nothing on that path");
+
+  // 2 & 3. Once installed, the three states are three distinct sentences.
+  assert.equal(p.diagnose({ ...granted, installed: true, coverageSatisfied: true }), "READY");
+  assert.equal(p.diagnose({ ...granted, installed: true, coverageSatisfied: false }),
+    "CATCH_ALL_NOT_INSTALLED", "a measured no");
+  assert.equal(p.diagnose({ ...granted, installed: true }), "COVERAGE_STATE_UNKNOWN",
+    "an absent field is the third term, and it is NOT the same sentence as a no");
 });

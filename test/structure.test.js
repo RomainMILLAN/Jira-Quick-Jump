@@ -39,6 +39,10 @@ const sectionsSource = () =>
 
 const codeOf = (source) =>
   source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/[^\n]*/g, "$1");
+/** The two HTML surfaces this extension ships. Named once, because two tests
+ *  used to skip themselves when one was missing. */
+const SURFACES = ["src/options.html", "src/popup.html"];
+
 const manifest = JSON.parse(read("src/manifest.json"));
 // The manifest's own strings are localised, so a store listing or a test that
 // wants the real name has to resolve __MSG_ through the default locale.
@@ -157,8 +161,11 @@ test("the script lists share a common prefix in the same order", () => {
   // until it checks nothing.
   const background = manifest.background.scripts;
   const shared = background.filter((s) => !s.endsWith("background.js"));
-  for (const page of ["src/options.html", "src/popup.html"]) {
-    if (!existsSync(join(ROOT, page))) continue;
+  for (const page of SURFACES) {
+    // No existsSync guard: both surfaces SHIP. Skipping on absence made renaming
+    // popup.html turn this test green and empty -- the failure mode the audit
+    // called "a test that neutralises itself".
+    assert.ok(existsSync(join(ROOT, page)), `${page} is a shipped surface and is missing`);
     const pageScripts = scriptsOf(read(page));
     const prefix = pageScripts.slice(0, shared.length);
     assert.deepEqual(prefix, shared, `${page} must load the shared scripts in the same order`);
@@ -237,7 +244,9 @@ test("the load order the changelocks depend on is pinned in every list", () => {
 });
 
 test("both HTML surfaces share the same UI tail", () => {
-  if (!existsSync(join(ROOT, "src/options.html")) || !existsSync(join(ROOT, "src/popup.html"))) return;
+  for (const page of SURFACES) {
+    assert.ok(existsSync(join(ROOT, page)), `${page} is a shipped surface and is missing`);
+  }
   const shared = manifest.background.scripts.filter((s) => !s.endsWith("background.js"));
   const tail = (page) => scriptsOf(read(page)).slice(shared.length).filter((s) => !/options\.js|popup\.js/.test(s));
   assert.deepEqual(tail("src/options.html"), tail("src/popup.html"));
@@ -314,9 +323,21 @@ test("the preview never fails silently", () => {
   // we cannot parse leaves the PREVIOUS verdict on screen -- a stale "Matched a named
   // shortcut" is worse than no answer, and is indistinguishable from the empty state.
   // This is the ear that lets rule-ranking.js keep its canary throw.
+  // BEHAVIOUR, not typography. This used to assert that `try {` was the first
+  // token after `async preview(ctx) {` -- a blank line broke it, and an empty
+  // `try {} catch {}` satisfied it. What matters is that the body is guarded and
+  // that the catch does something, so it measures the SHAPE of the function:
+  // a try that covers the awaits, and a catch that writes the fallback.
   const ui = sectionsSource();
-  assert.match(ui, /async preview\(ctx\) \{\s*(?:\/\/[^\n]*\n\s*)*try \{/,
-    "preview() no longer wraps its work: a throw would leave a stale verdict on screen");
+  const body = codeOf(ui).match(/async preview\(ctx\) \{([\s\S]*?)\n    \},/);
+  assert.ok(body, "preview(ctx) is no longer where this test can read it");
+  const [, work] = body;
+  const guard = work.indexOf("try {");
+  assert.ok(guard !== -1, "preview() no longer guards its work");
+  assert.equal(work.slice(0, guard).includes("await"), false,
+    "preview() awaits before entering its try: a throw there leaves a stale verdict on screen");
+  assert.match(work.slice(guard), /catch[^{]*\{[\s\S]*previewUnavailable/,
+    "preview()'s catch no longer writes the fallback, so a throw leaves the previous verdict standing");
   assert.ok(ui.includes("previewUnavailable"),
     "the preview has no sentence for a store it cannot read");
 });
@@ -523,7 +544,12 @@ test("every locale carries exactly the keys the code and the manifest ask for", 
       called.set(m[1], m[2]);
     }
   }
-  assert.ok(called.size > 40, "the t() scan found suspiciously few keys");
+  // A FLOOR ON `called.size` USED TO STAND HERE, first as `> 40` against a
+  // catalogue of ~180 -- a number chosen to pass, which let three quarters of the
+  // i18n be deleted with the harness green. Re-anchoring it on the catalogue made
+  // it honest and, in the same move, redundant: the two directions below already
+  // cover a broken scan. A scan finding nothing leaves every catalogue key
+  // unclaimed, and the orphan check fires. Measured, both ways, before deleting.
 
   const fromManifest = [...read("src/manifest.json").matchAll(/__MSG_([A-Za-z0-9_]+)__/g)].map((m) => m[1]);
   assert.ok(fromManifest.includes("extensionName"), "the manifest must localise its own name");
@@ -1120,4 +1146,133 @@ test("every section declares every collaborator it uses", () => {
     }
   }
   assert.deepEqual(offenders, [], "a section that borrows a name must say so at the top");
+});
+
+/**
+ * THE DOOR IS GONE, AND STAYS GONE.
+ *
+ * `JumpPolicy.registry()` handed the catalogue to anyone holding the root, and
+ * the pair meant to close the traversal (`orderedIds()` + `shortcutFor(id)`) did
+ * not close it: four callers still reached through, one of them three hops deep.
+ * The aggregate now answers the questions instead. This measures that no caller
+ * -- core, infrastructure, UI or test -- reopens the shortcut.
+ */
+test("nothing reaches through the aggregate to its catalogue", () => {
+  // Tests included: a witness that reaches through teaches the next reader that
+  // the door is still there.
+  const files = [...srcFiles().map((f) => join(ROOT, f)),
+    ...readdirSync(join(ROOT, "test")).filter((f) => f.endsWith(".js")).map((f) => join(ROOT, "test", f))];
+  for (const file of files) {
+    const body = codeOf(readFileSync(file, "utf8"));
+    assert.equal(/\.registry\(\)/.test(body), false,
+      `${file} reaches through the root; ask JumpPolicy the question instead`);
+  }
+});
+
+/**
+ * NOBODY TAKES A SHORTCUT APART TO GET A STRING OUT THE OTHER SIDE.
+ *
+ * `s.key().toString()` stood in fourteen places, `s.instance().baseUrl()` in
+ * eleven, `s.key().isCatchAll()` in eight -- thirty-three files that had to know
+ * a ProjectShortcut is made of a key and a destination, and that a key is the
+ * thing that knows its own nature. Renaming any of those value objects' methods
+ * meant editing a dozen unrelated files.
+ *
+ * The entity now answers keyText(), destination(), isCatchAll() and
+ * permissionOrigin(). The accessors stay for callers that need the value object
+ * WHOLE -- rule-factory builds a regex fragment from the key, shortcut-warning
+ * reads a host's shape from the destination -- so what this measures is the HOP,
+ * not the accessor.
+ */
+test("no caller reaches through a shortcut for a string", () => {
+  const banned = [
+    [/\.key\(\)\.toString\(\)/, "keyText()"],
+    [/\.instance\(\)\.baseUrl\(\)/, "destination()"],
+    [/\.key\(\)\.isCatchAll\(\)/, "isCatchAll()"],
+    [/\.instance\(\)\.permissionOrigin\(\)/, "permissionOrigin()"],
+    [/\.shortcut\(\)\.key\(\)/, "Binding.isCatchAll()"],
+  ];
+  const files = [...srcFiles().map((f) => join(ROOT, f)),
+    ...readdirSync(join(ROOT, "test")).filter((f) => f.endsWith(".js")).map((f) => join(ROOT, "test", f))];
+  for (const file of files) {
+    // codeOf: shortcut-registry.js legitimately calls key.isCatchAll() on a bare
+    // ProjectKey, and jump-policy's header QUOTES the hops it removed.
+    const body = codeOf(readFileSync(file, "utf8"));
+    for (const [hop, instead] of banned) {
+      assert.equal(hop.test(body), false, `${file} reaches through a shortcut; ask ${instead}`);
+    }
+  }
+});
+
+/**
+ * A GLOBAL NAME IS AN ADDRESS, NEVER A BAG OF STATE.
+ *
+ * Thirty-two files hang an object off `globalThis`, and that mechanism is
+ * imposed: the same sources run under importScripts, a Firefox event page and
+ * <script src>, none of which agree on modules (ARCHITECTURE.md carries the
+ * argument). What is NOT imposed is what those files keep between calls.
+ *
+ * rule-installer.js used to hold `pending`, `queued` and `deferred` as module
+ * variables. Two installers were impossible, and a test that jammed the queue
+ * poisoned every test after it -- the failure that made this rule worth pinning
+ * rather than merely writing down.
+ *
+ * Four survive, each for a reason stated where it lives. The list is the point:
+ * a fifth has to be argued here, in front of someone, instead of appearing.
+ */
+test("module-level mutable state stays a closed, argued list", () => {
+  const allowed = new Map([
+    ["src/background.js", "syncGeneration"],
+    ["src/rule-installer.js", "theSlot"],
+    ["src/install-outcome.js", "lastRev"],
+    ["src/ui/refusal-presentation.js", "cached"],
+  ]);
+  for (const file of srcFiles()) {
+    const body = codeOf(read(file));
+    for (const [, keyword, name] of body.matchAll(/^  (let|var) ([A-Za-z_$][\w$]*)/gm)) {
+      assert.equal(keyword, "let", `${file} declares ${name} with var`);
+      assert.equal(allowed.get(file), name,
+        `${file} keeps ${name} between calls; make it an attribute of an instantiable object, or argue it into this list`);
+    }
+  }
+  // The list does not outlive what it describes.
+  for (const [file, name] of allowed) {
+    assert.match(codeOf(read(file)), new RegExp(`^  let ${name}\\b`, "m"),
+      `${file} no longer holds ${name}; drop it from the allowed list`);
+  }
+});
+
+/**
+ * THE PUBLISHED PACKAGE CONTAINS ONLY WHAT THE EXTENSION IS MADE OF.
+ *
+ * Both build scripts copied src/ wholesale. Anything that had ever landed there
+ * shipped to both stores -- an editor's .bak, a notes.md, a .env dropped for five
+ * minutes. Nothing had to go wrong; it only had to be forgotten.
+ *
+ * The copy now runs through an allow-list that THROWS on an unknown type, so a
+ * stray file breaks the build instead of being published. This is the same list
+ * read from the other side: it fails at commit time rather than at release time,
+ * and it fails on the file that is actually there rather than on a build nobody
+ * ran yet.
+ */
+test("src holds nothing that must not ship", async () => {
+  const { SHIPPABLE } = await import("../scripts/package-filter.mjs");
+  // NOT srcFiles(): that one keeps only .js, which is every extension except the
+  // ones this test exists to catch. Written with it, the test passed on a
+  // src/scratch.txt sitting right there -- measured, which is why it is spelled
+  // out here instead.
+  const everything = (dir, out = []) => {
+    for (const entry of readdirSync(join(ROOT, dir), { withFileTypes: true })) {
+      if (entry.isDirectory()) everything(join(dir, entry.name), out);
+      else out.push(join(dir, entry.name));
+    }
+    return out;
+  };
+  for (const file of everything("src")) {
+    const name = file.split("/").pop();
+    assert.equal(name.startsWith("."), false, `${file} is a dotfile inside src/`);
+    const ext = name.slice(name.lastIndexOf("."));
+    assert.ok(SHIPPABLE.has(ext),
+      `${file} would be published to both stores. Move it out of src/, or add ${ext} to scripts/package-filter.mjs on purpose.`);
+  }
 });

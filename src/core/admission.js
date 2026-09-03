@@ -138,7 +138,7 @@
    * the destination: it decides who intercepts what.
    */
   const assertAdmittedInDocumentOrder = (policy, admittedIds) => {
-    const held = policy.registry().orderedIds();
+    const held = policy.orderedIds();
     const same =
       held.length === admittedIds.length && held.every((id, i) => id === admittedIds[i]);
     if (!same) {
@@ -185,10 +185,27 @@
     }
     // Selections written before engines were split per domain would otherwise
     // resolve to nothing, and an existing configuration would quietly stop working.
-    // core asking core. It used to call SearchEngineCatalog.migrateId, so the
-    // storage door depended on the airlock -- the exact inversion rule-factory.js
-    // forbids in the other direction, invisible because both meet on globalThis.
-    const engines = [...new Set(rawEngines.map((id) => global.EngineId.current(id)))];
+    // THROUGH THE VALUE OBJECT, which migrates an old spelling AND refuses what
+    // cannot be an engine identity. It was a bare string all the way to the
+    // catalogue's Map keys, a rule label and a permission origin, so nothing
+    // stopped a host name or an origin from being ticked.
+    //
+    // A refused id is DROPPED, never fatal: it is one entry of a list, and losing
+    // the whole configuration over a ticked engine would be the denial of service
+    // the bound above exists to prevent.
+    const engines = [];
+    const seenEngines = new Set();
+    for (const raw of rawEngines) {
+      const parsed = global.EngineId.parse(raw);
+      if (!parsed.ok) {
+        unreadableEngines.push({ code: parsed.code, message: parsed.message });
+        continue;
+      }
+      const written = parsed.value.toString();
+      if (seenEngines.has(written)) continue;
+      seenEngines.add(written);
+      engines.push(written);
+    }
     const customEngines = raw.customEngines === undefined ? [] : raw.customEngines;
     if (!Array.isArray(customEngines)) {
       return refuse("CUSTOM_ENGINES_NOT_A_LIST", "`customEngines` must be a list.");
@@ -226,6 +243,7 @@
     // field that door does not even read -- announced refusals that never
     // happened, on the one surface the whole batch says must be believed.
     const unreadable = [];
+    const unreadableEngines = [];
     let armed = false;
     if (typeof raw.armed === "boolean") {
       armed = raw.armed;
@@ -246,7 +264,7 @@
         // ALWAYS AN ARRAY, empty when there is nothing to say. A field that shows
         // up only sometimes is the meaningful absence mutation-result.js bans --
         // and the whole point here is to stop being silent.
-        unreadable,
+        unreadable: [...unreadable, ...unreadableEngines],
         engines,
         customEngines,
         shortcuts: raw.shortcuts,

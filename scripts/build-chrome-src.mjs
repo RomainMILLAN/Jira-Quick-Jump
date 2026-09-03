@@ -9,6 +9,7 @@
 import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { shippableFilter } from "./package-filter.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const SRC = join(ROOT, "src");
@@ -16,7 +17,7 @@ const OUT = join(ROOT, "build", "chrome");
 
 rmSync(OUT, { recursive: true, force: true });
 mkdirSync(OUT, { recursive: true });
-cpSync(SRC, OUT, { recursive: true });
+cpSync(SRC, OUT, { recursive: true, filter: shippableFilter });
 
 const path = join(OUT, "manifest.json");
 const manifest = JSON.parse(readFileSync(path, "utf8"));

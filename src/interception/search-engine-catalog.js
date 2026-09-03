@@ -15,6 +15,39 @@
 
   // How an engine builds its search URL. Adding a shape is a decision made here,
   // never by whoever types a domain into the options page.
+  /**
+   * THE PARAMETER WE READ MUST BE THE ONE THE ENGINE READS -- the first of its
+   * name, not any of its name.
+   *
+   * `\\?(?:.*&)?q=` stood here, and `.*&` happily swallowed `q=hello&` in
+   * `?q=hello&q=ABC-1`: the rule matched the SECOND `q`, which every search
+   * engine ignores. A third-party page could therefore navigate a visitor to
+   * `<their Jira>/browse/ABC-1` -- with a catch-all armed, to `/browse/ANYTHING`
+   * -- without a search ever happening, and without the address bar being used.
+   * The redirect is the extension's, so the flow is the extension's to close.
+   *
+   * RE2 has no lookaround, so "no earlier parameter of this name" is spelled by
+   * enumerating what a DIFFERENT name looks like: one that diverges at the first
+   * character, or one that starts with it and runs longer. The trailing `?`
+   * admits the nameless `?=v&` that browsers tolerate.
+   *
+   * THE COST IS ONE ALTERNATION OF TWO, and it is paid out of the eleven units
+   * re2-budget.js calls "a dated bet" against the unmeasured envelope. If Chrome
+   * ever refuses a rule over this, the fix is re2-budget's documented one -- drop
+   * MAX_ALTERNATION_COST to 50 -- and never widening this back, which would
+   * reopen the flow above.
+   *
+   * Single-character names only, which is what both shapes use. A longer name
+   * would need one alternative per position, and that IS a budget question rather
+   * than a free one -- so it fails loudly here instead of silently there.
+   */
+  const noEarlier = (queryParam) => {
+    if (queryParam.length !== 1) {
+      throw new Error(`query parameter ${queryParam}: only single-character names are budgeted`);
+    }
+    return `(?:(?:[^=&${queryParam}][^=&]*|${queryParam}[^=&]+)?=[^&]*&)*`;
+  };
+
   const SHAPES = {
     "search-q": { pathPattern: "/search", queryParam: "q" },
     "root-q": { pathPattern: "/", queryParam: "q" },
@@ -84,7 +117,8 @@
           "^https://" +
           hostPattern +
           form.pathPattern +
-          "\\?(?:.*&)?" +
+          "\\?" +
+          noEarlier(form.queryParam) +
           form.queryParam +
           "=" +
           typedTextFragment +
@@ -136,10 +170,12 @@
     },
 
     /** Kept as a convenience for callers already holding the catalogue; the
-     *  spelling itself is owned by core/engine-id.js, because the storage door
-     *  needs it and the storage door is core. */
+     *  identity itself is owned by core/engine-id.js, because the storage door
+     *  needs it and the storage door is core. An id this build cannot read at all
+     *  resolves to itself, and the lookup then simply finds nothing. */
     migrateId(id) {
-      return global.EngineId.current(id);
+      const parsed = global.EngineId.parse(id);
+      return parsed.ok ? parsed.value.toString() : String(id);
     },
   };
 

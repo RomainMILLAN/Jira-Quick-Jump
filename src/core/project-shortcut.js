@@ -401,9 +401,39 @@
     armed() { return this._consent.armed(); }
 
     /**
-     * The entity hands over its PARTS rather than itself, which is what lets the
-     * options page compute a key-scoped warning while a destination is still
-     * being typed -- no throwaway shortcut needed.
+     * THE THREE QUESTIONS THE OUTSIDE ACTUALLY ASKED, and it asked them by taking
+     * the entity apart: `s.keyText()` fourteen times, `s.instance()
+     * .baseUrl()` eleven, `s.isCatchAll()` eight -- thirty-three places
+     * that had to know this entity is made of a key and a destination, and that a
+     * key is the thing that knows its own nature.
+     *
+     * The accessors above stay, because a caller that needs the VALUE OBJECT
+     * needs it whole: rule-factory builds a regex fragment from the key,
+     * shortcut-warning reads a host's shape from the destination. What is banned
+     * is reaching through one to get a string out the other side -- the hop that
+     * spreads this entity's shape into files that only wanted a word to print.
+     */
+    keyText() { return this._key.toString(); }
+    destination() { return this._instance.baseUrl(); }
+    isCatchAll() { return this._key.isCatchAll(); }
+
+    /** WHICH HOST THIS SHORTCUT NEEDS ACCESS TO -- the fourth question, asked by
+     *  the airlock that assembles the permission prompt. Same hop as
+     *  destination(), and the same reason to name it here rather than there. */
+    permissionOrigin() { return this._instance.permissionOrigin(); }
+
+    /**
+     * THE ENTITY ASKS, and it is the only caller of forShortcut.
+     *
+     * The catalogue of warnings is a domain SERVICE, not a stranger: it holds the
+     * rules ("a catch-all leaves in clear text", "this host is private"), and it
+     * cannot hold state about one shortcut. What matters is the direction -- the
+     * options page asks THIS, never the catalogue about the parts of this, which
+     * is what an outside caller doing forKey(s.key()) + forInstance(s.instance())
+     * would be: a stranger deciding on the entity's behalf.
+     *
+     * The catalogue's two other doors stay public because the options page needs
+     * them on a key and a destination being TYPED, where no shortcut exists yet.
      */
     unacknowledgedWarnings() {
       return global.ShortcutWarning.forShortcut(this).filter((w) => !this._consent.acknowledged(w.kind));

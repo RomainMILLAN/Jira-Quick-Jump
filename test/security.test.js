@@ -311,6 +311,71 @@ test("a quarantined catch-all is repairable without the UI ever typing a star", 
   ]);
   const promoted = stored.readmit(stored.quarantined()[0].fingerprint, instance, crypto.randomUUID());
   assert.equal(promoted.ok, true);
-  assert.equal(promoted.value.policy().shortcuts()[0].key().isCatchAll(), true);
+  assert.equal(promoted.value.policy().shortcuts()[0].isCatchAll(), true);
   assert.equal(promoted.value.quarantined().length, 0);
+});
+
+
+/**
+ * A DESTINATION CANNOT SMUGGLE A BACKREFERENCE INTO THE SUBSTITUTION.
+ *
+ * `reference-pattern.js:62` is the only line between a `baseUrl` -- written by the
+ * sync channel, this project's named adversary -- and the `regexSubstitution` the
+ * platform interprets. In a DNR substitution `\1`..`\9` are BACKREFERENCES: a
+ * baseUrl carrying one would redirect to a destination assembled from a fragment
+ * of the intercepted URL, chosen by whoever wrote the policy.
+ *
+ * THE TWO FUNCTIONS DO NOT BACK EACH OTHER UP -- they SPLIT the domain, which is
+ * measured here rather than assumed, because the split is written nowhere:
+ *
+ *   - backslash FOLLOWED BY A DIGIT -> `assertBackreferences` REFUSES. It throws
+ *     rather than neutralises, and it throws even on the already-doubled form,
+ *     because its `/\\[0-9]/g` does not model escaping. Fail-closed.
+ *   - backslash WITHOUT a digit (`a\d`, a trailing `a\`) -> the assertion never
+ *     sees it, and `escapeSubstitution` alone doubles it so DNR reads a literal
+ *     backslash instead of an escape that would eat the next character.
+ *
+ * Neither is redundant, and removing either leaves a hole the other does not
+ * cover. That is why both halves are exercised below.
+ *
+ * THE DOUBLE BYPASSES `JiraInstance.parse`, ON PURPOSE. That parse already refuses
+ * a backslash (`project-shortcut.js:302`, BASE_BACKSLASH), so a test built through
+ * it would go red on the WRONG refusal and be disarmed by the next cleanup. The
+ * stand-in is exactly the scenario escapeSubstitution's own docstring names:
+ * "another source (a migration, a future importer) bypasses validation".
+ * The two functions stay private -- exporting them to test them would widen the
+ * surface for nothing.
+ */
+test("a baseUrl carrying a backreference is refused, never emitted", () => {
+  const key = g.ProjectKey.parse("ABC").value;
+
+  const honest = { baseUrl: () => "https://jira.example.org" };
+  const emitted = g.ReferencePattern.substitutionFor(honest, key);
+  assert.equal(emitted, "https://jira.example.org/browse/ABC-\\1");
+  assert.deepEqual(emitted.match(/\\[0-9]/g), ["\\1"],
+    "exactly the one backreference the key put there, and no other");
+
+  // Half one: a digit follows, so the assertion refuses outright.
+  for (const smuggled of [
+    "https://example.org/a\\1",   // the key's own group, duplicated
+    "https://example.org/\\0",    // the whole match
+    "https://example.org/x\\9y",  // a group that does not exist
+    "https://example.org/a\\\\1",  // already doubled: still refused
+  ]) {
+    assert.throws(
+      () => g.ReferencePattern.substitutionFor({ baseUrl: () => smuggled }, key),
+      /substitution must contain exactly/,
+      `${smuggled} reached the platform instead of being refused`
+    );
+  }
+
+  // Half two: no digit follows, so the assertion is blind and only the escaping
+  // stands between a lone backslash and the platform's substitution parser.
+  for (const [raw, doubled] of [
+    ["https://example.org/a\\d", "https://example.org/a\\\\d/browse/ABC-\\1"],
+    ["https://example.org/a\\", "https://example.org/a\\\\/browse/ABC-\\1"],
+  ]) {
+    assert.equal(g.ReferencePattern.substitutionFor({ baseUrl: () => raw }, key), doubled,
+      "a lone backslash must reach DNR doubled, or it escapes the character after it");
+  }
 });

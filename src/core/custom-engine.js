@@ -26,7 +26,10 @@
       this._host = host;
       this._shape = shape;
     }
-    id() { return `custom:${this._host}`; }
+    /** THE PREFIX IS NOT SPELLED HERE. It used to be, and the catalogue read it
+     *  back by hand -- two files that could drift on a colon. EngineId owns the
+     *  identity; this hands it the host it has already validated. */
+    id() { return global.EngineId.forCustomHost(this._host).toString(); }
     host() { return this._host; }
     shape() { return this._shape; }
     label() { return this._host; }

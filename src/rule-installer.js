@@ -342,9 +342,14 @@
       }
       return this.report({
         policy,
-        skipped,
         quarantinedCount,
-        reality: { installed, coverageSatisfied },
+        // THE CAUSES TRAVEL IN `reality`, not beside it. They used to ride a
+        // parameter of their own, which made `report()` carry two doors for one
+        // fact: the worker filled one, the page filled the other with `[]`, and
+        // the return picked the empty one. `reality` now means the same thing on
+        // both surfaces -- what THIS surface knows of the installed reality: the
+        // present for the worker, the receipt's memory for the page.
+        reality: { installed, coverageSatisfied, skipped },
         source: "INSTALL",
       });
     },
@@ -394,7 +399,7 @@
      * verifiable control would become the channel of the lie, with the preview's
      * authority behind it.
      */
-    async report({ policy, skipped, quarantinedCount, reality, source }) {
+    async report({ policy, quarantinedCount, reality, source }) {
       const origins = OriginRequirements.requiredOrigins(policy, SearchEngineCatalog.forPolicy(policy));
       const originsGranted = await Platform.grantedOrigins(origins);
       const rules = await dnr().getDynamicRules();
@@ -440,7 +445,12 @@
         installed: reality.installed,
         coverageSatisfied: reality.coverageSatisfied,
         diagnosis,
-        skipped,
+        // Named, like the two above -- no spread, and no `?? []`: both factories
+        // guarantee an array (rule-installer's own `skipped` is reassigned from
+        // `installable.skipped()` and a spread; InstallOutcome.read assigns
+        // `out.skipped` on every path, catch included). A hedge on the most
+        // constrained of the three fields would call its two neighbours reckless.
+        skipped: reality.skipped,
         missingOrigins: originsGranted ? [] : origins,
       };
     },

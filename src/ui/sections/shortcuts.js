@@ -297,7 +297,7 @@
       // statusOf is the SOLE judge of a row, so the row's vocabulary is the one
       // diagnose() speaks and two places never qualify the same line.
       const status = policy.statusOf(id);
-      const isCatchAll = shortcut.key().isCatchAll();
+      const isCatchAll = shortcut.isCatchAll();
 
       const orderArrow = (path, delta, ariaLabel, atEdge) =>
         el("button", {
@@ -351,7 +351,7 @@
           isCatchAll
             ? el("div", { class: "f key is-static" }, [
                 el("span", { text: t("catchAllKey", "Any short key") }),
-                el("code", { text: shortcut.key().toString() }),
+                el("code", { text: shortcut.keyText() }),
               ])
             : el("input", {
                 // A REAL `label for`, so clicking the word focuses the field and a
@@ -360,7 +360,7 @@
                 // hidden by CSS: an aria-label wins over a <label>, and both saying
                 // the same thing is what makes that safe.
                 id: `key-${id}`, "data-field": "key",
-                class: "f key", value: shortcut.key().toString(),
+                class: "f key", value: shortcut.keyText(),
                 "aria-label": t("key", "Key"),
                 onInput: (event) => this.editKey(event.target, id, ctx),
               }),
@@ -369,7 +369,7 @@
           el("label", { class: "field-label", "for": `url-${shortcut.id()}`, text: t("destination", "Destination") }),
           el("input", {
             id: `url-${id}`, "data-field": "url",
-            class: "f", value: shortcut.instance().baseUrl(),
+            class: "f", value: shortcut.destination(),
             "aria-label": t("destination", "Destination"),
             "aria-describedby": status === "SHADOWED" ? reasonId : undefined,
             onInput: (event) => this.editUrl(event.target, id, ctx),
@@ -445,7 +445,7 @@
       // The catch-all draft has NO key field at all: the Key input never sees `*`,
       // at any point. The UI expresses a gesture and the core forges the key.
       // No written form here: it belongs to the key, and a draft has no key yet.
-      // The saved row shows it, from shortcut.key().toString().
+      // The saved row shows it, from shortcut.keyText().
       const keyCell = draft.catchAll
         ? el("div", { class: "f key is-static" }, [
             el("span", { text: t("catchAllKey", "Any short key") }),

@@ -192,6 +192,13 @@ Publication runs in the `release` environment. Protect it with a required
 reviewer and the tag pattern `v*`, and a stolen token can push a tag without
 being able to publish anything.
 
+## Reading the source
+
+Two things surprise people who open the code: every file is an IIFE hanging off
+`globalThis` with no imports, and `JumpPolicy` answers six questions where one
+accessor would do. Both are deliberate, and
+[ARCHITECTURE.md](ARCHITECTURE.md) says why before you change one of them.
+
 ## Licence
 
 MIT. The author signature under `src/ui/author-signature.css` is vendored from

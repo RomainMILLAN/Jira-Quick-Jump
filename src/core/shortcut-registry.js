@@ -186,7 +186,7 @@
      *  an order of identifiers could not tell which one is a catch-all. */
     catchAll() {
       for (const shortcut of this._byId.values()) {
-        if (shortcut.key().isCatchAll()) return shortcut;
+        if (shortcut.isCatchAll()) return shortcut;
       }
       return undefined;
     }
@@ -289,7 +289,7 @@
       const shortcut = this._byId.get(id);
       if (!shortcut) return MutationResult.refused("UNKNOWN_SHORTCUT", "This shortcut no longer exists.");
       if (shortcut.key().equals(key)) return MutationResult.ok(this);
-      if (shortcut.key().isCatchAll() !== key.isCatchAll()) {
+      if (shortcut.isCatchAll() !== key.isCatchAll()) {
         return MutationResult.refused(
           "KEY_NATURE_IMMUTABLE",
           "A catch-all cannot be renamed, and a shortcut cannot become a catch-all."

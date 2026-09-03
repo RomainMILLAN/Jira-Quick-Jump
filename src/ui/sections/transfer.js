@@ -90,17 +90,17 @@
      * origin-only diff would hide /jira becoming /jira-fake.
      */
     diff(stored, ctx) {
-      const current = new Map(stored.policy().shortcuts().map((s) => [s.key().toString(), s]));
-      const incoming = new Map(this.proposal.policy.shortcuts().map((s) => [s.key().toString(), s]));
+      const current = new Map(stored.policy().shortcuts().map((s) => [s.keyText(), s]));
+      const incoming = new Map(this.proposal.policy.shortcuts().map((s) => [s.keyText(), s]));
       const rows = [];
 
       for (const [key, shortcut] of incoming) {
         const before = current.get(key);
-        const changed = before && before.instance().baseUrl() !== shortcut.instance().baseUrl();
+        const changed = before && before.destination() !== shortcut.destination();
         rows.push(el("div", { class: `row${changed ? " is-refused" : ""}` }, [
           el("span", { class: "tag " + (changed ? "bad" : "ok"),
             text: changed ? t("diffChanged", "Changed") : t("diffNew", "New") }),
-          el("span", { class: "dest", text: key }),
+          el("span", { class: "mono-token", text: key }),
           el("span", {}, changed
             ? [destination(before.instance(), "dest was"), destination(shortcut.instance(), "dest now")]
             : [destination(shortcut.instance())]),
@@ -110,7 +110,7 @@
         if (incoming.has(key)) continue;
         rows.push(el("div", { class: "row" }, [
           el("span", { class: "tag off", text: t("diffRemoved", "Removed") }),
-          el("span", { class: "dest", text: key }),
+          el("span", { class: "mono-token", text: key }),
           destination(shortcut.instance()),
         ]));
       }

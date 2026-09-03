@@ -228,8 +228,8 @@ test("two entries claiming one identity: the second is quarantined, the first ke
   });
   assert.equal(restored.policy.shortcuts().length, 1, "the squatter must not be registered");
   const survivor = restored.policy.shortcutFor(ID);
-  assert.equal(survivor.key().toString(), "ABC", "the first occupant keeps the identity");
-  assert.equal(survivor.instance().baseUrl(), "https://first.atlassian.net");
+  assert.equal(survivor.keyText(), "ABC", "the first occupant keeps the identity");
+  assert.equal(survivor.destination(), "https://first.atlassian.net");
   assert.equal(restored.quarantine.length, 1, "the squatter is set aside, never destroyed");
   assert.ok(restored.dropped.some((d) => d.code === "DUPLICATE_ID"));
 });

@@ -44,6 +44,10 @@
       this._ruleIndex = ruleIndex;
     }
     shortcut() { return this._shortcut; }
+
+    /** Asked of the binding, because `binding.isCatchAll()` is
+     *  three hops and both callers wanted the last one. */
+    isCatchAll() { return this._shortcut.isCatchAll(); }
     engineId() { return this._engineId; }
     /** Rules are replaced wholesale on every sync, so ids are positional.
      *  There is deliberately NO second positional number here: priority comes
@@ -90,7 +94,18 @@
      */
     shortcutCount() { return this._registry.size(); }
     hasShortcuts() { return this._registry.size() > 0; }
-    registry() { return this._registry; }
+    /**
+     * WHICH SHORTCUTS THE CATCH-ALL SWALLOWS -- asked, not fetched.
+     *
+     * `registry()` used to stand here, and it made the closed pair below a
+     * fiction: four callers reached THROUGH the root to the catalogue, one of
+     * them writing `after.registry().find(id).key().toString()` -- three hops
+     * from an aggregate that publishes `shortcutFor(id)`. The pair does not
+     * close while the door beside it stays open, so the door is gone and the two
+     * questions the outside actually asked are named here instead.
+     */
+    shadowedIds() { return this._registry.shadowedIds(); }
+    isShadowed(id) { return this._registry.isShadowed(id); }
     engineIds() { return [...this._engineIds]; }
     customEngines() { return [...this._customEngines]; }
     armed() { return this._armed; }
@@ -213,7 +228,7 @@
      * contract comes out empty() and satisfiedBy is true by vacuity.
      */
     wantsCatchAll() {
-      return this.activeBindings().some((binding) => binding.shortcut().key().isCatchAll());
+      return this.activeBindings().some((binding) => binding.isCatchAll());
     }
 
     /**
@@ -268,7 +283,7 @@
         return { code: "NO_MATCH" };
       }
       return {
-        code: claimant.key().isCatchAll() ? "MATCHED_CATCH_ALL" : "MATCHED_SHORTCUT",
+        code: claimant.isCatchAll() ? "MATCHED_CATCH_ALL" : "MATCHED_SHORTCUT",
         shortcut: claimant,
       };
     }
@@ -468,8 +483,8 @@
         [...this._engineIds].sort(),
         this._registry.shortcuts().map((s) => [
           s.id(),
-          s.key().toString(),
-          s.instance().baseUrl(),
+          s.keyText(),
+          s.destination(),
           s.armed(),
         ]),
       ]);
@@ -499,8 +514,8 @@
         customEngines: this._customEngines.map((e) => e.toJSON()),
         shortcuts: this._registry.shortcuts().map((s) => ({
           id: s.id(),
-          key: s.key().toString(),
-          baseUrl: s.instance().baseUrl(),
+          key: s.keyText(),
+          baseUrl: s.destination(),
         })),
       };
     }

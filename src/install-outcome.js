@@ -36,6 +36,22 @@
   const { Platform, VersionedEntry } = global;
   // Enough to name the causes without turning a receipt into a log.
   const MAX_SKIPPED = 10;
+  /**
+   * A DISPLAY BOUND, NOT A VALIDATION -- and the difference is worth a sentence,
+   * because a silent correction at a customs post reads as a validation six months
+   * later. MAX_SKIPPED caps HOW MANY causes come back; nothing capped how LONG each
+   * one is, and ten causes are enough to wreck the panel if a `subject` weighs 50kB.
+   *
+   * TRUNCATED FROM THE START, on purpose: a `subject` is often a URL, and a URL's
+   * origin is at its front. A prefix stays true about where traffic goes, while
+   * eliding the middle would make `https://jira.internal...` indistinguishable from
+   * `https://jira.internal.evil.example/...` -- on the very panel that explains why
+   * a control fell.
+   *
+   * Here and NOT in record(): the producer is the worker, whose subjects come from
+   * an already-admitted policy. This is the side the data is read back from.
+   */
+  const MAX_SUBJECT = 200;
   const ENTRY = "installOutcome";
 
   /**
@@ -108,6 +124,7 @@
           ? value.skipped
               .filter((s) => s && typeof s.code === "string" && typeof s.subject === "string")
               .slice(0, MAX_SKIPPED)
+              .map((s) => ({ code: s.code.slice(0, MAX_SUBJECT), subject: s.subject.slice(0, MAX_SUBJECT) }))
           : [];
         return out;
       } catch {

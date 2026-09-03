@@ -575,9 +575,8 @@ test("report() cannot be overwritten on the way OUT", async () => {
 
   const report = await g.RuleInstaller.report({
     policy: armedCatchAll(),
-    skipped: [],
     quarantinedCount: 0,
-    reality: { installed: true, rules: ["FORGED RULE"], applied: 99 },
+    reality: { installed: true, rules: ["FORGED RULE"], applied: 99, skipped: [] },
     source: "PAGE",
   });
 
@@ -597,9 +596,8 @@ test("report() cannot be overwritten on the way IN, and the POLARITY is what cou
 
   const report = await g.RuleInstaller.report({
     policy: g.JumpPolicy.empty(),
-    skipped: [],
     quarantinedCount: 0,
-    reality: { rulesInstalled: false },
+    reality: { rulesInstalled: false, skipped: [] },
     source: "PAGE",
   });
 
@@ -614,7 +612,7 @@ test("the TWO call sites pass `source`, and a third one would go red", async () 
   assert.equal(report.source, "INSTALL");
 
   const page = await g.RuleInstaller.report({
-    policy: armedCatchAll(), skipped: [], quarantinedCount: 0, reality: {}, source: "PAGE",
+    policy: armedCatchAll(), quarantinedCount: 0, reality: { skipped: [] }, source: "PAGE",
   });
   assert.equal(page.source, "PAGE");
 
@@ -623,7 +621,7 @@ test("the TWO call sites pass `source`, and a third one would go red", async () 
   // Named fields make the omission VISIBLE at the call site, which is the point:
   // positionally, this read as a three-argument call and looked deliberate.
   const nameless = await g.RuleInstaller.report({
-    policy: armedCatchAll(), skipped: [], quarantinedCount: 0, reality: { installed: true },
+    policy: armedCatchAll(), quarantinedCount: 0, reality: { installed: true, skipped: [] },
   });
   assert.equal(nameless.source, undefined);
   assert.notEqual(nameless.source, "INSTALL", "a forgotten source never governs the projection");
@@ -692,4 +690,30 @@ test("a translated build is exercised, not merely compared key for key", async (
   delete i18nCatalogue.diagReady;
   assert.equal(g.Platform.t("diagReady", "Everything is ready."), "Everything is ready.",
     "and an absent translation still falls back to the shipped English");
+});
+
+/**
+ * A CAUSE CANNOT WRECK THE PANEL BY BEING LONG.
+ *
+ * MAX_SKIPPED caps how MANY causes come back; nothing capped how LONG each is, and
+ * ten causes are enough to dislocate the layout if a `subject` weighs 50kB. The
+ * bound lives in read(), where the data crosses back out of storage.local -- not at
+ * render time, which is the order this repository keeps everywhere.
+ *
+ * TRUNCATED FROM THE START: a subject is often a URL, whose origin is at its front,
+ * so a clipped string stays true about where traffic goes.
+ */
+test("a skipped cause is bounded in length at the customs post, from the front", async () => {
+  const long = "https://jira.internal.example/" + "x".repeat(50_000);
+  store.put("installOutcome", {
+    rev: 3,
+    value: { installed: false, skipped: [{ code: "RUN_OVER_BUDGET", subject: long }] },
+  });
+
+  const [cause] = (await g.InstallOutcome.read()).skipped;
+  assert.equal(cause.subject.length, 200, "the subject is clipped");
+  assert.ok(cause.subject.startsWith("https://jira.internal.example/"),
+    "and clipped from the FRONT, so the origin survives -- a tail-clipped URL would " +
+    "make jira.internal look like jira.internal.evil.example");
+  assert.equal(cause.code, "RUN_OVER_BUDGET", "a short code passes through untouched");
 });

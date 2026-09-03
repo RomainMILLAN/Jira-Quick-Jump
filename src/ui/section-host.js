@@ -142,12 +142,12 @@
           // back to {} and report() re-fabricated `installed: true` -- the page
           // owned two labels it could STRUCTURALLY never display.
           //
-          // `skipped` is EMPTY on this surface and that is a fact, not an
-          // oversight: the causes are produced during an installation, which only
-          // the worker performs. What the page can show comes from the receipt.
+          // THE CAUSES COME IN `reality`, and there is no second door. This call
+          // used to pass `skipped: []` beside it, which report() then returned --
+          // so the page rendered zero causes while the receipt held six. The
+          // parameter is gone; the receipt is the only source on this surface.
           lastReport = await RuleInstaller.report({
             policy: stored.policy(),
-            skipped: [],
             quarantinedCount: stored.quarantinedCount(),
             reality: await InstallOutcome.read(),
             source: "PAGE",

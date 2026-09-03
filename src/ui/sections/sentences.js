@@ -16,7 +16,10 @@
 
   const FACT_SENTENCE = (fact) => {
     const host = (text) => el("span", { class: "dest host", text });
-    const plain = (text) => el("span", { class: "dest", text });
+    // NOT `.dest`: this paints a key, or a phrase standing in for one -- never a
+    // destination. One class for three meanings made a rule about where traffic
+    // goes govern the word beside it.
+    const plain = (text) => el("span", { class: "mono-token", text });
     switch (fact.type) {
       case "ShortcutAppeared":
       case "CatchAllAppeared":
@@ -180,7 +183,24 @@
     return movedUp ? t("movedUp", "Moved up.") : t("movedDown", "Moved down.");
   };
 
-  const SKIPPED_SENTENCE = () => ({
+  /**
+   * NO PROTOTYPE, because this table is the only one here indexed by a key that
+   * comes from OUTSIDE. `cause.code` and `cause.subject` are read back from the
+   * receipt, where install-outcome.js checks `typeof === "string"` and nothing
+   * else -- so `{ code: "constructor" }` would return the `Object` function,
+   * which is TRUTHY, so the `|| cause.code` fallback would not fire, and the
+   * panel meant to explain why a security control fell would print
+   * `function Object() { [native code] }`. Same for toString, valueOf, __proto__.
+   *
+   * `cause.subject` is the one that matters most: `code` is a closed vocabulary we
+   * write (Re2Budget.REASONS, frozen), while `subject` is free text derived from
+   * the policy -- the "text chosen by whoever wrote the policy" that policy-diff
+   * already refuses to carry elsewhere.
+   *
+   * Object.create(null) closes BOTH lookups at once. A hasOwn() at each call site
+   * would work too, and would be forgotten on one of the two.
+   */
+  const SKIPPED_SENTENCE = () => Object.assign(Object.create(null), {
     UNKNOWN_ENGINE: t("skipUnknownEngine", "A ticked search engine is no longer known."),
     REGEX_UNSUPPORTED: t("skipRegexUnsupported", "The browser refused the pattern for this rule."),
     UNIT_INCOMPLETE: t("skipUnitIncomplete", "This rule was dropped with the group it belongs to."),

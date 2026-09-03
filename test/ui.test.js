@@ -689,3 +689,36 @@ test("a refused commit shows the banner and leaves the screen alone", async () =
     }
   });
 });
+
+/**
+ * A CAUSE NAMED `constructor` MUST PRINT ITSELF, NOT Object.
+ *
+ * The Lot-3 fix turns this render path from dead to live: `report.skipped` used to
+ * be `[]` on the page, so preview.js:158-183 had never run with data. It reads its
+ * sentences out of a table indexed by `cause.code` and `cause.subject`, and those
+ * come back from the receipt where install-outcome.js checks `typeof === "string"`
+ * and nothing more.
+ *
+ * With an ordinary object literal, `table["constructor"]` returns the `Object`
+ * function -- TRUTHY, so the `|| cause.code` fallback never fires -- and the panel
+ * that exists to explain why a security control fell would print
+ * `function Object() { [native code] }`. `subject` is the likelier vector of the
+ * two: `code` is a closed vocabulary this repository writes, `subject` is free text
+ * derived from the policy, i.e. from the sync channel.
+ */
+test("a skipped cause cannot borrow a sentence from Object.prototype", async () => {
+  await withDocument(async (doc) => {
+    const section = (await loadSections()).find((s) => typeof s.preview === "function");
+    const root = doc.createElement("div");
+    const stored = new g.StoredPolicy(g.JumpPolicy.empty().withEngines(["google.com"]).value, []);
+    section.mount(root, contextFor(stored, []));
+
+    const table = globalThis.SectionSentences.SKIPPED_SENTENCE();
+    assert.equal(Object.getPrototypeOf(table), null, "the table must carry no prototype");
+    for (const borrowed of ["constructor", "toString", "valueOf", "__proto__", "hasOwnProperty"]) {
+      assert.equal(table[borrowed], undefined,
+        `${borrowed} resolves through the prototype chain, so the || fallback stays asleep`);
+    }
+    assert.equal(typeof table.UNKNOWN_ENGINE, "string", "and the real keys still answer");
+  });
+});

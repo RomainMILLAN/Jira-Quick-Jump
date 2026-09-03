@@ -117,7 +117,7 @@ const DIAGNOSES = [
     code: "COVERAGE_STATE_UNKNOWN",
     applies: (p, f, live) =>
       typeof f.coverageSatisfied !== "boolean" &&
-      live.some((binding) => binding.shortcut().key().isCatchAll()),
+      live.some((binding) => binding.isCatchAll()),
   },
   { code: "MISSING_ORIGINS", applies: (p, f) => !f.originsGranted },
   { code: "PARTIAL_POLICY", applies: (p, f) => f.quarantinedCount > 0 },
@@ -125,9 +125,25 @@ const DIAGNOSES = [
 ];
 
   const Diagnosis = {
-    // FROZEN. It was a live array handed out through JumpPolicy.DIAGNOSES, so any
-    // reader could reorder the published language of this project in place.
-    CODES: Object.freeze(DIAGNOSES.map((d) => d.code)),
+    /**
+     * THE PUBLISHED LANGUAGE: each code once, in rank order.
+     *
+     * It projected the RANKS, and PARTIAL_POLICY holds two of them -- one above
+     * NO_SHORTCUTS, one far below -- so the list handed out fifteen entries for
+     * fourteen words. A vocabulary that repeats itself is not a vocabulary; every
+     * reader had to dedupe it, or count wrong.
+     *
+     * The duplicate stays where it belongs, in RANKS, and a test pins both facts:
+     * fifteen ranks, fourteen codes.
+     *
+     * Frozen: it was a live array handed out through JumpPolicy.DIAGNOSES, so any
+     * reader could reorder this project's published language in place.
+     */
+    CODES: Object.freeze([...new Set(DIAGNOSES.map((d) => d.code))]),
+
+    /** How many rungs the ladder has, duplicates included. The ORDER is the
+     *  arbitration; the codes are the words. */
+    RANKS: Object.freeze(DIAGNOSES.map((d) => d.code)),
 
     /**
      * The facts come in THROUGH THE DOOR: answering MISSING_ORIGINS needs the
