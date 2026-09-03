@@ -154,6 +154,11 @@ const contextFor = (initial, applied) => {
   journal: { read: async () => ({ entries: [], unseen: [], acknowledged: true, overflowed: false }) },
   refresh: async () => {},
   condemned: () => false,
+  // THE WHOLE SURFACE THE HOST OFFERS, so a section can read it without a guard.
+  // A `typeof ctx.unreadable === "function"` in the section would be a defence
+  // that exists only for this harness -- and the lifecycle test next door already
+  // insists a wrapped section answers the whole contract, not most of it.
+  unreadable: () => [],
   };
 };
 
@@ -1026,5 +1031,217 @@ test("every declared section mounts and renders without throwing", async () => {
     const total = painted.reduce((n, node) => n + node.children.length, 0);
     assert.ok(total > sections.length,
       `the sections painted almost nothing: ${total} nodes for ${sections.length} sections`);
+  });
+});
+
+/**
+ * THE CHANGE BANNER SANITISES WHAT IT PRINTS.
+ *
+ * Dom.visibleText's docstring used to bound itself to "exactly one place: the
+ * quarantine rows", on the argument that "a host on any other screen has survived
+ * JiraInstance.parse". That is false here: a fact comes back from storage.local
+ * through DestinationJournal.entryOf, which bounds the LENGTH of a text field and
+ * validates nothing else -- it is not re-parsed at render time. So an RTL override
+ * in a journalled baseUrl printed the destination BACKWARDS, on the one surface
+ * whose entire job is to have a destination checked by eye.
+ *
+ * Only a local writer can put one there, so this is defence in depth in a zone
+ * SECURITY.md declares out of scope -- and the falsified sentence is what would
+ * have stopped the next reader from looking.
+ */
+test("a journalled destination is printed with its deceptive characters removed", async () => {
+  await withDocument(async () => {
+    await loadSections();
+    const override = "‮";
+    const zeroWidth = "​";
+    const nodes = g.SectionSentences.FACT_SENTENCE({
+      type: "DestinationChanged",
+      key: "ABC" + zeroWidth,
+      oldBaseUrl: "https://jira.corp.example",
+      newBaseUrl: "https://jira." + override + "moc.live",
+    });
+    const printed = nodes
+      .map((node) => (typeof node === "string" ? node : node.textContent))
+      .join("");
+    assert.equal(printed.includes(override), false, "the override reaches the banner");
+    assert.equal(printed.includes(zeroWidth), false, "a zero-width space reaches the banner");
+    assert.ok(printed.includes("�"), "something must say a character was there");
+    assert.ok(printed.includes("jira."), "and the rest of the host is still readable");
+  });
+});
+
+test("every fact type the journal can hand over has a sentence, and none is empty", async () => {
+  await withDocument(async () => {
+    await loadSections();
+    // The journal's door coerces an unknown type to UnknownFact, so the set of
+    // types that can REACH this function is exactly FACT_TYPES. A missing case
+    // falls through to `default:` -- the DestinationChanged sentence -- which
+    // prints fields the fact does not carry: " now points to  ."
+    // Every field any fact carries, so a sentence is judged on what it SAYS and
+    // never on a field its own type was not given.
+    const everyField = {
+      key: "ABC", oldKey: "ABC", newKey: "XYZ",
+      baseUrl: "https://jira.corp.example",
+      oldBaseUrl: "https://was.corp.example",
+      newBaseUrl: "https://now.corp.example",
+      catchAllBaseUrl: "https://catchall.corp.example",
+      affectedKeys: ["ABC", "OPS"], kinds: ["DestinationChanged"],
+      changedCount: 3, engineCount: 2, shortcutCount: 4,
+    };
+    const render = (fact) =>
+      g.SectionSentences.FACT_SENTENCE(fact)
+        .map((node) => (typeof node === "string" ? node : node.textContent))
+        .join("")
+        .trim();
+
+    for (const type of g.DestinationJournal.FACT_TYPES) {
+      const printed = render({ type, ...everyField });
+      assert.ok(printed.length > 0, `${type} renders nothing`);
+      assert.equal(printed.includes("undefined"), false, `${type} prints "undefined"`);
+    }
+
+    /**
+     * THE REGRESSION, NAMED. An unknown type used to fall through to `default:`,
+     * which IS the DestinationChanged sentence -- so the banner announced a
+     * destination change, with the destinations missing, from an entry that never
+     * said so. Both halves are asserted: it has a sentence OF ITS OWN, and that
+     * sentence is not the neighbour's.
+     */
+    const unknown = render({ type: g.DestinationJournal.UNKNOWN_FACT });
+    const destinationChanged = render({ type: "DestinationChanged", ...everyField });
+    assert.notEqual(unknown, destinationChanged, "an unnameable change borrows a claim");
+    assert.equal(unknown.includes("points to"), false, "it must claim no destination");
+    assert.ok(unknown.length > 0, "and it must still say something: it is evidence");
+
+    // A fact with NO fields at all is the shape a hostile local store writes most
+    // cheaply, and it must not render a sentence with holes where hosts go.
+    assert.equal(
+      /points to\s*\.\s*$/.test(render({ type: g.DestinationJournal.UNKNOWN_FACT })),
+      false,
+    );
+  });
+});
+
+test("a search domain added elsewhere is named in the banner", async () => {
+  await withDocument(async () => {
+    await loadSections();
+    const printed = g.SectionSentences
+      .FACT_SENTENCE({ type: "DomainsAdded", affectedKeys: ["intra.example.org", "google.com"] })
+      .map((node) => (typeof node === "string" ? node : node.textContent))
+      .join("");
+    // EnginesAdded can only count -- an engine id is opaque at that layer. A custom
+    // domain IS a host the user can recognise, and the one that matters is the one
+    // duplicating an engine they already granted.
+    assert.ok(printed.includes("intra.example.org"), "the domain must be named");
+    assert.ok(printed.includes("google.com"));
+  });
+});
+
+test("the export releases its object URL on the next turn, not in this one", async () => {
+  await withDocument(async () => {
+    await loadUi();
+    // `click()` SCHEDULES the download; revoking in the same task can cancel it
+    // before the browser has read the blob, and the export then silently does
+    // nothing -- on the only path by which a user gets their configuration out.
+    const revoked = [];
+    const previous = { create: global.URL.createObjectURL, revoke: global.URL.revokeObjectURL };
+    global.URL.createObjectURL = () => "blob:fake";
+    global.URL.revokeObjectURL = (url) => revoked.push(url);
+    try {
+      g.Dom.downloadFile("quick-jump-for-jira.json", "{}");
+      assert.deepEqual(revoked, [], "revoking in the same task can cancel the download");
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      assert.deepEqual(revoked, ["blob:fake"], "and it must still be released");
+    } finally {
+      global.URL.createObjectURL = previous.create;
+      global.URL.revokeObjectURL = previous.revoke;
+    }
+  });
+});
+
+/**
+ * A FACT NOBODY READS IS A CONTROL THAT DOES NOT EXIST.
+ *
+ * PolicyRepository.load returns `unreadable` beside `stored` -- one entry per field
+ * of the saved document the admission door could not make sense of. admission.js
+ * called the absent reader "named debt, not an oversight", and it stayed absent
+ * while the producers grew to three: an arming state that is not a boolean, a
+ * ticked engine id that is not an identity, a selection longer than anything
+ * selectable. A signal about the integrity of the stored configuration, computed
+ * and thrown away.
+ */
+test("a field of the configuration that could not be read is said, in the section named for it", async () => {
+  await withDocument(async (doc) => {
+    const section = (await loadSections())[6];
+    const stored = new g.StoredPolicy(g.JumpPolicy.empty(), []);
+    const root = doc.createElement("div");
+    const ctx = {
+      ...contextFor(stored, []),
+      unreadable: () => [
+        { code: "ENGINES_TRUNCATED", message: "raw english from the domain" },
+        { code: "ARMING_STATE_UNREADABLE", message: "raw english from the domain" },
+        { code: "SOMETHING_A_LATER_BUILD_INVENTED", message: "raw english from the domain" },
+      ],
+    };
+    section.mount(root, ctx);
+    section.render(stored, ctx);
+
+    assert.equal(root.hidden, false, "the section hides itself when there is nothing to say, and there is");
+    // `.row-msg` rather than ".causes li": the fake DOM implements simple
+    // selectors only, and this root holds no quarantine row, so the class is exact.
+    const said = root.querySelectorAll(".row-msg").map((li) => li.textContent);
+    assert.equal(said.length, 3, "one line per fact, not a summary");
+    assert.ok(said[0].includes("longer than"), `the truncation is explained, got ${said[0]}`);
+    assert.ok(said[1].includes("nothing is armed"), `the arming state is explained, got ${said[1]}`);
+    // A code this build has no sentence for still SAYS something rather than
+    // vanishing: over-signalling is the direction, exactly as for an unknown fact.
+    assert.equal(said[2], "SOMETHING_A_LATER_BUILD_INVENTED");
+    // NEVER the message that travelled with the fact: it is English written in the
+    // domain, on a surface that is translated.
+    for (const line of said) {
+      assert.equal(line.includes("raw english from the domain"), false, "the domain's English reached the screen");
+    }
+  });
+});
+
+test("the section stays hidden when nothing was set aside and nothing was unreadable", async () => {
+  await withDocument(async (doc) => {
+    const section = (await loadSections())[6];
+    const stored = new g.StoredPolicy(g.JumpPolicy.empty(), []);
+    const root = doc.createElement("div");
+    const ctx = contextFor(stored, []);
+    section.mount(root, ctx);
+    section.render(stored, ctx);
+    assert.equal(root.hidden, true, "a section with nothing to say says nothing");
+  });
+});
+
+test("every code the admission door can put in `unreadable` has a sentence", async () => {
+  await withDocument(async () => {
+    await loadSections();
+    // The producers are three files, and a code invented in one of them without a
+    // sentence here renders as a bare identifier. Scanned rather than listed, so a
+    // fourth producer cannot appear unnoticed.
+    const { readFileSync } = await import("node:fs");
+    const table = g.SectionSentences.UNREADABLE_SENTENCE();
+    const produced = new Set();
+    for (const file of ["src/core/admission.js", "src/core/engine-id.js"]) {
+      const source = readFileSync(new URL(`../${file}`, import.meta.url), "utf8");
+      for (const m of source.matchAll(/code:\s*"([A-Z_]+)"/g)) produced.add(m[1]);
+      for (const m of source.matchAll(/refuse\("(ENGINE_ID_[A-Z_]+)"/g)) produced.add(m[1]);
+    }
+    // Only the ones that actually travel in `unreadable`: readDocument pushes the
+    // arming state and the engine facts, and EngineId.parse's codes reach it through
+    // `unreadableEngines`.
+    for (const code of ["ARMING_STATE_UNREADABLE", "ENGINES_TRUNCATED",
+                        "ENGINE_ID_SHAPE", "ENGINE_ID_NOT_A_STRING"]) {
+      assert.ok(produced.has(code), `${code} is no longer produced: the table has a dead row`);
+      assert.equal(typeof table[code], "string", `${code} has no sentence`);
+      assert.ok(table[code].length > 0);
+    }
+    // And no row is maintained for a code nothing produces.
+    for (const code of Object.keys(table)) {
+      assert.ok(produced.has(code), `${code} has a sentence but nothing produces it`);
+    }
   });
 });

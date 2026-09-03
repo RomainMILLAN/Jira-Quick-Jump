@@ -81,28 +81,36 @@
    * differ from the bytes that are stored, which is the gap the two parsers spend
    * their headers refusing. U+FFFD says "something was here".
    *
-   * WHERE IT IS NEEDED, and it is exactly one place: the quarantine rows, the
-   * only surface in this project that displays a string the parser REFUSED. A
-   * host on any other screen has survived JiraInstance.parse, hence
-   * /^[\x21-\x7e]+$/, so no override can be in it. `.ltr-isolate` STAYS on those
-   * fields -- isolating the value from the labels around it is still worth
-   * having, it was simply never the control the comment claimed.
+   * WHERE IT IS NEEDED, and it is TWO places, not one. The docstring used to say
+   * "exactly one place: the quarantine rows", on the argument that "a host on any
+   * other screen has survived JiraInstance.parse, hence /^[\x21-\x7e]+$/, so no
+   * override can be in it". That sentence is false for the CHANGE BANNER: the
+   * facts it prints come back from `storage.local` through
+   * DestinationJournal.entryOf, which bounds their LENGTH and nothing else -- they
+   * are not re-parsed at render time. So the two surfaces are:
    *
-   * WRITTEN AS ESCAPES, NEVER AS THE CHARACTERS THEMSELVES -- hence a RegExp
-   * built from a string, like INVISIBLE in core/project-shortcut.js and for the
-   * same reason. A regex LITERAL holding invisible characters cannot be reviewed,
-   * cannot be grepped, and is the one place in this project where a hand edit
-   * could drop a range without leaving a trace in a diff.
+   *   the quarantine rows   a value the parser REFUSED, shown to be repaired
+   *   the change banner     a value read back from the journal, shown to be checked
    *
-   * The set: the two marks plus the Arabic one (U+200E LRM, U+200F RLM,
-   * U+061C ALM), the legacy embeddings and overrides (U+202A-U+202E), and the
-   * four isolates Unicode 6.3 added to replace them (U+2066-U+2069) -- the same
-   * ranges the parser refuses at the door.
+   * Both display a string to be VERIFIED by eye, which is the only property that
+   * matters here. `.ltr-isolate` STAYS on the quarantine fields -- isolating the
+   * value from the labels around it is still worth having, it was simply never
+   * the control the comment claimed.
+   *
+   * THE SET IS NOT SPELLED HERE ANY MORE, and that is the second fix. It listed
+   * the bidi controls alone, while the parsers refuse a wider class -- so a
+   * zero-width space (U+200B), a soft hyphen (U+00AD), a NBSP or a U+FEFF reached
+   * the repair field intact and hid part of a host name in a field the user is
+   * asked to read. Two regexes for one rule, and the narrower one was the one on
+   * screen.
+   *
+   * ProjectKey.DECEPTIVE_SOURCE is now the single author: it is the class the
+   * parsers refuse, minus the ordinary space (visible in a field, so replacing it
+   * would mangle a legitimate value). Written as escapes there, never as the
+   * characters themselves, for the reason that file gives: a regex literal
+   * holding invisible characters cannot be reviewed and cannot be grepped.
    */
-  const BIDI_CONTROLS = new RegExp(
-    "[\\u200e\\u200f\\u061c\\u202a-\\u202e\\u2066-\\u2069]",
-    "g"
-  );
+  const DECEPTIVE = () => new RegExp("[" + global.ProjectKey.DECEPTIVE_SOURCE + "]", "g");
 
   const Dom = {
     /**
@@ -114,7 +122,11 @@
      * argument as downloadFile and dragHandle below.
      */
     visibleText(raw) {
-      return String(raw ?? "").replace(BIDI_CONTROLS, "�");
+      // Built at CALL TIME, not at load: this file is loaded before
+      // core/project-shortcut.js in no list, but resolving the owner lazily is
+      // what keeps the load order from deciding whether a security control
+      // exists -- the same reason shortcut-key.js resolves CatchAllKey lazily.
+      return String(raw ?? "").replace(DECEPTIVE(), "�");
     },
 
     el(tag, props = {}, children = []) {
@@ -159,7 +171,14 @@
       document.body.appendChild(anchor);
       anchor.click();
       anchor.remove();
-      URL.revokeObjectURL(url);
+      // REVOKED ON THE NEXT TURN, never in this one. `click()` SCHEDULES the
+      // download; revoking in the same task can cancel it before the browser has
+      // read the blob, and the export then silently does nothing -- on the only
+      // path by which a user gets their configuration out of here.
+      //
+      // The leak this used to avoid is bounded and pays for itself: one object URL
+      // per export, released a task later, on a page the user closes.
+      setTimeout(() => URL.revokeObjectURL(url), 0);
     },
 
     /**

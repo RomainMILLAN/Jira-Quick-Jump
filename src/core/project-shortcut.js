@@ -94,10 +94,77 @@
   //
   // U+00AD (SHY) and U+180E join for the same reason and with the same status:
   // caught downstream by the canonicality post-condition, refused here by name.
-  const INVISIBLE = new RegExp(
-    "[\\u0000-\\u0020\\u007f\\u00a0\\u00ad\\u180e\\u200b-\\u200f\\u2028\\u2029" +
-      "\\u202a-\\u202e\\u2060-\\u2064\\u2066-\\u2069\\u061c\\ufeff]"
-  );
+  //
+  // SPLIT IN TWO, WITH ONE OWNER, and the seam is a domain distinction rather
+  // than a convenience.
+  //
+  // DECEPTIVE_SOURCE is the set that LIES ON SCREEN: invisible, zero-width, or
+  // reordering. `Dom.visibleText` replaces exactly these before displaying a
+  // value the parser refused, and it must not spell them a second time -- a
+  // second regex somewhere else is how the two drift, and the drift costs a
+  // character nobody notices. So the class is exported from here, its only
+  // author, and the UI builds its own RegExp from this source.
+  //
+  // The ORDINARY SPACE is deliberately NOT in it. The parsers refuse a space
+  // (a base URL or a key holding one is not what the user sees), which is why
+  // INVISIBLE adds it below -- but a space is VISIBLE in a field, so replacing
+  // it with U+FFFD would mangle a legitimate value on the one screen whose whole
+  // job is to show a value as it stands. Refusing and displaying are two
+  // questions, and only one of them is about deception.
+  const DECEPTIVE_SOURCE =
+    "\\u0000-\\u001f\\u007f\\u00a0\\u00ad\\u180e\\u200b-\\u200f\\u2028\\u2029" +
+    "\\u202a-\\u202e\\u2060-\\u2064\\u2066-\\u2069\\u061c\\ufeff";
+
+  // The same set plus the space: what NO parser of this project accepts. Built
+  // from the source above rather than restated, so the pair cannot drift on a
+  // range -- the post-condition below holds the one added character.
+  const INVISIBLE = new RegExp("[\\u0020" + DECEPTIVE_SOURCE + "]");
+
+  /**
+   * The parsers refuse everything the display replaces, plus the space. Asserted
+   * at load time, because "plus one character" is a claim and not a comment.
+   *
+   * BY THE BOUNDS OF EVERY RANGE, not by walking the plane. The first version
+   * looped over all 65 536 code points, which is 3 ms on every service-worker
+   * wake-up for a property that the ends of each range establish exactly: both
+   * expressions are built from ONE source string plus a literal ` `, so they
+   * can only ever differ at a range boundary or at that one character. Same
+   * gesture, and same reasoning, as assertShapesCannotDrift below -- named samples
+   * that cover the axis that can move.
+   */
+  (function assertRefusalCoversDeception() {
+    const deceptive = new RegExp("[" + DECEPTIVE_SOURCE + "]");
+    const at = (code) => String.fromCharCode(code);
+    // Every range end, plus one interior sample per range that has an interior.
+    for (const code of [
+      0x0000, 0x0010, 0x001f,             // C0 controls
+      0x007f, 0x00a0, 0x00ad, 0x180e,     // DEL, NBSP, SHY, Mongolian vowel separator
+      0x200b, 0x200d, 0x200f,             // zero-width family and the two marks
+      0x2028, 0x2029,                     // line and paragraph separators
+      0x202a, 0x202c, 0x202e,             // legacy embeddings and overrides
+      0x2060, 0x2062, 0x2064,             // invisible operators
+      0x2066, 0x2067, 0x2069,             // Unicode 6.3 isolates
+      0x061c, 0xfeff,                     // Arabic letter mark, BOM
+    ]) {
+      if (!deceptive.test(at(code))) {
+        throw new Error("a character this class must strip is outside it: U+" + code.toString(16));
+      }
+      if (!INVISIBLE.test(at(code))) {
+        throw new Error("a deceptive character is not refused: U+" + code.toString(16));
+      }
+    }
+    // THE ONE CHARACTER THE TWO DISAGREE ON, in both directions.
+    if (!INVISIBLE.test(" ")) throw new Error("the space must be refused by the parsers");
+    if (deceptive.test(" ")) throw new Error("the space must not be replaced on screen");
+    // And the neighbours just outside each range, so a widening cannot pass as a
+    // boundary: a class that swallows `!`, `-` or a soft-hyphen look-alike would
+    // put U+FFFD through legitimate values on the repair screen.
+    for (const code of [0x0021, 0x002d, 0x007e, 0x00a1, 0x2010, 0x2030, 0x205f, 0xfefe]) {
+      if (deceptive.test(at(code)) || INVISIBLE.test(at(code))) {
+        throw new Error("a legitimate character is caught: U+" + code.toString(16));
+      }
+    }
+  })();
 
   class ProjectKey {
     constructor(value) {
@@ -243,8 +310,11 @@
 
   // Frozen for the SAME reason as its neighbour: every file shares globalThis, so
   // an assignment before the airlock builds its pattern would turn the extension
-  // into a universal redirector.
+  // into a universal redirector. DECEPTIVE_SOURCE joins them on the same ground:
+  // it is what Dom.visibleText strips, so a writable copy would let a file loaded
+  // afterwards empty the class and put an RTL override back on screen.
   for (const [name, value] of [["MAX_LENGTH", MAX_LENGTH],
+                               ["DECEPTIVE_SOURCE", DECEPTIVE_SOURCE],
                                ["caseInsensitiveShape", caseInsensitiveShape]]) {
     Object.defineProperty(ProjectKey, name, {
       value, writable: false, configurable: false, enumerable: true,
@@ -407,8 +477,41 @@
     browseUrl(issueReference) {
       return this._baseUrl + "/browse/" + issueReference.toString();
     }
+    /**
+     * THE ORIGIN TO ASK THE BROWSER FOR, AND IT CARRIES NO PORT.
+     *
+     * It was `this._url.host`, which INCLUDES the port -- so a self-hosted Jira
+     * produced `http://jira:8080/*`, and a match pattern cannot hold a port.
+     * Firefox refuses one outright (bug 1362809), so the WebExtensions schema
+     * rejects the whole call: `permissions.request` throws, "Grant access"
+     * reports a refusal, `permissions.contains` throws too and grantedOrigins
+     * answers `false` -- for ever. The badge reads `off`, the diagnosis stays on
+     * MISSING_ORIGINS, and no jump can ever happen. Chrome does accept a port
+     * here, so the fault was Gecko-only and invisible to a Chromium test.
+     *
+     * WORSE THAN ITS OWN BLAST RADIUS: requestOrigins asks for every origin in
+     * ONE call, so a single port-bearing destination made the grant fail for the
+     * search engines as well. One shortcut, and the whole extension inert.
+     *
+     * AND THIS IS THE POPULATION `http:` WAS ACCEPTED FOR. The scheme is
+     * admitted a hundred lines below on the sentence "a Jira Server on an
+     * internal network, behind a VPN, with no TLS -- `http://jira:8080` is the
+     * canonical shape". That shape was exactly the one that could not work.
+     *
+     * WHAT DROPPING THE PORT WIDENS, and why it widens nothing that matters. A
+     * granted origin now covers every port of that host, where the rule fires on
+     * one. That is a permission wider than the rule -- the direction
+     * search-engine-catalog.js spends a paragraph refusing for the ENGINES -- and
+     * it is admitted here for a reason that does not apply there: a match pattern
+     * has no way to say "this port", so the narrow form is not merely unasked, it
+     * is INEXPRESSIBLE. What bounds it instead is the substitution: the redirect
+     * target is the literal base URL, port included, so no rule of this build can
+     * ever reach another port of that host. The extra grant buys an attacker who
+     * already controls the configuration nothing, because changing the
+     * destination is what the host permission gates in the first place.
+     */
     permissionOrigin() {
-      return this._url.protocol + "//" + this._url.host + "/*";
+      return this._url.protocol + "//" + this._url.hostname + "/*";
     }
     equals(other) {
       return other instanceof JiraInstance && other._baseUrl === this._baseUrl;

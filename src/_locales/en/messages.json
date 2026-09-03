@@ -443,9 +443,6 @@
   "refuseEnginesNotAList": {
     "message": "The list of search engines in that file could not be read."
   },
-  "refuseTooManyEngines": {
-    "message": "That configuration ticks more search engines than can exist."
-  },
   "refuseCustomEnginesNotAList": {
     "message": "The list of added domains in that file could not be read."
   },
@@ -673,5 +670,35 @@
   },
   "kindEnginesRemoved": {
     "message": "search engines removed"
+  },
+  "kindDomains": {
+    "message": "search domains added"
+  },
+  "kindDomainsRemoved": {
+    "message": "search domains removed"
+  },
+  "kindUnknown": {
+    "message": "a change this version cannot name"
+  },
+  "factDomainsAdded": {
+    "message": "Search domains were added, and searches on them are now intercepted:"
+  },
+  "factDomainsRemoved": {
+    "message": "Search domains were removed, so their searches go through untouched:"
+  },
+  "factUnknown": {
+    "message": "A change was recorded that this version cannot describe. Check every destination."
+  },
+  "unreadableArming": {
+    "message": "The saved on/off state could not be read, so nothing is armed."
+  },
+  "unreadableEngineId": {
+    "message": "A saved search engine was not an engine at all, so it is no longer selected."
+  },
+  "unreadableEnginesTruncated": {
+    "message": "The saved list of search engines was longer than the number that can exist, so the extra entries were refused."
+  },
+  "unreadableEngineIdType": {
+    "message": "A saved search engine could not be read, so it is no longer selected."
   }
 }

@@ -500,6 +500,22 @@
       return JSON.stringify([
         this._armed,
         [...this._engineIds].sort(),
+        // THE ADDED DOMAINS BELONG IN THE EMPREINTE, and their absence was a hole
+        // in the detector rather than an omission of detail.
+        //
+        // This value is the claim token: recordUnclaimed stays SILENT when the
+        // journal already covers the fingerprint. Two policies differing only by
+        // their custom domains used to share one, so a claim posted by a
+        // legitimate edit covered a domain somebody else had added -- and
+        // `custom:google.com` under the OTHER shape is not deduplicated (the
+        // catalogue keys on hostPattern + shape), so it ships a second rule, on a
+        // path the built-in entry never matched, against a host permission the
+        // user has ALREADY granted. Silent, live, and on the one channel the
+        // detector exists to watch.
+        //
+        // Sorted, like the engine ids beside it: the order of this list decides
+        // nothing, and an empreinte that changes when nothing did is a false alarm.
+        this._customEngines.map((e) => e.id()).sort(),
         this._registry.shortcuts().map((s) => [
           s.id(),
           s.keyText(),

@@ -74,9 +74,17 @@ attestation you can verify.
 **Absent on purpose**, and worth stating: no `tabs`, `scripting`, `webRequest`,
 `webNavigation`, `history`, `cookies`, `downloads`, `clipboardRead` — and no
 content script, so no code of this extension ever runs in a web page. No
-`web_accessible_resources`, so a page cannot even detect that it is installed.
-`declarativeNetRequestFeedback` is deliberately excluded: it would expose matched
-navigation.
+`web_accessible_resources`, so no resource of this extension is addressable from a
+page. `declarativeNetRequestFeedback` is deliberately excluded: it would expose
+matched navigation.
+
+This line used to end "so a page cannot even detect that it is installed", which
+is more than the premise carries and contradicted this repository's own
+`SECURITY.md`. The absence of `web_accessible_resources` closes detection by
+resource URL; the **redirect itself remains observable** — a page can navigate to
+a search URL shaped like an issue reference and see where it lands. That is stated
+in `SECURITY.md` as the assumed cost of a catch-all, and a reviewer reading both
+documents must not find them disagreeing.
 
 ## Data disclosure
 

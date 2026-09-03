@@ -100,6 +100,45 @@ class FakeNode {
       set: (v) => { this._attrs.accept = String(v); },
       enumerable: false,
     });
+    /**
+     * `href` and `download`, ON THE SAME GROUND AS `accept` ABOVE.
+     *
+     * Dom.downloadFile is the project's OTHER reviewed exit -- `href` and
+     * `download` are deliberately absent from the Dom.el whitelist so that an
+     * object URL cannot be attached to an element from anywhere else -- and it was
+     * the one method of that file no test ever executed. The seal said so, in the
+     * only way it can: "Cannot add property href, object is not extensible".
+     *
+     * The surface therefore grew by two the day the export was finally exercised,
+     * which is exactly the rule the neighbour above states: this fake implements
+     * the surface this project USES, measured rather than guessed.
+     */
+    for (const name of ["href", "download"]) {
+      Object.defineProperty(this, name, {
+        get: () => (this._attrs[name] === undefined ? "" : this._attrs[name]),
+        set: (v) => { this._attrs[name] = String(v); },
+        enumerable: false,
+      });
+    }
+  }
+
+  /**
+   * A CLICK THE PROGRAM MAKES ITSELF, which is the only kind this fake needs.
+   *
+   * `anchor.click()` in Dom.downloadFile and `this.file.click()` in the import
+   * button are both a program driving its own element -- so this dispatches, like
+   * a real one, and a listener registered through Dom.el sees it. It does NOT
+   * emulate the browser's default action (no download starts, no file picker
+   * opens); what the export test measures is the ORDER of what happens around it.
+   */
+  click() {
+    this.dispatch("click");
+  }
+
+  /** ChildNode.remove(). Dom.downloadFile detaches its anchor with it, and a
+   *  section removing a row would too. */
+  remove() {
+    if (this.parentNode) this.parentNode.removeChild(this);
   }
 
   get children() {

@@ -1089,18 +1089,50 @@ test("a refused string is shown with its bidi controls REMOVED, not merely isola
     "a raw String() into a quarantine field is the bug this test exists for",
   );
 
-  // AND THE CONTROL HAS ONE OWNER. A second regex spelled anywhere else is how
-  // the two drift, and a section that rolls its own is a section that forgets a
-  // character.
+  // AND THE CONTROL HAS ONE OWNER -- ONE, not two.
+  //
+  // It used to allow two: the parser's refusal list and Dom's own copy. They
+  // drifted, exactly as the comment feared, and the narrower copy was the one on
+  // screen: Dom spelled the BIDI controls alone while the parsers refuse a wider
+  // class, so a zero-width space, a soft hyphen, a NBSP or a U+FEFF reached the
+  // repair field intact and hid part of a host name in a field the user is asked
+  // to read.
+  //
+  // ProjectKey.DECEPTIVE_SOURCE is now the single author and Dom builds its RegExp
+  // from it, so there is nothing left to drift. A second file spelling a range is
+  // the regression this pins.
   const owners = [];
   for (const file of walkJs("src")) {
     if (/\\u202e|\\u2066/i.test(read(file))) owners.push(file);
   }
   assert.deepEqual(
-    owners.sort(),
-    ["src/core/project-shortcut.js", "src/ui/dom.js"].sort(),
-    "only the parser's refusal list and Dom own the bidi character set",
+    owners,
+    ["src/core/project-shortcut.js"],
+    "the character set has exactly one author, and the UI asks it rather than copying it",
   );
+
+  // AND THE UI GENUINELY ASKS. Without this, deleting the range from dom.js and
+  // forgetting to replace it with anything would satisfy the assertion above.
+  assert.match(
+    read("src/ui/dom.js"),
+    /ProjectKey\.DECEPTIVE_SOURCE/,
+    "Dom must build its class from the owner, not from nothing",
+  );
+
+  // THE WIDER CLASS IS WHAT IS ACTUALLY STRIPPED. The bidi loop above is the
+  // attack that was measured; these are the characters the previous copy dropped.
+  for (const escaped of ["\\u200b", "\\u00ad", "\\u00a0", "\\ufeff", "\\u2060", "\\u180e"]) {
+    const ch = JSON.parse(`"${escaped}"`);
+    const shown = g.Dom.visibleText("https://jira.corp" + ch + ".example");
+    assert.equal(shown.includes(ch), false, `${escaped} survives Dom.visibleText`);
+    assert.ok(shown.includes("�"), `${escaped} vanishes without a trace`);
+  }
+
+  // And the ordinary space is deliberately NOT stripped: it is visible in a field,
+  // so replacing it would mangle a legitimate value on the one screen whose job is
+  // to show a value as it stands. The parsers still refuse it.
+  assert.equal(g.Dom.visibleText("a b"), "a b", "a space is visible, so it is not replaced");
+  assert.equal(g.ProjectKey.parse("A B").code, "KEY_CONTROL_CHARS", "and it is still refused");
 
   // The CSS rule, now checked as what it is: typography, so a host name is not
   // reordered by the LABELS around it in an RTL interface.
@@ -1733,4 +1765,91 @@ test("CI stays in audit mode on purpose, and says so", () => {
     assert.match(policy, /egress-policy:\s*audit$/, `ci.yml changed policy: ${policy}`);
   }
   assert.match(ci, /audit, not block/i, "ci.yml no longer explains why it is not block");
+});
+
+/**
+ * THE CORE'S COUNT OF BUILT-IN ENGINES AND THE CATALOGUE AGREE.
+ *
+ * admission.js derives MAX_ENGINES from `BUILT_IN_ENGINES + MAX_CUSTOM_ENGINES`,
+ * and it has to spell the first number itself: the core must not ask the airlock
+ * how many engines ship -- that is the dependency this project has removed twice.
+ * So the agreement is mechanical rather than trusted, and it goes red the day a
+ * fifth engine ships without the constant moving.
+ *
+ * The consequence of a drift is not cosmetic. A ticked id that resolves to no
+ * engine still costs a binding (activeBindings cannot consult the catalogue), so a
+ * cap above what can exist is what let a synced document push past MAX_BINDINGS
+ * and quarantine every shortcut after the fourth, on every device.
+ */
+test("the engine cap and the shipped catalogue cannot drift apart", async () => {
+  const { loadCore } = await import("./load-core.js");
+  const core = await loadCore();
+
+  assert.equal(
+    core.ShortcutAdmission.BUILT_IN_ENGINES,
+    core.SearchEngineCatalog.all().length,
+    "core/admission.js counts a different number of built-in engines than the catalogue ships",
+  );
+  assert.equal(
+    core.ShortcutAdmission.MAX_ENGINES,
+    core.ShortcutAdmission.BUILT_IN_ENGINES + core.ShortcutAdmission.MAX_CUSTOM_ENGINES,
+    "the cap must stay derived, never chosen",
+  );
+  // And it is genuinely derived in the SOURCE, not merely equal by coincidence:
+  // a literal that happens to add up today is the shape this replaces.
+  const source = read("src/core/admission.js");
+  assert.match(
+    source,
+    /MAX_ENGINES\s*=\s*BUILT_IN_ENGINES\s*\+\s*MAX_CUSTOM_ENGINES/,
+    "MAX_ENGINES must be written as its own justification",
+  );
+});
+
+/**
+ * A LOOKUP TABLE INDEXED BY A STORED VALUE CANNOT REACH Object.prototype.
+ *
+ * `shape` comes from the configuration and is validated only as
+ * `/^[a-z-]{1,32}$/`. `constructor` matches that and lives on Object.prototype, so
+ * `SHAPES["constructor"]` answered the Object function -- TRUTHY -- and the filter
+ * whose whole job is "an unknown shape is filtered here" let it through. The entry
+ * then carried `pathPattern: undefined` and searchUrlPattern threw a TypeError out
+ * of buildRules, so rule-installer purged everything: NOTHING installed, from one
+ * field of a synced document.
+ *
+ * This pins the SHAPE of the fix rather than only its effect, because the
+ * behavioural test next door would stay green if the Map became a hardened object
+ * literal and then, one refactor later, a plain one.
+ */
+test("the shape catalogue is a Map, and nothing indexes it with a bracket", () => {
+  const source = read("src/interception/search-engine-catalog.js");
+  assert.match(source, /const SHAPES = new Map\(/, "SHAPES must be a Map, not an object literal");
+  // THE CODE, NOT THE PROSE. The docstring quotes `SHAPES[shape]` to explain what
+  // was wrong, and a test that cannot tell the explanation from the defect makes
+  // the explanation undeletable-or-forbidden. Comment lines are dropped first.
+  assert.equal(
+    /SHAPES\s*\[/.test(codeOf(source)),
+    false,
+    "a bracket lookup on SHAPES is the prototype walk this fix removed",
+  );
+
+  // The other tables reached by a value rather than a literal. None of them is
+  // exploitable today -- their keys are closed sets -- which is exactly when the
+  // guard is free, and a file where one table is hardened and its neighbour is not
+  // teaches the next reader that the rule is optional.
+  for (const [file, table] of [
+    ["src/core/engine-id.js", "LEGACY"],
+    ["src/interception/rule-ranking.js", "BANDS"],
+    ["src/interception/reference-pattern.js", "IN_URL"],
+    ["src/core/shortcut-warning.js", "SCOPES"],
+    ["src/ui/sections/sentences.js", "KIND_NOUN"],
+    ["src/ui/sections/sentences.js", "WARNING_MESSAGE"],
+    ["src/ui/sections/sentences.js", "PREVIEW_MISS"],
+    ["src/ui/sections/sentences.js", "SKIPPED_SENTENCE"],
+    ["src/background.js", "BADGE_COLOUR"],
+    ["src/ui/diagnosis-presentation.js", "ENTRIES"],
+  ]) {
+    const body = read(file);
+    const declaration = new RegExp(`${table}\\s*=\\s*(?:\\(\\)\\s*=>\\s*)?(?:Object\\.freeze\\()?Object\\.assign\\(Object\\.create\\(null\\)`);
+    assert.match(body, declaration, `${file}: ${table} must have no prototype to walk into`);
+  }
 });

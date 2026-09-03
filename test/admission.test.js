@@ -283,6 +283,14 @@ test("a flood of ticked engines cannot quarantine the whole configuration", () =
   // activeBindings() past MAX_BINDINGS -- and _guarded then refused EVERY
   // register, sending the entire configuration to quarantine on every device the
   // sync reached. A denial of service through the one field nobody had counted.
+  //
+  // IT TRUNCATES RATHER THAN REFUSING THE DOCUMENT, and that is strictly stronger.
+  // A refusal left the ceiling to be enforced by whoever refused; truncation means
+  // no policy can EVER hold more ticked ids than engines that can exist, whatever
+  // arrives -- and it removes a downgrade cliff a refusal created, because a
+  // document written by a future build with more built-in engines (same schema
+  // version, so SCHEMA_TOO_NEW never fires) would have been refused ENTIRELY on
+  // the way back.
   const flood = Array.from({ length: 5000 }, (_, i) => `engine-${i}.example`);
   const restored = g.JumpPolicy.restore({
     schemaVersion: 1,
@@ -290,8 +298,32 @@ test("a flood of ticked engines cannot quarantine the whole configuration", () =
     engines: flood,
     shortcuts: [{ id: ID, key: "ABC", baseUrl: "https://example.atlassian.net" }],
   });
-  assert.equal(restored.ok, false, "the document is refused at the door");
-  assert.equal(restored.code, "TOO_MANY_ENGINES");
+  assert.equal(restored.ok, true, "the configuration survives: the shortcut is not lost");
+  assert.equal(
+    restored.policy.engineIds().length,
+    g.ShortcutAdmission.MAX_ENGINES,
+    "no policy may hold more ticked ids than engines that can exist",
+  );
+  assert.deepEqual(restored.policy.engineIds(), flood.slice(0, g.ShortcutAdmission.MAX_ENGINES),
+    "and it keeps the document's own order, from the front");
+  // The shortcut is admitted: this is the cascade the bound exists to prevent.
+  assert.equal(restored.policy.shortcuts().length, 1);
+  assert.equal(restored.quarantine.length, 0, "nothing was set aside");
+  // AND IT IS SAID. A silent truncation is the same defect as a silent drop.
+  assert.ok(
+    restored.unreadable.some((f) => f.code === "ENGINES_TRUNCATED"),
+    "a truncated selection must be reported, not swallowed",
+  );
+});
+
+test("a selection that fits is left exactly as it is", () => {
+  // The truncation must not touch a legitimate document -- including one sitting
+  // exactly on the bound, which is where an off-by-one would live.
+  const exact = Array.from({ length: g.ShortcutAdmission.MAX_ENGINES }, (_, i) => `e${i}.example`);
+  const restored = g.JumpPolicy.restore({ schemaVersion: 1, armed: true, engines: exact, shortcuts: [] });
+  assert.equal(restored.ok, true);
+  assert.deepEqual(restored.policy.engineIds(), exact);
+  assert.deepEqual(restored.unreadable, [], "nothing to report when nothing was dropped");
 });
 
 test("a quarantined entry is addressed by what it is, never by where it sits", () => {

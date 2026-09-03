@@ -40,18 +40,75 @@
    * Single-character names only, which is what both shapes use. A longer name
    * would need one alternative per position, and that IS a budget question rather
    * than a free one -- so it fails loudly here instead of silently there.
+   *
+   * A PERCENT SIGN CANNOT OPEN A PRECEDING PARAMETER NAME, and that one character
+   * closes the encoded form of the very hole this function exists for.
+   *
+   * The first alternative only ever required a first character other than `q`, so
+   * `%71` satisfied it -- and `%71` IS `q` once decoded. On an engine that decodes
+   * parameter NAMES, `?%71=hello&q=ABC-1` therefore had the rule fire on the
+   * second `q` while the engine reads the first: exactly the divergence the strict
+   * prefix was written to forbid, under a spelling no reviewer reads.
+   *
+   * Excluding `%` from that first position is what refuses it, and the direction
+   * of failure is safe: a name that cannot be consumed makes the whole prefix
+   * fail, so the rule does not match and no redirect happens. What it costs a
+   * legitimate URL is nothing -- no search engine names a parameter with a `%`
+   * (Google ships `sca_esv`, `sxsrf`, `oq`, `gs_lp`, `sourceid`, `ie`), and a
+   * browser's address bar never percent-encodes a name it writes itself.
+   *
+   * ONE CHARACTER OF BUDGET, and it is spent on the redirect form only: the
+   * guards ship `exactParameter: false`, so this branch never enters an envelope
+   * that is cut into runs. re2-budget.js says "never WIDEN the query pattern
+   * back"; this NARROWS it, which is the direction that paragraph protects.
+   *
+   * `q[^=&]+` stays as it is: a name starting with `q` and continuing decodes to
+   * something other than `q` whatever the continuation, so it is genuinely
+   * another parameter.
    */
   const noEarlier = (queryParam) => {
     if (queryParam.length !== 1) {
       throw new Error(`query parameter ${queryParam}: only single-character names are budgeted`);
     }
-    return `(?:(?:[^=&${queryParam}][^=&]*|${queryParam}[^=&]+)?=[^&]*&)*`;
+    return `(?:(?:[^=&%${queryParam}][^=&]*|${queryParam}[^=&]+)?=[^&]*&)*`;
   };
 
-  const SHAPES = {
-    "search-q": { pathPattern: "/search", queryParam: "q" },
-    "root-q": { pathPattern: "/", queryParam: "q" },
-  };
+  /**
+   * A MAP, AND THE PROTOTYPE CHAIN IS THE REASON.
+   *
+   * This was an object literal, read as `SHAPES[shape]` with a `shape` that comes
+   * from the configuration -- storage.sync included -- and validated only as
+   * `/^[a-z-]{1,32}$/`. `constructor` matches that pattern and lives on
+   * Object.prototype, so `SHAPES["constructor"]` answered the Object function:
+   * TRUTHY. The guard three lines down (`if (!form) return undefined`), whose
+   * whole job is "an unknown shape is filtered here, exactly as an unknown engine
+   * id is", let it through.
+   *
+   * MEASURED, on this build, from a document that passes every admission bound:
+   *
+   *   CustomEngine.parse({ host: "intra.example.org", shape: "constructor" }) -> ok
+   *   catalogue entry present            -> true      (the filter did not filter)
+   *   entry.pathPattern / queryParam     -> undefined
+   *   entry.exampleUrl                   -> "https://intra.example.orgundefined?undefined=ABC-1234"
+   *   entry.searchUrlPattern("X")        -> TypeError (noEarlier reads .length)
+   *
+   * That TypeError leaves buildRules from inside the binding loop, where nothing
+   * catches it -- so rule-installer's outer catch fires, the whole programme is
+   * purged, and NOTHING is installed: not the catch-all, not one named shortcut,
+   * on every device the synchronisation reaches. A one-field denial of service,
+   * reported as INSTALL_FAILED with the cause UNKNOWN, because a TypeError is not
+   * a Re2Budget.Refusal and cannot be named.
+   *
+   * A Map has no prototype chain to walk, so `get` answers `undefined` for
+   * `constructor` and the existing filter does what it always claimed to do. The
+   * core cannot hold this list (it must not learn what shapes exist), so the
+   * soundness of THIS lookup is the whole of the control -- which is why it is a
+   * Map and not a hardened object literal.
+   */
+  const SHAPES = new Map([
+    ["search-q", { pathPattern: "/search", queryParam: "q" }],
+    ["root-q", { pathPattern: "/", queryParam: "q" }],
+  ]);
 
   const BUILT_IN = [
     { id: "google.com", label: "Google.com", domain: "google.com", shape: "search-q" },
@@ -63,7 +120,7 @@
   // Selections written before engines were split per domain. Without this, an
   // existing configuration silently loses every engine and stops jumping.
   const build = ({ id, label, domain, shape }) => {
-    const form = SHAPES[shape];
+    const form = SHAPES.get(shape);
     // `undefined`, like find() two lines down. This file had BOTH spellings of
     // absence, and the caller wrote `if (!entry) continue` to cover the pair --
     // a presence test that exists only because the vocabulary was double.
@@ -209,9 +266,12 @@
   const SearchEngineCatalog = {
     ...view(builtIn),
 
-    SHAPES: Object.keys(SHAPES),
+    SHAPES: [...SHAPES.keys()],
+    /** Through the Map, like build() above: this label reaches a chip in the
+     *  options page, and `constructor` used to render "undefined?undefined=". */
     shapeLabel(shape) {
-      return SHAPES[shape] ? `${SHAPES[shape].pathPattern}?${SHAPES[shape].queryParam}=` : shape;
+      const form = SHAPES.get(shape);
+      return form ? `${form.pathPattern}?${form.queryParam}=` : shape;
     },
 
     /** Built-ins plus this policy's own domains — the lookup every caller needs. */

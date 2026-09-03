@@ -37,6 +37,24 @@
       const cancel = (coalesceKey) => writes.cancel(coalesceKey);
       const flush = () => writes.flush();
       let stored = null;
+      /**
+       * WHAT THE LAST READ COULD NOT MAKE SENSE OF, kept rather than computed and
+       * thrown away.
+       *
+       * PolicyRepository.load returns `unreadable` beside `stored` -- document-scoped
+       * facts, one per field the admission door could not read: an arming state that
+       * was not a boolean, a ticked engine id that is not an identity, a selection
+       * longer than anything selectable. admission.js called their absent reader
+       * "named debt, not an oversight", and it stayed absent while the list of
+       * producers grew to three.
+       *
+       * A signal about the integrity of the saved configuration that is computed and
+       * then discarded is the same defect as a status line reading READY over a
+       * failed install. It is kept HERE, beside `stored`, because it belongs to the
+       * READ and not to the folder: a section asks the host what the last load could
+       * not read, exactly as it asks for the folder itself.
+       */
+      let unreadable = [];
       let disposed = false;
 
       const ctx = {
@@ -69,6 +87,10 @@
          * reload(), OUTSIDE the latch.
          */
         condemned: () => condemned,
+        /** Document-scoped facts from the last read. Always an array, never
+         *  absent: a field that shows up only sometimes is the meaningful absence
+         *  mutation-result.js bans. */
+        unreadable: () => unreadable,
       };
 
       /**
@@ -189,6 +211,7 @@
           return;
         }
         stored = loaded.stored;
+        unreadable = loaded.unreadable ?? [];
         lastReport = null;
         // A SUCCESSFUL reload hides the banner -- but ONLY the one whose cause is a
         // READ. Nothing ever set banner.hidden back to true, so a stale failure
@@ -442,6 +465,7 @@
       }
       if (loaded.ok) {
         stored = loaded.stored;
+        unreadable = loaded.unreadable ?? [];
         await render();
       } else {
         showFailure(loaded, "load");

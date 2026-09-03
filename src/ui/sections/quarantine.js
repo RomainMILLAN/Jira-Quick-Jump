@@ -9,6 +9,7 @@
 
   const { Dom, ProjectKey, JiraInstance, RefusalPresentation } = global;
   const { el, t, label } = global.SectionParts;
+  const { UNREADABLE_SENTENCE } = global.SectionSentences;
 
   const Quarantine = {
 
@@ -20,13 +21,40 @@
 
     render(stored, ctx) {
       const entries = stored.quarantined();
-      // A section with nothing to say says nothing.
-      this.root.hidden = entries.length === 0;
+      /**
+       * TWO KINDS OF "COULD NOT BE READ BACK", AND THIS SECTION IS THE HOME OF BOTH.
+       *
+       * An ENTRY that was refused has a row, a value to repair and a decision to
+       * make -- that is the list below. A FIELD of the document that could not be
+       * read has none of those: there is nothing to repair, only something to be
+       * told. `unreadable` carried exactly those facts and had NO READER ANYWHERE:
+       * admission.js computed them and called the absent reader "named debt, not an
+       * oversight", and the list of producers reached three while it stayed absent.
+       *
+       * They belong here rather than in the status line because this section is
+       * already titled with the question they answer, and because the status line
+       * says ONE thing (the worst diagnosis) where this says as many as happened.
+       */
+      const unreadable = ctx.unreadable();
+      // A section with nothing to say says nothing -- and now it has two ways of
+      // having something to say.
+      this.root.hidden = entries.length === 0 && unreadable.length === 0;
       Dom.clear(this.body);
-      if (entries.length === 0) return;
+      if (this.root.hidden) return;
 
       this.body.appendChild(label(t("quarantine", "Could not be read back"),
         t("quarantineNote", "Kept, never deleted on your behalf.")));
+
+      if (unreadable.length > 0) {
+        this.body.appendChild(el("ul", { class: "causes" }, unreadable.map((fact) => el("li", {
+          class: "row-msg pending",
+          // The sentence, or the code. NEVER the message that travelled with the
+          // fact: it is English written in the domain, and this surface is
+          // translated -- the same rule RefusalPresentation follows for a refusal.
+          text: UNREADABLE_SENTENCE()[fact.code] || String(fact.code),
+        }))));
+      }
+      if (entries.length === 0) return;
       entries.forEach(({ entry: raw, fingerprint }) => {
         const message = el("div", { class: "row-msg refused", hidden: true });
         // Fixing means EDITING what could not be read, then sending it back
@@ -36,10 +64,14 @@
         // `Dom.visibleText` IS THE CONTROL. `ltr-isolate` IS NOT, AND USED TO BE
         // BELIEVED TO BE.
         //
-        // These two fields are THE ONLY SURFACE IN THE PROJECT that displays a
-        // string the parser REFUSED. Everywhere else a host on screen has survived
-        // JiraInstance.parse, hence /^[\x21-\x7e]+$/, so no bidi override can be
-        // in it. Here the entry is in quarantine BECAUSE the parser refused it, and
+        // These two fields display a string the parser REFUSED. They were called
+        // "THE ONLY SURFACE IN THE PROJECT" that does, on the reasoning that
+        // "everywhere else a host on screen has survived JiraInstance.parse, hence
+        // /^[\x21-\x7e]+$/, so no bidi override can be in it" -- and that was FALSE
+        // of the change banner, whose facts come back from storage.local through a
+        // door that bounds their length and nothing else. Both surfaces go through
+        // Dom.visibleText now; see its docstring, which names the two.
+        // Here the entry is in quarantine BECAUSE the parser refused it, and
         // BASE_CONTROL_CHARS is precisely the code that refuses those overrides —
         // so an RTL override arrives, unopposed, on the screen where the user reads
         // the value to decide whether to readmit it. structure.test.js already says

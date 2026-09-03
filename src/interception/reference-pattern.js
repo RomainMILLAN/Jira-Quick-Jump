@@ -24,7 +24,10 @@
 
   // How each domain separator appears inside a URL query string. URL knowledge,
   // hence interception, not core.
-  const IN_URL = { "-": "-", " ": "\\+", "%20": "%20" };
+  // Null-prototyped, like BANDS in rule-ranking.js: it is indexed by a separator
+  // a key hands over, and a lookup that can reach Object.prototype would splice a
+  // function's source into a regex instead of throwing.
+  const IN_URL = Object.assign(Object.create(null), { "-": "-", " ": "\\+", "%20": "%20" });
 
   /**
    * THE LOAD-BEARING PROPERTY OF THE WHOLE PRIORITY DESIGN, asserted rather than

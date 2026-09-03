@@ -66,6 +66,58 @@
     typeof value === "string" ? value.slice(0, MAX_FACT_TEXT) : undefined;
 
   /**
+   * THE PUBLISHED LANGUAGE OF THIS JOURNAL, closed and owned here.
+   *
+   * `type` used to be admitted as any string of up to 256 characters, and the
+   * presentation layer has no case for an unknown one -- so it fell through to
+   * the `default:` branch, which is the DestinationChanged sentence. That branch
+   * prints `fact.key`, `fact.newBaseUrl` and `fact.oldBaseUrl`; on a fact that
+   * carries none of them, Dom.el skips an `undefined` text and the banner renders
+   * " now points to  . It used to point to ." -- a sentence with holes where the
+   * destinations should be, on the one surface that must be believed.
+   *
+   * Worse than ugly: it FABRICATES A CLAIM. A reader is told a destination
+   * changed, with no destination named, from an entry that never said so.
+   *
+   * So an unknown type is coerced to UNKNOWN_FACT, which has a sentence of its
+   * own ("a change this version cannot describe -- check every destination").
+   * Over-signalling, which is the direction this file's whole trust model
+   * requires, and never a fabricated specific.
+   *
+   * NOT DROPPED: an entry we cannot name is still evidence that SOMETHING was
+   * recorded, and dropping it would be the under-signalling the detector forbids.
+   */
+  const UNKNOWN_FACT = "UnknownFact";
+
+  const FACT_TYPES = Object.freeze([
+    // Produced by core/policy-diff.js -- the one corpus of both doors.
+    "ShortcutAppeared", "CatchAllAppeared", "ShortcutRemoved", "CatchAllRemoved",
+    "DestinationChanged", "KeyChanged", "ShortcutArmed", "ShadowingChanged",
+    "PolicyArmed", "EnginesAdded", "EnginesRemoved", "DomainsAdded", "DomainsRemoved",
+    "PolicyReplaced",
+    // Produced by stored-policy.js, when a quarantined entry is readmitted.
+    "QuarantinedReadmitted",
+    // Produced by background.js, on the two paths that have no revision to
+    // attribute themselves to.
+    "PolicyUnreadable", "ProjectionStale",
+    // The reading door's own answer to a type it cannot place.
+    UNKNOWN_FACT,
+  ]);
+
+  const KNOWN_TYPE = new Set(FACT_TYPES);
+
+  /**
+   * ABSENT MEANS DestinationChanged, and that is a MIGRATION rather than a
+   * default: builds before the type field wrote exactly that fact and nothing
+   * else. Unknown means UnknownFact, which is a refusal to guess.
+   */
+  const typeOf = (raw) => {
+    if (raw === undefined) return "DestinationChanged";
+    if (typeof raw !== "string") return UNKNOWN_FACT;
+    return KNOWN_TYPE.has(raw) ? raw : UNKNOWN_FACT;
+  };
+
+  /**
    * ONE PLACE DECIDES THE SPECIES OF AN ENTRY, and it decides it once.
    *
    * It was decided in `read()` and NOT in the mutation path, so the two
@@ -114,7 +166,7 @@
     const entry = {
       // Entries written before the split carry no species. UNKNOWN is the safe
       // reading: a detector must fail by over-signalling.
-      type: typeof raw.type === "string" ? raw.type.slice(0, MAX_FACT_TEXT) : "DestinationChanged",
+      type: typeOf(raw.type),
       source: raw.source === CLAIMED ? CLAIMED : UNCLAIMED,
       // `seen` is the journal's own flag, and ABSENT MEANS NOT SEEN: the banner
       // filters on `entry.seen !== true`, so a corrupt value must never read as
@@ -412,6 +464,8 @@
   };
 
   DestinationJournal.MAX_ENTRIES = MAX_ENTRIES;
+  DestinationJournal.FACT_TYPES = FACT_TYPES;
+  DestinationJournal.UNKNOWN_FACT = UNKNOWN_FACT;
   DestinationJournal.CLAIMED = CLAIMED;
   DestinationJournal.UNCLAIMED = UNCLAIMED;
   DestinationJournal.MAX_CLAIMS = MAX_CLAIMS;

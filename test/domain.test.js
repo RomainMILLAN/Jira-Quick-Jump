@@ -1110,3 +1110,132 @@ test("an unknown warning kind is refused with a code, not filtered away", () => 
     assert.equal(g.ShortcutWarning.parse(kind).ok, true, `${kind} is shipped but unparseable`);
   }
 });
+
+/**
+ * THE EMPREINTE COVERS EVERYTHING THE DIFF CAN REPORT.
+ *
+ * It is the claim token: recordUnclaimed stays SILENT when the journal already
+ * covers the fingerprint. `customEngines` was absent from it, so two policies
+ * differing only by their added domains shared one -- and a claim posted by a
+ * legitimate edit covered a domain somebody else had added. The rule this pins is
+ * the general one, not the field: anything PolicyDiff can produce a fact about
+ * must move the empreinte, or the detector can be silenced by an unrelated edit.
+ */
+test("the empreinte moves for every change the diff can report", () => {
+  const base = () => {
+    let p = g.JumpPolicy.empty().withEngines(["google.com"]).value;
+    p = p.register("a", g.ProjectKey.parse("ABC").value,
+      g.JiraInstance.parse("https://example.atlassian.net").value).value;
+    return p;
+  };
+  const engine = (host) => g.CustomEngine.parse({ host, shape: "search-q" }).value;
+
+  const before = base();
+  const mutations = [
+    ["a domain added", (p) => p.withCustomEngine(engine("intra.example.org")).value],
+    ["a destination changed", (p) => p.withBaseUrlFor("a",
+      g.JiraInstance.parse("https://other.atlassian.net").value).value],
+    ["a key changed", (p) => p.withKeyFor("a", g.ProjectKey.parse("XYZ").value).value],
+    ["an engine ticked", (p) => p.withEngines(["google.com", "bing.com"]).value],
+    ["a shortcut armed", (p) => p.armShortcut("a").value],
+    ["the policy disarmed", (p) => p.disarm()],
+    ["a shortcut removed", (p) => p.remove("a").value],
+  ];
+  for (const [what, mutate] of mutations) {
+    assert.notEqual(
+      mutate(base()).fingerprint(),
+      before.fingerprint(),
+      `${what} leaves the empreinte unchanged, so a stale claim can silence it`,
+    );
+  }
+
+  // And it does NOT move for what changes nothing: an empreinte that shifts on its
+  // own is a false alarm, which is the other way this detector can fail.
+  assert.equal(base().fingerprint(), before.fingerprint(), "the same policy, twice");
+  const twoDomains = (first, second) =>
+    base().withCustomEngine(engine(first)).value.withCustomEngine(engine(second)).value.fingerprint();
+  assert.equal(
+    twoDomains("a.example.org", "b.example.org"),
+    twoDomains("b.example.org", "a.example.org"),
+    "the ORDER of the added domains decides nothing, so it must not move the empreinte",
+  );
+});
+
+/**
+ * A DOMAIN ADDED IS A FACT, AND IT NAMES THE DOMAIN.
+ *
+ * PolicyDiff compared the ticked SELECTION and ignored the CATALOGUE it draws
+ * from, so a domain added without being ticked produced no fact at all --
+ * `facts.length === 0`, reconcile wrote nothing, and the entry that prepares an
+ * interception was invisible.
+ *
+ * The one that matters is the domain DUPLICATING an engine already granted:
+ * `google.com` under the other shape is not deduplicated (the catalogue keys on
+ * hostPattern + shape), so it ships a second rule, on a path the built-in entry
+ * never matched, against a host permission already in place.
+ */
+test("an added or removed search domain is reported, by name", () => {
+  const engine = (host, shape = "search-q") => g.CustomEngine.parse({ host, shape }).value;
+  const before = g.JumpPolicy.empty().withEngines(["google.com"]).value;
+
+  const added = before.withCustomEngine(engine("intra.example.org")).value;
+  const facts = g.PolicyDiff.between(before, added);
+  assert.equal(facts.length, 1, "adding a domain must produce exactly one fact");
+  assert.equal(facts[0].type, "DomainsAdded");
+  assert.deepEqual(facts[0].affectedKeys, ["intra.example.org"]);
+
+  // Removed too: a change the user did not make is worth saying even when it is
+  // not the dangerous direction.
+  const removedFacts = g.PolicyDiff.between(added, before);
+  assert.equal(removedFacts.length, 1);
+  assert.equal(removedFacts[0].type, "DomainsRemoved");
+  assert.deepEqual(removedFacts[0].affectedKeys, ["intra.example.org"]);
+
+  // THE MEASURED CASE: a domain that duplicates a granted engine under the other
+  // shape. It is reported, and it really does ship a second rule.
+  const twin = before.withCustomEngine(engine("google.com", "root-q")).value;
+  const twinFacts = g.PolicyDiff.between(before, twin);
+  assert.deepEqual(twinFacts.map((f) => f.type), ["DomainsAdded"]);
+  assert.deepEqual(twinFacts[0].affectedKeys, ["google.com"]);
+
+  let live = twin.withEngines(["google.com", "custom:google.com"]).value;
+  live = live.register("a", g.ProjectKey.parse("ABC").value,
+    g.JiraInstance.parse("https://example.atlassian.net").value).value;
+  live = live.armShortcut("a").value;
+  const rules = g.RuleFactory.buildRules(
+    live,
+    g.SearchEngineCatalog.forPolicy(live),
+    (e) => g.Re2Budget.forEnvelope(e.guardEnvelopeCost()),
+  ).rules();
+  assert.equal(rules.length, 2, "the twin shape is a second interception path, not a duplicate");
+  assert.notEqual(rules[0].condition.regexFilter, rules[1].condition.regexFilter);
+});
+
+test("the engine cap is what its own sentence says it is", () => {
+  // It was the literal 64 under a comment reading "the number of engines that can
+  // exist: the built-in catalogue plus the custom domains, themselves capped" --
+  // which is 24. activeBindings() counts a ticked id that resolves to no engine
+  // (it cannot consult the catalogue: the core holds opaque identities), so the
+  // gap let a synced document push 5 x 64 past MAX_BINDINGS and quarantine every
+  // shortcut after the fourth, on every device.
+  assert.equal(
+    g.ShortcutAdmission.MAX_ENGINES,
+    g.ShortcutAdmission.BUILT_IN_ENGINES + g.ShortcutAdmission.MAX_CUSTOM_ENGINES,
+    "the cap must be derived from what can exist, not chosen",
+  );
+  // AND THE ARITHMETIC IS THE POINT, so it is spelled rather than trusted.
+  //
+  // A ticked id that resolves to nothing still costs a binding, so the cap decides
+  // how few live shortcuts an adversary can leave a profile with. The old 64
+  // allowed FOUR before _guarded started refusing every register and quarantining
+  // the rest; the derived cap allows twelve, which is the DNR rule ceiling talking
+  // rather than an adversary -- exactly what a user ticking every engine this build
+  // can hold would get on their own.
+  const liveShortcutsUnder = (engines) => Math.floor(g.JumpPolicy.MAX_BINDINGS / engines);
+  assert.equal(liveShortcutsUnder(64), 4, "the cap that shipped left four");
+  assert.equal(liveShortcutsUnder(g.ShortcutAdmission.MAX_ENGINES), 12);
+  assert.ok(
+    liveShortcutsUnder(g.ShortcutAdmission.MAX_ENGINES) > liveShortcutsUnder(64),
+    "the derived cap must cost an adversary reach, not merely look tidier",
+  );
+});

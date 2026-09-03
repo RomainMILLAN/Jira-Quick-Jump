@@ -12,7 +12,7 @@
   "use strict";
 
   const { el, t } = global.SectionParts;
-  const { CatchAllKey } = global;
+  const { CatchAllKey, Dom } = global;
 
   /**
    * The nouns behind the fact types carried by PolicyReplaced. No prototype: the
@@ -31,14 +31,44 @@
     EnginesRemoved: t("kindEnginesRemoved", "search engines removed"),
     PolicyArmed: t("kindPolicyArmed", "the extension switched on"),
     QuarantinedReadmitted: t("kindReadmitted", "quarantined entries brought back"),
+    DomainsAdded: t("kindDomains", "search domains added"),
+    DomainsRemoved: t("kindDomainsRemoved", "search domains removed"),
+    UnknownFact: t("kindUnknown", "a change this version cannot name"),
   });
 
   const FACT_SENTENCE = (fact) => {
-    const host = (text) => el("span", { class: "dest host", text });
+    /**
+     * BOTH GO THROUGH Dom.visibleText, and the reason is not the same as the
+     * quarantine's -- it is the same DANGER.
+     *
+     * A fact comes back from `storage.local` through DestinationJournal.entryOf,
+     * which bounds the LENGTH of a text field and validates nothing else. It is
+     * NOT re-parsed at render time, so the claim in Dom.visibleText's old
+     * docstring -- "a host on any other screen has survived JiraInstance.parse" --
+     * did not hold here. An RTL override in a journalled baseUrl printed the
+     * destination backwards, on the one surface whose entire job is to have a
+     * destination checked by eye.
+     *
+     * Only a LOCAL writer can put one there (the facts this build produces come
+     * from an already-admitted policy, and the sync channel does not reach
+     * storage.local), so this is defence in depth in a zone SECURITY.md declares
+     * out of scope. It costs two calls.
+     */
+    const host = (text) => el("span", { class: "dest host", text: Dom.visibleText(text) });
     // NOT `.dest`: this paints a key, or a phrase standing in for one -- never a
     // destination. One class for three meanings made a rule about where traffic
     // goes govern the word beside it.
-    const plain = (text) => el("span", { class: "mono-token", text });
+    const plain = (text) => el("span", { class: "mono-token", text: Dom.visibleText(text) });
+    /**
+     * A list of values from the journal, printed as one token.
+     *
+     * Joining first and cleaning after is safe HERE, and only because
+     * DECEPTIVE_SOURCE deliberately excludes the ordinary space: the ", "
+     * separators this composes survive. Were the space ever added to that class,
+     * this would have to clean each member and join afterwards -- which is why
+     * the exclusion is argued in project-shortcut.js rather than assumed.
+     */
+    const plainList = (values) => plain((values || []).join(", "));
     switch (fact.type) {
       case "ShortcutAppeared":
       case "CatchAllAppeared":
@@ -70,7 +100,7 @@
         return [
           t("factShadowedStopped", "These keys no longer fire, because the catch-all moved above them:"),
           " ",
-          plain(fact.affectedKeys.join(", ")),
+          plainList(fact.affectedKeys),
           ". ",
           t("factShadowedClaims", "What the catch-all does claim goes to"),
           " ",
@@ -129,6 +159,43 @@
         return [
           t("factEnginesRemoved", "Fewer search engines are intercepted than before."),
         ];
+      case "DomainsAdded":
+        /**
+         * IT NAMES THE DOMAINS, where EnginesAdded can only count.
+         *
+         * A domain added to the catalogue is a host the user can read, and the one
+         * that matters is the one that DUPLICATES an engine they already granted:
+         * `google.com` under the other shape ships a second rule, on a path the
+         * built-in entry never matched, against a permission already in place. So
+         * the sentence sends them to the section where the domain can be removed,
+         * not to Access, where nothing new would be asked.
+         */
+        return [
+          t("factDomainsAdded", "Search domains were added, and searches on them are now intercepted:"),
+          " ",
+          plainList(fact.affectedKeys),
+          ".",
+        ];
+      case "DomainsRemoved":
+        return [
+          t("factDomainsRemoved", "Search domains were removed, so their searches go through untouched:"),
+          " ",
+          plainList(fact.affectedKeys),
+          ".",
+        ];
+      case "UnknownFact":
+        /**
+         * A CHANGE WE CANNOT NAME IS STILL A CHANGE.
+         *
+         * The journal's reading door coerces any type it does not know to this
+         * one. It used to let it fall through to the `default:` branch below --
+         * the DestinationChanged sentence -- which prints three fields the entry
+         * does not carry, so the banner read " now points to  . It used to point
+         * to ." A fabricated claim with holes in it, on the surface that must be
+         * believed. Over-signalling, by name, is the honest answer.
+         */
+        return [t("factUnknown",
+          "A change was recorded that this version cannot describe. Check every destination.")];
       case "PolicyArmed":
         return [t("factPolicyArmed",
           "The extension was switched back on elsewhere, and every shortcut redirects again.")];
@@ -169,7 +236,11 @@
    * below: t() reads the locale, which is not available while this file is still
    * being evaluated in a service worker.
    */
-  const WARNING_MESSAGE = () => ({
+  // Null-prototyped, like KIND_NOUN and SKIPPED_SENTENCE above. The kind reaching
+  // this table has passed ShortcutWarning.parse, so nothing hostile arrives -- and
+  // that is why the guard is free. Two tables in one file with two rules is how the
+  // next reader learns the rule is optional.
+  const WARNING_MESSAGE = () => Object.assign(Object.create(null), {
     INSECURE_SCHEME: t("warnInsecureScheme", "Traffic and your Jira session cookie travel in clear text."),
     INTERNAL_HOST: t("warnInternalHost", "This destination is on a private or non-public network."),
     LITERAL_IP: t("warnLiteralIp", "This destination is an IP address rather than a host name."),
@@ -276,7 +347,33 @@
       .replace("{max}", String(longest));
   };
 
-  const PREVIEW_MISS = () => ({
+  /**
+   * WHAT A FIELD OF THE SAVED CONFIGURATION COULD NOT SAY.
+   *
+   * Document-scoped facts, one per field the admission door could not read. They
+   * are NOT refused entries -- an entry that is refused goes to quarantine and has
+   * a row -- and that is why they have a table of their own rather than joining
+   * RefusalPresentation: the same code means "this line is set aside" there and
+   * "this field of the document was not usable" here.
+   *
+   * They had no reader at all until now: admission.js computed them and called the
+   * absent reader "named debt, not an oversight". Three producers later, a signal
+   * about the integrity of the saved configuration was still being computed and
+   * thrown away.
+   */
+  const UNREADABLE_SENTENCE = () => Object.assign(Object.create(null), {
+    ARMING_STATE_UNREADABLE: t("unreadableArming",
+      "The saved on/off state could not be read, so nothing is armed."),
+    ENGINE_ID_SHAPE: t("unreadableEngineId",
+      "A saved search engine was not an engine at all, so it is no longer selected."),
+    ENGINES_TRUNCATED: t("unreadableEnginesTruncated",
+      "The saved list of search engines was longer than the number that can exist, so the extra entries were refused."),
+    ENGINE_ID_NOT_A_STRING: t("unreadableEngineIdType",
+      "A saved search engine could not be read, so it is no longer selected."),
+  });
+
+  // Null-prototyped, for the same reason and with the same cost as WARNING_MESSAGE.
+  const PREVIEW_MISS = () => Object.assign(Object.create(null), {
     NOT_A_URL: t("previewNotAUrl", "That is not a URL."),
     // A configuration answer, never a verdict on the text: with nothing ticked
     // the preview used to blame the input for a problem it did not have.
@@ -293,6 +390,6 @@
 
   global.SectionSentences = {
     FACT_SENTENCE, WARNING_MESSAGE, sentenceFor,
-    SKIPPED_SENTENCE, catchAllNote, PREVIEW_MISS,
+    SKIPPED_SENTENCE, catchAllNote, PREVIEW_MISS, UNREADABLE_SENTENCE,
   };
 })(globalThis);

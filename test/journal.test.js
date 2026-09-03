@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { loadCore } from "./load-core.js";
+import { readFileSync } from "node:fs";
 
 const g = await loadCore();
 
@@ -1048,4 +1049,69 @@ test("every field PolicyDiff emits survives the round trip through storage", asy
       }
     }
   });
+});
+
+/**
+ * THE JOURNAL'S PUBLISHED LANGUAGE IS CLOSED, AND UNKNOWN IS A WORD IN IT.
+ *
+ * `type` was admitted as any string of up to 256 characters, and the presentation
+ * layer has no case for an unknown one -- so it fell through to `default:`, which
+ * IS the DestinationChanged sentence. That branch prints `key`, `newBaseUrl` and
+ * `oldBaseUrl`; on an entry carrying none of them, Dom.el skips an undefined text
+ * and the banner reads " now points to  . It used to point to ." -- a fabricated
+ * claim with holes in it, on the surface that must be believed.
+ */
+test("a fact type this build cannot place is named, not dressed as a destination change", async () => {
+  await withJournal(async (area) => {
+    await area.set({
+      destinationJournal: {
+        rev: 1,
+        value: {
+          entries: [
+            { type: "SomethingFromTheFuture", source: "UNKNOWN", when: 1, seen: false },
+            { type: 42, source: "UNKNOWN", when: 2, seen: false },
+            // No `type` at all: builds before the field wrote exactly one fact, so
+            // absence is a MIGRATION and must keep meaning DestinationChanged.
+            { source: "UNKNOWN", when: 3, seen: false, key: "ABC",
+              oldBaseUrl: "https://a.example", newBaseUrl: "https://b.example" },
+          ],
+          acknowledged: false,
+          claims: [],
+        },
+      },
+    });
+    const journal = await g.DestinationJournal.read();
+    assert.deepEqual(
+      journal.entries.map((e) => e.type),
+      [g.DestinationJournal.UNKNOWN_FACT, g.DestinationJournal.UNKNOWN_FACT, "DestinationChanged"],
+    );
+    // It is still EVIDENCE: dropping it would be the under-signalling this
+    // detector forbids, and the banner must still fire.
+    assert.equal(journal.unseen.length, 3);
+    assert.equal(journal.acknowledged, false);
+  });
+});
+
+test("every fact any producer can emit is in the journal's own list", () => {
+  // Three files produce facts -- policy-diff.js, stored-policy.js, background.js --
+  // and the reading door coerces anything it does not know to UnknownFact. A
+  // producer inventing a type the door has not been told about would therefore be
+  // silently downgraded to the generic sentence, losing the detail it went to the
+  // trouble of carrying.
+  const declared = new Set(g.DestinationJournal.FACT_TYPES);
+  const emitted = new Set();
+  for (const file of ["src/core/policy-diff.js", "src/stored-policy.js", "src/background.js"]) {
+    const source = readFileSync(new URL(`../${file}`, import.meta.url), "utf8");
+    for (const m of source.matchAll(/\btype:\s*"([A-Za-z]+)"/g)) emitted.add(m[1]);
+  }
+  assert.ok(emitted.size >= 10, `only ${emitted.size} types found: the scan is broken`);
+  for (const type of emitted) {
+    assert.ok(declared.has(type), `${type} is produced but the journal door does not know it`);
+  }
+  // And the other direction: a type in the list that nobody produces is a sentence
+  // maintained for nothing -- except UnknownFact, which the DOOR produces.
+  for (const type of declared) {
+    if (type === g.DestinationJournal.UNKNOWN_FACT) continue;
+    assert.ok(emitted.has(type), `${type} is declared but nothing produces it`);
+  }
 });

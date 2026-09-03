@@ -111,7 +111,6 @@
     SHORTCUTS_NOT_A_LIST: t("refuseShortcutsNotAList", "The list of shortcuts in that file could not be read."),
     TOO_MANY_SHORTCUTS: t("refuseTooManyShortcuts", "That configuration holds more shortcuts than this extension keeps."),
     ENGINES_NOT_A_LIST: t("refuseEnginesNotAList", "The list of search engines in that file could not be read."),
-    TOO_MANY_ENGINES: t("refuseTooManyEngines", "That configuration ticks more search engines than can exist."),
     CUSTOM_ENGINES_NOT_A_LIST: t("refuseCustomEnginesNotAList", "The list of added domains in that file could not be read."),
     TOO_MANY_CUSTOM_ENGINES: t("refuseTooManyCustomEngines", "That configuration holds more added domains than this extension keeps."),
     ENTRY_NOT_AN_OBJECT: t("refuseEntryNotAnObject", "That entry could not be read as a shortcut."),

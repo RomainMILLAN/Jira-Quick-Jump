@@ -204,6 +204,40 @@
         facts.push({ type: "EnginesRemoved", engineCount: removed.length });
       }
 
+      /**
+       * THE ADDED DOMAINS, WHICH HAD NO PRODUCER AT ALL.
+       *
+       * This corpus is the ONE implementation the door and the window share, and
+       * it compared the ticked SELECTION (`engineIds`) while ignoring the
+       * CATALOGUE the selection draws from (`customEngines`). A domain added
+       * without being ticked therefore produced no fact, `facts.length === 0`,
+       * and reconcile returned having written nothing -- so the entry that
+       * prepares an interception was invisible, and only the later tick was
+       * reported, as the anonymous "more search engines than before".
+       *
+       * IT NAMES THE DOMAIN, and that is the whole value of the fact. EnginesAdded
+       * counts (`engineCount`) because an engine id is an opaque identity to this
+       * layer and a count is all it can honestly say; a custom domain, by
+       * contrast, IS a host the user can read and recognise -- so it travels in
+       * `affectedKeys`, the field ShadowingChanged already uses for a list of
+       * things worth printing.
+       *
+       * Removal is reported too, and for the same reason as EnginesRemoved: it is
+       * not a danger, it is a change the user did not make, and a detector that
+       * only reports the alarming half teaches its reader that silence means
+       * nothing happened.
+       */
+      const domainsBefore = new Set(before.customEngines().map((e) => e.id()));
+      const domainsAfter = new Set(after.customEngines().map((e) => e.id()));
+      const addedDomains = after.customEngines().filter((e) => !domainsBefore.has(e.id()));
+      if (addedDomains.length > 0) {
+        facts.push({ type: "DomainsAdded", affectedKeys: addedDomains.map((e) => e.host()) });
+      }
+      const removedDomains = before.customEngines().filter((e) => !domainsAfter.has(e.id()));
+      if (removedDomains.length > 0) {
+        facts.push({ type: "DomainsRemoved", affectedKeys: removedDomains.map((e) => e.host()) });
+      }
+
       if (facts.length > MAX_FACTS_PER_COMMIT) {
         // THE KINDS SURVIVE THE COLLAPSE, and this is a detection property, not a
         // nicety. Moving ONE destination produced DestinationChanged naming the old

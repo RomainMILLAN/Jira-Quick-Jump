@@ -72,16 +72,16 @@ test("the anchor seam is locked against a literal expectation", () => {
   // which is what actually locks the seam.
   assert.equal(
     g.SearchEngineCatalog.find("duckduckgo.com").searchUrlPattern("FRAGMENT"),
-    "^https://(?:www\\.)?duckduckgo\\.com/\\?(?:(?:[^=&q][^=&]*|q[^=&]+)?=[^&]*&)*q=FRAGMENT(?:&|$)"
+    "^https://(?:www\\.)?duckduckgo\\.com/\\?(?:(?:[^=&%q][^=&]*|q[^=&]+)?=[^&]*&)*q=FRAGMENT(?:&|$)"
   );
   assert.equal(
     g.SearchEngineCatalog.find("google.com").searchUrlPattern("FRAGMENT"),
-    "^https://(?:www\\.)?google\\.com/search\\?(?:(?:[^=&q][^=&]*|q[^=&]+)?=[^&]*&)*q=FRAGMENT(?:&|$)"
+    "^https://(?:www\\.)?google\\.com/search\\?(?:(?:[^=&%q][^=&]*|q[^=&]+)?=[^&]*&)*q=FRAGMENT(?:&|$)"
   );
   const rules = delivered(policy);
   assert.equal(
     rules[0].condition.regexFilter,
-    "^https://(?:www\\.)?google\\.com/search\\?(?:(?:[^=&q][^=&]*|q[^=&]+)?=[^&]*&)*q=ABC(?:-|\\+|%20)(\\d+)(?:&|$)"
+    "^https://(?:www\\.)?google\\.com/search\\?(?:(?:[^=&%q][^=&]*|q[^=&]+)?=[^&]*&)*q=ABC(?:-|\\+|%20)(\\d+)(?:&|$)"
   );
 });
 
@@ -359,7 +359,7 @@ test("the whole rule set is locked against a literal expectation", () => {
       id: 1, priority: 3,
       action: { type: "redirect", redirect: { regexSubstitution: "https://example.atlassian.net/browse/ABC-\\1" } },
       condition: {
-        regexFilter: "^https://(?:www\\.)?google\\.com/search\\?(?:(?:[^=&q][^=&]*|q[^=&]+)?=[^&]*&)*q=ABC(?:-|\\+|%20)(\\d+)(?:&|$)",
+        regexFilter: "^https://(?:www\\.)?google\\.com/search\\?(?:(?:[^=&%q][^=&]*|q[^=&]+)?=[^&]*&)*q=ABC(?:-|\\+|%20)(\\d+)(?:&|$)",
         isUrlFilterCaseSensitive: false, resourceTypes: ["main_frame"],
       },
     },
@@ -367,7 +367,7 @@ test("the whole rule set is locked against a literal expectation", () => {
       id: 2, priority: 3,
       action: { type: "redirect", redirect: { regexSubstitution: "https://ops.example.com/jira/browse/OPS-\\1" } },
       condition: {
-        regexFilter: "^https://(?:www\\.)?google\\.com/search\\?(?:(?:[^=&q][^=&]*|q[^=&]+)?=[^&]*&)*q=OPS(?:-|\\+|%20)(\\d+)(?:&|$)",
+        regexFilter: "^https://(?:www\\.)?google\\.com/search\\?(?:(?:[^=&%q][^=&]*|q[^=&]+)?=[^&]*&)*q=OPS(?:-|\\+|%20)(\\d+)(?:&|$)",
         isUrlFilterCaseSensitive: false, resourceTypes: ["main_frame"],
       },
     },
@@ -377,7 +377,7 @@ test("the whole rule set is locked against a literal expectation", () => {
       condition: {
         // The claimed length, not the validator's: RE2 refuses {1,19} outright.
         // Built from its owner so the shape cannot be pasted wrong here.
-        regexFilter: "^https://(?:www\\.)?google\\.com/search\\?(?:(?:[^=&q][^=&]*|q[^=&]+)?=[^&]*&)*q=(" +
+        regexFilter: "^https://(?:www\\.)?google\\.com/search\\?(?:(?:[^=&%q][^=&]*|q[^=&]+)?=[^&]*&)*q=(" +
           g.ProjectKey.caseInsensitiveShape(g.CatchAllKey.only().claimsKeysUpTo()) + ")-(\\d+)(?:&|$)",
         isUrlFilterCaseSensitive: false, resourceTypes: ["main_frame"],
       },
@@ -1073,8 +1073,12 @@ test("guards pay no strictness they cannot use, and stay well inside the budget"
 
   const strict = engine.searchUrlPattern("FRAGMENT");
   const wide = engine.searchUrlPattern("FRAGMENT", { exactParameter: false });
-  assert.ok(strict.includes("[^=&q]"), "a redirect must still pin the FIRST parameter");
-  assert.equal(wide.includes("[^=&q]"), false, "a guard must not pay for that pin");
+  // `%` IS IN THAT CLASS, and it is not cosmetic: without it `%71=hello&q=ABC-1`
+  // satisfied the "some other parameter" branch, so the rule fired on the second
+  // `q` while an engine decoding parameter names reads the first -- the very
+  // divergence this pin exists to forbid, spelled so no reviewer reads it.
+  assert.ok(strict.includes("[^=&%q]"), "a redirect must still pin the FIRST parameter");
+  assert.equal(wide.includes("[^=&%q]"), false, "a guard must not pay for that pin");
   assert.ok(wide.length < strict.length - 20, "and the saving is what buys the budget back");
 
   // The delivered guards, at the shipped budget, with margin against the length
@@ -1276,4 +1280,78 @@ test("an engine that cannot be guarded loses its own catch-all, and only its own
   // status line must be able to say so rather than reporting a satisfied coverage.
   assert.equal(set.coverageSatisfied(), false,
     "coverage must NOT be satisfied by vacuity: the engine wanted a catch-all");
+});
+
+/**
+ * THE CONSTRUCTOR IS TOTAL, on all four fields and not just the band.
+ *
+ * This class reads the DNR store -- a foreign system, says jump-preview.js's own
+ * header -- and it normalised `priority` while reading `action.type`,
+ * `condition.regexFilter` and the substitution bare, on the argument that DNR
+ * makes those mandatory. The rule is real; the conclusion did not follow, and one
+ * of the two shapes it left open is a fail-OPEN:
+ *
+ *   new RegExp(undefined) is /(?:)/, which matches EVERY url.
+ *
+ * So a condition carrying `urlFilter` and no `regexFilter` -- allowed by DNR,
+ * never written by this build -- would have made the preview affirm a destination
+ * for any input at all: the organ built to be faithful, and the only place a user
+ * can check where ABC-1 goes.
+ */
+test("a rule read back without a usable regex is unreadable, never universal", () => {
+  const raw = {
+    id: 7,
+    priority: g.RuleRanking.NAMED,
+    action: { type: "redirect", redirect: { regexSubstitution: "https://evil.example/browse/\\1" } },
+    condition: { urlFilter: "*://*/*", isUrlFilterCaseSensitive: false },
+  };
+  // The language's own answer, pinned so the reason this matters stays visible.
+  assert.equal(new RegExp(undefined).test("https://anything.example/"), true);
+
+  const rule = new g.InstalledRule(raw);
+  assert.equal(rule.regexFilter(), undefined, "an absent regex must read as unreadable");
+
+  // And the preview SKIPS it rather than compiling it.
+  const verdict = g.JumpPreview.forSearchUrl("https://www.google.com/search?q=ABC-1", [raw]);
+  assert.equal(verdict.ok, false);
+  assert.equal(verdict.code, "NO_MATCH", "a rule we cannot read must not paint a destination");
+});
+
+test("a rule read back with no action or no condition does not throw", () => {
+  // A TypeError out of the constructor is rendered as "could not read the installed
+  // rules": honest, but it is a crash wearing a sentence rather than the
+  // normalisation this door promises. The whole preview died on ONE such rule.
+  for (const raw of [
+    { id: 1, priority: 3 },
+    { id: 2, priority: 3, action: { type: "block" } },
+    { id: 3, priority: 3, condition: { regexFilter: "ABC-(\\d+)" } },
+    { id: 4, priority: 3, action: null, condition: null },
+    {},
+  ]) {
+    const rule = new g.InstalledRule(raw);
+    assert.equal(typeof rule.band(), "number", `band unreadable for ${JSON.stringify(raw)}`);
+    // Whatever is missing, nothing here is a compiled universal regex.
+    if (rule.regexFilter() !== undefined) assert.equal(typeof rule.regexFilter(), "string");
+    if (rule.substitution() !== undefined) assert.equal(typeof rule.substitution(), "string");
+  }
+  // And the preview survives a store full of them, saying NO_MATCH rather than
+  // blaming the user's text.
+  const verdict = g.JumpPreview.forSearchUrl("https://www.google.com/search?q=ABC-1", [
+    { id: 1, priority: 3 },
+    { id: 2, priority: 3, action: { type: "upgradeScheme" }, condition: {} },
+  ]);
+  assert.equal(verdict.code, "NO_MATCH");
+});
+
+test("a substitution that is not text cannot become a destination", () => {
+  // `redirect ? redirect.regexSubstitution : undefined` carried whatever the store
+  // held -- a number, an object -- into `.replace()`. The preview's own guard reads
+  // `substitution() === undefined`, so only a typed door makes that guard true.
+  const verdict = g.JumpPreview.forSearchUrl("https://www.google.com/search?q=ABC-1", [{
+    id: 9,
+    priority: g.RuleRanking.NAMED,
+    action: { type: "redirect", redirect: { regexSubstitution: 42 } },
+    condition: { regexFilter: "^https://www\\.google\\.com/search\\?q=ABC-(\\d+)$", isUrlFilterCaseSensitive: false },
+  }]);
+  assert.equal(verdict.ok, false, "a substitution that is not text must not be rendered");
 });

@@ -443,9 +443,6 @@
   "refuseEnginesNotAList": {
     "message": "La liste des moteurs de recherche de ce fichier n'a pas pu être lue."
   },
-  "refuseTooManyEngines": {
-    "message": "Cette configuration coche plus de moteurs de recherche qu'il ne peut en exister."
-  },
   "refuseCustomEnginesNotAList": {
     "message": "La liste des domaines ajoutés de ce fichier n'a pas pu être lue."
   },
@@ -673,5 +670,35 @@
   },
   "kindEnginesRemoved": {
     "message": "moteurs retirés"
+  },
+  "kindDomains": {
+    "message": "domaines de recherche ajoutés"
+  },
+  "kindDomainsRemoved": {
+    "message": "domaines de recherche retirés"
+  },
+  "kindUnknown": {
+    "message": "un changement que cette version ne sait pas nommer"
+  },
+  "factDomainsAdded": {
+    "message": "Des domaines de recherche ont été ajoutés, et les recherches qui s'y font sont désormais interceptées :"
+  },
+  "factDomainsRemoved": {
+    "message": "Des domaines de recherche ont été retirés, leurs recherches passent donc sans être touchées :"
+  },
+  "factUnknown": {
+    "message": "Un changement a été enregistré que cette version ne sait pas décrire. Vérifiez chaque destination."
+  },
+  "unreadableArming": {
+    "message": "L'état armé enregistré n'a pas pu être lu, donc rien n'est armé."
+  },
+  "unreadableEngineId": {
+    "message": "Un moteur de recherche enregistré n'était pas un moteur, il n'est donc plus sélectionné."
+  },
+  "unreadableEnginesTruncated": {
+    "message": "La liste enregistrée de moteurs de recherche était plus longue que le nombre de moteurs pouvant exister, les entrées en trop ont donc été refusées."
+  },
+  "unreadableEngineIdType": {
+    "message": "Un moteur de recherche enregistré n'a pas pu être lu, il n'est donc plus sélectionné."
   }
 }

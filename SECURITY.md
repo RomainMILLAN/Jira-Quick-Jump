@@ -62,6 +62,30 @@ trade rather than leave stale rules firing under a badge that says `off`.
   Jira → Site access*; Firefox: *Add-ons → Quick Jump for Jira → Permissions*.
   Removing it and re-granting through the Access section leaves you with the two
   narrow origins.
+- **A DESTINATION'S PERMISSION CARRIES NO PORT, and that is the one place this
+  page's "exactly the hosts a rule can match" is knowingly wider than the rule.**
+  It used to carry one: `permissionOrigin()` read `URL.host`, so `http://jira:8080`
+  asked for `http://jira:8080/*`. **A match pattern cannot hold a port.** Firefox
+  refuses one outright ([bug 1362809](https://bugzil.la/1362809)), so the
+  WebExtensions schema rejected the whole call — `permissions.request` threw,
+  "Grant access" reported a refusal, `permissions.contains` threw too and the
+  extension answered "not granted" for ever: badge `off`, status `MISSING_ORIGINS`,
+  not one jump possible. Chrome accepts a port there, so the fault was **Gecko-only**
+  and no Chromium test could see it. Worse than its own blast radius: origins are
+  requested in ONE call, so a single port-bearing destination made the grant fail
+  for the search engines as well. And it was precisely the population `http:` is
+  admitted for — `http://jira:8080` is the shape that argument names.
+  The origin asked for is now `http://jira/*`, which **may be granted for every
+  port of that host**. What bounds it is not the permission but the substitution:
+  the redirect target is the literal base URL, port included, so no rule of this
+  build can reach another port. A test asserts both — that every origin collected
+  is a pattern a browser can parse, and that the emitted rule keeps the port.
+  **The residual, stated:** a destination written as an IPv6 literal
+  (`http://[::1]:8080`) is accepted by the parser and produces `http://[::1]/*`,
+  which some browsers do not accept as a match pattern either. The failure is
+  visible and fail-closed — the browser's own refusal is shown in the Access
+  section — and no rule fires. It is not refused at the door because refusing a
+  legitimate destination costs more than a visible, explained failure.
 - **Project keys and base URLs are the two security functions.** A key is
   concatenated literally into a regex filter, so it is held to a closed character
   set; a base URL becomes a redirect target, so it is refused rather than cleaned
@@ -84,15 +108,91 @@ trade rather than leave stale rules firing under a badge that says `off`.
   mapping is now unwrapped before the list is consulted, and the same address
   feeds the private-network warning, so a mapped RFC 1918 host is called private
   for the right reason instead of incidentally.
-- **A string the parsers refused is displayed with its bidi controls removed.**
-  The quarantine repair screen is the only surface that shows a value validation
-  rejected, and an RTL override inside a host name makes the displayed
-  destination read backwards — so what you check is not where the traffic would
-  go. This used to rest on `unicode-bidi: isolate` in the stylesheet, which
-  **does not do that**: measured in Chromium, the rendering with the rule is
+- **A value shown to be checked by eye is displayed with its deceptive characters
+  removed.** An RTL override inside a host name makes the displayed destination
+  read backwards — so what you check is not where the traffic would go. This used
+  to rest on `unicode-bidi: isolate` in the stylesheet, which **does not do
+  that**: measured in Chromium, the rendering with the rule is
   character-for-character the rendering without it, and no value of the property
   helps. The characters are stripped and replaced with `U+FFFD` at render time
   instead; the CSS rule stays as what it always was, typography.
+  **TWO SURFACES, NOT ONE, AND A WIDER CLASS THAN BIDI.** This paragraph used to
+  name the quarantine repair screen as "the only surface that shows a value
+  validation rejected", and the code said the same in stronger words: "a host on
+  any other screen has survived `JiraInstance.parse`, hence `/^[\x21-\x7e]+$/`".
+  That is false for the **change banner**: its facts come back from
+  `storage.local` through the journal's reading door, which bounds the *length* of
+  a text field and validates nothing else — they are never re-parsed at render
+  time. Both surfaces now go through the same door. And the door was too narrow:
+  it stripped the bidi controls alone, while the parsers refuse a wider class, so
+  a zero-width space, a soft hyphen, a NBSP or a `U+FEFF` reached the repair field
+  intact and hid part of a host name. The class now has **one author** — the
+  parser's own list, minus the ordinary space, which is visible in a field and
+  whose replacement would mangle a legitimate value — and a test refuses a second
+  file spelling a range. The limit, stated: only a **local** writer can put such a
+  character in the journal (the facts this build produces come from an
+  already-admitted policy, and the sync channel does not reach `storage.local`),
+  so this half is defence in depth. The falsified sentence was the real defect:
+  it is what would have stopped the next reader from looking.
+- **A change nobody claims raises the banner, and "nobody claims" now includes the
+  added search domains.** The detector compared the ticked *selection* and ignored
+  the *catalogue* it draws from, in both of its halves: no fact was produced for a
+  domain added to `customEngines`, and the fingerprint that serves as the claim
+  token did not cover them either — so two policies differing only by their added
+  domains shared one, and a claim posted by a legitimate edit covered somebody
+  else's addition. What that bought an attacker holding the sync channel:
+  `google.com` added under the *other* URL shape is not deduplicated (the
+  catalogue keys on host pattern **and** shape), so it ships a second rule, on a
+  path the built-in entry never matched, against a host permission you have
+  **already granted** — live, immediately, with nothing on screen. The destination
+  is still whatever your shortcuts say, and a change to those was always detected,
+  which is what bounded this. A domain added or removed is now a fact of its own,
+  it **names the domain** (where an engine id can only be counted), and it moves
+  the fingerprint. A test asserts the general rule rather than the field: anything
+  the diff can report must move the fingerprint, or an unrelated edit can silence
+  it.
+- **A search-engine shape is looked up in a Map, and that is a security control.**
+  The URL shape of a custom domain is chosen from a closed set — a user-supplied
+  path or query parameter would mean a user-supplied regex — and the airlock is
+  the only place that filtering happens, because the domain layer deliberately
+  does not know what shapes exist. The set was an object literal read as
+  `SHAPES[shape]`, and `shape` is validated only as `/^[a-z-]{1,32}$/`:
+  **`constructor` matches that pattern and lives on `Object.prototype`**, so the
+  lookup answered a function, the "an unknown shape is filtered here" guard saw a
+  truthy value, and the entry was built with no path and no parameter. Measured,
+  from a document that passes every admission bound: a `TypeError` out of the rule
+  factory, from inside a loop where nothing catches it, so the installer purged
+  everything — **not one rule installed**, catch-all and named shortcuts alike, on
+  every device the synchronisation reached, reported as `INSTALL_FAILED` with the
+  cause `UNKNOWN` because a `TypeError` cannot be named. A Map has no prototype
+  chain to walk. Every other table in the project that is indexed by a value
+  rather than a literal is now prototype-free too — none of them was reachable,
+  which is exactly when the guard is free, and a file where one table is hardened
+  and its neighbour is not teaches the next reader that the rule is optional.
+- **The cap on ticked search engines is derived from what can exist.** It was 64,
+  under a comment reading "the number of engines that can exist: the built-in
+  catalogue plus the custom domains, themselves capped" — which is 24. A ticked id
+  that resolves to no engine still costs a binding (the domain layer holds opaque
+  identities and cannot consult the catalogue), so the gap let a synced document
+  ticking 64 well-formed but non-existent ids push five armed shortcuts past the
+  300-rule ceiling: every shortcut after the fourth landed in quarantine, on every
+  device, repairable only by hand. At the derived cap the same document leaves
+  twelve live shortcuts — which is the platform's rule ceiling talking, not an
+  adversary, and exactly what a user ticking every engine this build can hold gets
+  on their own. A test pins the count against the shipped catalogue, so a fifth
+  built-in engine cannot ship without moving it.
+  **AND THE EXCESS IS TRUNCATED, NOT THE DOCUMENT REFUSED**, which is this file's
+  own rule about a single unreadable id — "a refused id is dropped, never fatal:
+  losing the whole configuration over a ticked engine would be the denial of
+  service the bound exists to prevent" — applied to the bound that broke it. Two
+  gains: no policy can ever hold more ticked ids than engines that can exist,
+  whatever arrives; and a document written by a *future* build with more built-in
+  engines (same schema version, so the newer-format refusal never fires) is no
+  longer refused entirely on the way back — a downgrade cliff the old headroom of
+  64 was silently paying for. The truncation is reported rather than silent, and
+  it is visible: an id that is not kept is an engine whose chip shows unticked.
+  `shortcuts` and `customEngines` keep refusing the document, three lines away,
+  because truncating those would delete something the user made.
 - **Reordering goes through one door, whatever the affordance.** The arrows and the
   drag handle share a single write path: an absolute intention carrying the whole
   ordered list, settled by a compare-and-set that refuses any mismatch of the id
@@ -129,6 +229,20 @@ trade rather than leave stale rules firing under a badge that says `off`.
   **Never widen the query pattern back, and never raise the key bound, which is a
   domain decision.** Re-measure before touching either number: no test in this
   repository executes RE2.
+  **The query pattern was NARROWED once since, by one character, and that
+  direction is the one this paragraph protects.** "No earlier parameter of this
+  name" is spelled by enumerating what a *different* name looks like, and the
+  first branch only required a first character other than `q` — so `%71`
+  satisfied it, and `%71` **is** `q` once decoded. On an engine that decodes
+  parameter names, `?%71=hello&q=ABC-1` therefore fired the rule on the second `q`
+  while the engine reads the first: the exact divergence the strict prefix exists
+  to forbid, under a spelling no reviewer reads. A percent sign can no longer open
+  a preceding parameter name. It costs one character, on the redirect form only —
+  the guards ship the wide form, so no envelope that is cut into runs pays for it —
+  and its failure direction is safe: a name that cannot be consumed makes the
+  whole prefix fail, so nothing matches and nothing redirects. What it does **not**
+  change is the assumed cost of a catch-all: a page could already force
+  `?q=ANYTHING-1` directly, so this closes a fidelity gap, not a capability.
 - **A custom search domain is bounded at 40 characters, and that bound is an RE2
   budget rather than tidiness.** The margin above pays for an engine envelope the
   measurement never covered, and a user-typed domain spends it: the worst case was

@@ -45,7 +45,13 @@
   }
 
   /** One band per nature of key. */
-  const BANDS = Object.freeze({ named: NAMED, "catch-all": CATCH_ALL });
+  // NULL-PROTOTYPED, on the same ground as LEGACY in core/engine-id.js: this is
+  // indexed by a value (`key.nature()`), and a lookup that can walk into
+  // Object.prototype answers a FUNCTION where a priority band is expected. Ours
+  // are two literals today, so nothing reaches it -- and that is exactly when the
+  // guard costs nothing.
+  const BANDS = Object.freeze(Object.assign(Object.create(null),
+    { named: NAMED, "catch-all": CATCH_ALL }));
 
   const RuleRanking = {
     NAMED,

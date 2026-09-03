@@ -49,8 +49,38 @@
   // refusal in JiraInstance.parse, but 0.1.2.3 was not even warned about), and
   // 192.0.2.0/24 is TEST-NET-1. The rest was already here: RFC 1918, loopback and
   // the carrier-grade NAT range.
-  const PRIVATE_V4 =
-    /^(0\.|10\.|127\.|192\.168\.|192\.0\.2\.|172\.(1[6-9]|2[0-9]|3[01])\.|100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.)/;
+  /**
+   * The non-public IPv4 space, WRITTEN AS A LIST OF RFCs rather than as one
+   * unreadable alternation -- because the omissions were only findable by reading
+   * it against the registry, and three of them were there.
+   *
+   * `192.0.2.0/24` was present while its two twins from the SAME RFC were not, so
+   * `198.51.100.7` and `203.0.113.7` got LITERAL_IP (an IP address) and never
+   * INTERNAL_HOST (a private network) -- the less specific of the two sentences,
+   * on the screen where the user decides whether to trust a destination. Same for
+   * the RFC 2544 benchmark range, which is the one an appliance actually answers
+   * on, and the dead 6to4 relay anycast block.
+   *
+   * IPv6 is covered next door, and DELIBERATELY not here: isInternal tests
+   * `!hostname.includes(".")`, which catches every bracketed literal -- ULA
+   * (`[fc00::1]`), link-local and loopback alike. That works, and it works for a
+   * reason worth writing down rather than leaving as luck: a bracketed IPv6
+   * literal has no dot, so the "a host with no dot is not on the public internet"
+   * rule already owns it.
+   */
+  const PRIVATE_V4 = new RegExp("^(" + [
+    "0\\.",                                             // RFC 1122 "this network"
+    "10\\.",                                            // RFC 1918
+    "172\\.(1[6-9]|2[0-9]|3[01])\\.",                   // RFC 1918
+    "192\\.168\\.",                                     // RFC 1918
+    "127\\.",                                           // RFC 1122 loopback
+    "100\\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\\.",  // RFC 6598 CGNAT
+    "198\\.1[89]\\.",                                   // RFC 2544 benchmarking
+    "192\\.88\\.99\\.",                                 // RFC 7526 dead 6to4 relay
+    "192\\.0\\.2\\.",                                   // RFC 5737 documentation
+    "198\\.51\\.100\\.",                                // RFC 5737 documentation
+    "203\\.0\\.113\\.",                                 // RFC 5737 documentation
+  ].join("|") + ")");
 
   /**
    * THE SUFFIXES A PRIVATE NETWORK ACTUALLY USES, as a named list.
@@ -144,9 +174,22 @@
     },
   ];
 
-  const SCOPES = { destination: DESTINATION_KINDS, key: KEY_KINDS };
+  // Null-prototyped, like its siblings: `kindsInScope(scope)` indexes it, and a
+  // lookup that reaches Object.prototype would call `.map` on a function.
+  const SCOPES = Object.assign(Object.create(null),
+    { destination: DESTINATION_KINDS, key: KEY_KINDS });
 
-  const shown = ({ kind, severity, message }) => ({ kind, severity, message });
+  /**
+   * NO `message` FIELD. It was `({ kind, severity, message })` over catalogue
+   * entries that declare only `kind`, `severity` and `appliesTo` -- so every
+   * warning shipped `message: undefined`, the meaningful absence
+   * mutation-result.js bans in its own header ("no field whose presence varies").
+   *
+   * The sentence has an owner, and it is not this file: ui/sections/sentences.js
+   * holds WARNING_MESSAGE, keyed by kind and translated. A domain catalogue that
+   * also carried English would be the second owner.
+   */
+  const shown = ({ kind, severity }) => ({ kind, severity });
 
   const ShortcutWarning = {
     KINDS: [...DESTINATION_KINDS, ...KEY_KINDS].map((k) => k.kind),

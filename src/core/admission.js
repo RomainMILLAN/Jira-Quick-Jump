@@ -31,9 +31,39 @@
   // thousand engines would freeze the service worker. Fail-closed and no leak,
   // but free to close.
   const MAX_CUSTOM_ENGINES = 20;
-  // The built-in catalogue plus every custom domain that may exist, with room to
-  // spare: a selection cannot legitimately be longer than what can be selected.
-  const MAX_ENGINES = 64;
+
+  /**
+   * How many engines this build SHIPS. A number, in core/, about a catalogue that
+   * lives in interception/ -- deliberately, because the alternative is worse: the
+   * core would have to ask the airlock, which is the dependency this project has
+   * removed twice. A changelock in structure.test.js compares it to
+   * SearchEngineCatalog.all().length and goes red the day a fifth ships.
+   */
+  const BUILT_IN_ENGINES = 4;
+
+  /**
+   * The built-in catalogue plus every custom domain that may exist. DERIVED, and
+   * that is the fix: it was the literal 64 under a comment that said "the number
+   * of engines that can exist: the built-in catalogue plus the custom domains,
+   * themselves capped" -- which is 24. The cap was 2.7x its own justification.
+   *
+   * WHAT THE GAP COST, and it is not academic. activeBindings() iterates the
+   * ticked ids WITHOUT consulting the catalogue -- it cannot, the core holds only
+   * opaque identities -- so an id that resolves to no engine still consumes a
+   * binding, and _guarded refuses every register past MAX_BINDINGS (300). A
+   * synced document ticking 64 well-formed but non-existent ids, with five armed
+   * shortcuts pointing at ordinary https hosts (hence no warning to acknowledge,
+   * hence live even after the sync door drops the attestations), pushed
+   * 5 x 64 = 320 past the ceiling: every shortcut after the fourth landed in
+   * quarantine, on every device, repairable only by hand.
+   *
+   * At 24 the same document buys nothing a legitimate configuration cannot
+   * reach on its own -- 24 engines ticked allows 12 live shortcuts, which is the
+   * DNR rule ceiling talking, not an adversary. The phantom ids still cost a
+   * binding each; what changes is that the cost is now bounded by what the user
+   * could have done themselves, which is the only bound that means anything here.
+   */
+  const MAX_ENGINES = BUILT_IN_ENGINES + MAX_CUSTOM_ENGINES;
   // What a configuration FILE may weigh. It was written as `64 * 1024` inside the
   // options page -- a security bound living on the surface it protects, with no
   // relation to the limits beside it here and nothing testing it.
@@ -180,9 +210,38 @@
     // The cap is the number of engines that can exist: the built-in catalogue
     // plus the custom domains, themselves capped. Anything beyond is not a
     // selection, it is a payload.
-    if (rawEngines.length > MAX_ENGINES) {
-      return refuse("TOO_MANY_ENGINES", "This configuration ticks too many search engines.");
-    }
+    //
+    // IT TRUNCATES, IT DOES NOT REFUSE THE DOCUMENT -- and that is this file's own
+    // rule, stated forty lines below about a single unreadable id: "A refused id is
+    // DROPPED, never fatal: it is one entry of a list, and losing the whole
+    // configuration over a ticked engine would be the denial of service the bound
+    // above exists to prevent." The bound was the one place that broke its own rule.
+    //
+    // TWO REASONS, and the second is the one that decided it.
+    //
+    //   1. A DOWNGRADE CLIFF. This cap used to be 64 -- 2.7x the number of engines
+    //      that can exist -- and tightening it to the derived 24 would have made a
+    //      document written by a FUTURE build (more built-in engines, same schema
+    //      version, so SCHEMA_TOO_NEW never fires) refuse ENTIRELY on the way back.
+    //      The headroom was doing work nobody had named.
+    //   2. IT CLOSES THE AMPLIFICATION COMPLETELY. A refusal leaves the hostile
+    //      document's OTHER effects in place only if some later door admits it;
+    //      truncation means no policy can ever hold more than MAX_ENGINES ticked
+    //      ids, whatever arrives. A ticked id that resolves to no engine still
+    //      costs a binding, so this is the field that fed the quarantine cascade,
+    //      and a hard ceiling beats a refusal that a future field could bypass.
+    //
+    // Fail-closed and VISIBLE: a dropped id is an engine that is not intercepted,
+    // and the Engines section shows its chip unticked. Nothing silently redirects.
+    //
+    // WHY `shortcuts` AND `customEngines` KEEP REFUSING the document, three lines
+    // apart from this: their bounds are not the same kind of thing. Truncating
+    // `shortcuts` would DELETE shortcuts -- the very loss quarantine exists to
+    // prevent -- and truncating `customEngines` would leave ticked ids pointing at
+    // domains that no longer exist. A selection is the only one of the three whose
+    // excess can be dropped without losing something the user made.
+    const excessEngines = Math.max(0, rawEngines.length - MAX_ENGINES);
+    const tickedEngines = excessEngines === 0 ? rawEngines : rawEngines.slice(0, MAX_ENGINES);
     // Selections written before engines were split per domain would otherwise
     // resolve to nothing, and an existing configuration would quietly stop working.
     // THROUGH THE VALUE OBJECT, which migrates an old spelling AND refuses what
@@ -217,7 +276,18 @@
     const unreadableEngines = [];
     const engines = [];
     const seenEngines = new Set();
-    for (const raw of rawEngines) {
+    if (excessEngines > 0) {
+      // SAID, like the arming state below: a selection that arrived longer than
+      // anything that can be selected is a fact about the document, not an entry
+      // that was refused, so it travels in `unreadable` and never in `refused`.
+      unreadableEngines.push({
+        code: "ENGINES_TRUNCATED",
+        // "refused", per the vocabulary map in core/mutation-result.js: it is the
+        // verdict word, and a structure test holds it.
+        message: "The saved list of search engines was longer than the number that can exist, so the extra entries were refused.",
+      });
+    }
+    for (const raw of tickedEngines) {
       const parsed = global.EngineId.parse(raw);
       if (!parsed.ok) {
         unreadableEngines.push({ code: parsed.code, message: parsed.message });
@@ -470,6 +540,7 @@
 
   ShortcutAdmission.MAX_CUSTOM_ENGINES = MAX_CUSTOM_ENGINES;
   ShortcutAdmission.MAX_ENGINES = MAX_ENGINES;
+  ShortcutAdmission.BUILT_IN_ENGINES = BUILT_IN_ENGINES;
   ShortcutAdmission.MAX_TRANSFER_BYTES = MAX_TRANSFER_BYTES;
   ShortcutAdmission.MAX_QUARANTINE = MAX_QUARANTINE;
   global.ShortcutAdmission = ShortcutAdmission;

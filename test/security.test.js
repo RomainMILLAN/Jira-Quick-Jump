@@ -672,3 +672,217 @@ test("the refusal catalogue covers every code the import and repair doors can pr
   const missing = [...emitted].filter((code) => g.RefusalPresentation.sentence({ ok: false, code }) === code);
   assert.deepEqual(missing, [], "these codes fall back to the raw code or to English");
 });
+
+/**
+ * THE PERMISSION A DESTINATION NEEDS CARRIES NO PORT.
+ *
+ * `permissionOrigin()` read `URL.host`, which INCLUDES the port, so a self-hosted
+ * Jira produced `http://jira:8080/*`. A match pattern cannot hold a port: Firefox
+ * refuses one outright (bug 1362809), so the WebExtensions schema rejects the whole
+ * call -- permissions.request throws, permissions.contains throws, grantedOrigins
+ * answers false for ever, the badge reads `off` and no jump can ever happen. Chrome
+ * accepts a port here, which is why the fault was Gecko-only and invisible.
+ *
+ * And it was the population `http:` exists for: project-shortcut.js admits the
+ * scheme on the sentence "`http://jira:8080` is the canonical shape".
+ *
+ * The two directions are asserted, because only one of them used to be:
+ *   SHAPE    -- what leaves here must be a pattern a browser can parse.
+ *   IDENTITY -- and it must still name the right host.
+ */
+test("a destination's permission is a pattern a browser can parse, port or not", () => {
+  for (const [base, expected] of [
+    ["http://jira:8080", "http://jira/*"],
+    ["https://jira.example.org:8443/tickets", "https://jira.example.org/*"],
+    ["https://example.atlassian.net", "https://example.atlassian.net/*"],
+    ["https://intra.example.org/jira", "https://intra.example.org/*"],
+    ["http://[::1]:8080", "http://[::1]/*"],
+  ]) {
+    const parsed = g.JiraInstance.parse(base);
+    assert.equal(parsed.ok, true, `${base} must still be a legitimate destination`);
+    const asked = parsed.value.permissionOrigin();
+    assert.equal(asked, expected, `${base} asks for the wrong origin`);
+    // NO PORT, EVER. The regex is the shape of a match pattern, not a URL: scheme,
+    // a host with no colon in it and no wildcard, then `/*`.
+    assert.match(
+      asked,
+      /^https?:\/\/(?:\[[0-9a-f:.]+\]|[^:/*]+)\/\*$/,
+      `${asked} is not a match pattern a browser will accept`,
+    );
+  }
+});
+
+test("every origin the airlock collects is a pattern a browser can parse", () => {
+  // The shape test above covers one instance; this covers what actually reaches
+  // permissions.request -- ONE call carrying every origin, so a single bad pattern
+  // used to make the grant fail for the search engines too.
+  let p = g.JumpPolicy.empty().withEngines(["google.com"]).value;
+  p = p.register("id-port", g.ProjectKey.parse("ABC").value,
+    g.JiraInstance.parse("http://jira:8080").value).value;
+  p = p.register("id-tls", g.ProjectKey.parse("OPS").value,
+    g.JiraInstance.parse("https://jira.example.org:8443/tickets").value).value;
+
+  const origins = g.OriginRequirements.requiredOrigins(p, g.SearchEngineCatalog.forPolicy(p));
+  assert.ok(origins.includes("http://jira/*"), "the port-bearing destination is missing");
+  assert.ok(origins.includes("https://jira.example.org/*"));
+  for (const origin of origins) {
+    assert.match(origin, /^https?:\/\/(?:\[[0-9a-f:.]+\]|[^:/*]+)\/\*$/, `${origin} is not askable`);
+    assert.equal(/:\d/.test(origin.replace(/^https?:\/\//, "")), false, `${origin} carries a port`);
+  }
+
+  // AND THE RULE STILL TARGETS THE PORT. Dropping it from the PERMISSION widens
+  // what may be granted; it must not widen what any rule can reach, and the
+  // substitution is where that is decided.
+  const shortcut = p.shortcutFor("id-port");
+  assert.equal(
+    g.ReferencePattern.substitutionFor(shortcut.instance(), shortcut.key()),
+    "http://jira:8080/browse/ABC-\\1",
+    "the redirect target must keep the port the user typed",
+  );
+});
+
+/**
+ * A SHAPE THAT RESOLVES THROUGH Object.prototype IS NOT A SHAPE.
+ *
+ * `shape` comes from the configuration and is validated only as `/^[a-z-]{1,32}$/`.
+ * `constructor` matches that, and on the object literal this catalogue used to be,
+ * `SHAPES["constructor"]` answered the Object function -- TRUTHY -- so the filter
+ * whose whole job is "an unknown shape is filtered here, exactly as an unknown
+ * engine id is" let it through. The entry then carried `pathPattern: undefined`,
+ * and searchUrlPattern threw a TypeError out of buildRules, from inside the binding
+ * loop where nothing catches it: rule-installer purged everything and NOTHING was
+ * installed -- not the catch-all, not one named shortcut, on every device the
+ * synchronisation reached. A one-field denial of service, reported as INSTALL_FAILED
+ * with the cause UNKNOWN, because a TypeError cannot be named.
+ */
+test("a shape borrowed from Object.prototype is filtered like any unknown shape", () => {
+  for (const shape of ["constructor", "hasownproperty", "nope", "search-q-"]) {
+    const engine = g.CustomEngine.parse({ host: "intra.example.org", shape });
+    // The CORE does not know what shapes exist -- that is deliberate -- so the
+    // refusal is not expected here. What matters is what the airlock does with it.
+    if (!engine.ok) continue;
+
+    let p = g.JumpPolicy.empty().withCustomEngine(engine.value).value;
+    p = p.withEngines([engine.value.id()]).value;
+    const catalog = g.SearchEngineCatalog.forPolicy(p);
+
+    assert.equal(
+      catalog.find(engine.value.id()),
+      undefined,
+      `shape ${JSON.stringify(shape)} produced a catalogue entry`,
+    );
+    assert.equal(catalog.has(engine.value.id()), false);
+    // And the label never renders a hole where a shape should be.
+    assert.equal(
+      g.SearchEngineCatalog.shapeLabel(shape).includes("undefined"),
+      false,
+      `shapeLabel(${JSON.stringify(shape)}) prints "undefined"`,
+    );
+  }
+});
+
+test("a hostile shape costs its own engine, never the whole programme", () => {
+  // The point of the fix is not that the shape is refused -- it is that everything
+  // ELSE still installs. This is the assertion the TypeError made impossible.
+  const bad = g.CustomEngine.parse({ host: "intra.example.org", shape: "constructor" });
+  assert.equal(bad.ok, true, "the core still admits it: it does not know the shapes");
+
+  let p = g.JumpPolicy.empty().withCustomEngine(bad.value).value;
+  p = p.withEngines(["google.com", bad.value.id()]).value;
+  p = p.register("only", g.ProjectKey.parse("ABC").value,
+    g.JiraInstance.parse("https://example.atlassian.net").value).value;
+  p = p.armShortcut("only").value;
+
+  const set = g.RuleFactory.buildRules(
+    p,
+    g.SearchEngineCatalog.forPolicy(p),
+    (engine) => g.Re2Budget.forEnvelope(engine.guardEnvelopeCost()),
+  );
+  const rules = set.rules();
+  assert.equal(rules.length, 1, "the google.com rule must survive the hostile domain");
+  assert.match(rules[0].condition.regexFilter, /google\\\.com/);
+  // The ticked id that resolves to nothing is REPORTED, not silently dropped.
+  assert.ok(
+    set.skipped().some((s) => s.code === "UNKNOWN_ENGINE"),
+    "an unusable engine must say so",
+  );
+});
+
+/**
+ * THE FIRST PARAMETER OF THAT NAME, INCLUDING ITS ENCODED SPELLINGS.
+ *
+ * `[^=&q][^=&]*` only required a first character other than `q`, so `%71` -- which
+ * IS `q` once decoded -- satisfied it. On an engine that decodes parameter names,
+ * the rule then fired on the second `q` while the engine reads the first: exactly
+ * the divergence the strict prefix exists to forbid, under a spelling no reviewer
+ * reads. Excluding `%` from that position refuses it, and the failure direction is
+ * safe -- the prefix cannot be consumed, so nothing matches and nothing redirects.
+ */
+test("an earlier parameter of the same name is refused, encoded or not", () => {
+  let p = g.JumpPolicy.empty().withEngines(["google.com"]).value;
+  p = p.register("one", g.ProjectKey.parse("ABC").value,
+    g.JiraInstance.parse("https://example.atlassian.net").value).value;
+  p = p.armShortcut("one").value;
+  const rules = g.RuleFactory.buildRules(
+    p,
+    g.SearchEngineCatalog.forPolicy(p),
+    (engine) => g.Re2Budget.forEnvelope(engine.guardEnvelopeCost()),
+  ).rules();
+  const live = new RegExp(rules[0].condition.regexFilter, "i");
+
+  // What must still fire: the parameter the engine reads IS ours.
+  for (const url of [
+    "https://www.google.com/search?q=ABC-1",
+    "https://www.google.com/search?sca_esv=1&q=ABC-1",
+    "https://www.google.com/search?q=ABC-1&sourceid=chrome",
+    "https://www.google.com/search?client=firefox-b-d&sxsrf=x&q=ABC-1",
+  ]) {
+    assert.ok(live.test(url), `${url} must still be intercepted`);
+  }
+
+  // What must not: an earlier `q`, however it is spelled.
+  for (const url of [
+    "https://www.google.com/search?q=hello&q=ABC-1",
+    "https://www.google.com/search?%71=hello&q=ABC-1",
+    "https://www.google.com/search?%71=hello&%71=ABC-1",
+    "https://www.google.com/search?a=1&%71=hello&q=ABC-1",
+  ]) {
+    assert.equal(live.test(url), false, `${url} reaches the rule through a second q`);
+  }
+});
+
+test("the private IPv4 space covers the ranges no appliance is on the public internet for", () => {
+  const kindsFor = (url) =>
+    g.ShortcutWarning.forInstance(g.JiraInstance.parse(url).value).map((w) => w.kind);
+
+  // `192.0.2.0/24` shipped while its two twins from the SAME RFC did not, so
+  // these got LITERAL_IP (an IP address) and never INTERNAL_HOST (a private
+  // network) -- the less specific of the two sentences, on the screen where the
+  // user decides whether to trust a destination.
+  for (const host of ["https://198.18.0.1", "https://198.19.255.254", "https://192.88.99.1",
+                      "https://198.51.100.7", "https://203.0.113.7", "https://192.0.2.5",
+                      "https://10.0.0.1", "https://172.16.0.1", "https://192.168.1.1",
+                      "https://100.64.0.1", "https://127.0.0.1"]) {
+    const kinds = kindsFor(host);
+    assert.ok(kinds.includes("INTERNAL_HOST"), `${host} is not reported as internal`);
+    assert.ok(kinds.includes("LITERAL_IP"), `${host} is not reported as a literal IP`);
+  }
+  // And the ranges next door stay public: a warning that fires on everything says
+  // nothing.
+  for (const host of ["https://198.20.0.1", "https://192.88.100.1", "https://172.32.0.1",
+                      "https://100.128.0.1", "https://203.0.114.1"]) {
+    assert.equal(kindsFor(host).includes("INTERNAL_HOST"), false, `${host} is not private`);
+  }
+});
+
+test("a warning carries no field it cannot fill", () => {
+  // `shown` was `({ kind, severity, message })` over catalogue entries that
+  // declare no `message`, so every warning shipped `message: undefined` -- the
+  // meaningful absence mutation-result.js bans in its own header. The sentence
+  // has an owner, and it is the presentation layer.
+  const warnings = g.ShortcutWarning.forInstance(g.JiraInstance.parse("http://jira").value);
+  assert.ok(warnings.length > 0, "http on a dotless host must warn about something");
+  for (const warning of warnings) {
+    assert.deepEqual(Object.keys(warning).sort(), ["kind", "severity"]);
+  }
+});

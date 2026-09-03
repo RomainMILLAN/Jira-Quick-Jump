@@ -48,22 +48,52 @@
      * remains, deliberately: any integer >= 1 is presumed to be one of our three
      * bands, for want of a band registry.
      *
-     * `condition` and `action` are read bare because DNR makes them MANDATORY --
-     * that is a rule rather than a case, and priority is exactly the optional one.
+     * THE OTHER THREE FIELDS ARE NORMALISED TOO, and reading them bare was an
+     * exception this docstring used to defend: "`condition` and `action` are read
+     * bare because DNR makes them MANDATORY -- that is a rule rather than a case".
+     * The rule is real; the conclusion did not follow, because this class reads a
+     * FOREIGN STORE and the very next paragraph of jump-preview.js says so. Two
+     * shapes DNR allows and this build does not write:
+     *
+     *   a condition with `urlFilter` and no `regexFilter`
+     *     -> `new RegExp(undefined)` is `/(?:)/`, which MATCHES EVERY URL.
+     *        Measured: new RegExp(undefined).test("http://anything/") === true.
+     *        On a redirect rule carrying a substitution, the preview would then
+     *        affirm a destination for ANY input -- the organ built to be faithful,
+     *        and the only place a user can check where ABC-1 goes.
+     *   a rule with no `action` or no `condition` at all
+     *     -> a TypeError out of a constructor, which the preview renders as
+     *        "could not read the installed rules": honest, but it is a crash
+     *        wearing a sentence, not the normalisation this door promises.
+     *
+     * Nothing writes those shapes today -- a structure test pins that
+     * updateDynamicRules has ONE caller, and it always emits a regexFilter. That
+     * is precisely why this costs nothing, and why leaving it would have been a
+     * doctrine applied to one field out of four.
+     *
+     * An absent regex reads as UNREADABLE (`undefined`), never as the empty regex
+     * the language would hand back. jump-preview.js skips such a rule, exactly as
+     * it already skips an action it cannot simulate.
      */
     constructor(raw) {
-      const readable = Number.isInteger(raw.priority) && raw.priority >= DNR_MINIMUM_PRIORITY;
-      this._band = readable ? raw.priority : DNR_DEFAULT_PRIORITY;
-      this._id = raw.id;
-      this._actionType = raw.action.type;
-      this._regexFilter = raw.condition.regexFilter;
+      const source = raw && typeof raw === "object" ? raw : {};
+      const condition = source.condition && typeof source.condition === "object" ? source.condition : {};
+      const action = source.action && typeof source.action === "object" ? source.action : {};
+      const readable = Number.isInteger(source.priority) && source.priority >= DNR_MINIMUM_PRIORITY;
+      this._band = readable ? source.priority : DNR_DEFAULT_PRIORITY;
+      this._id = source.id;
+      this._actionType = typeof action.type === "string" ? action.type : undefined;
+      this._regexFilter = typeof condition.regexFilter === "string" ? condition.regexFilter : undefined;
       // NOT normalised elsewhere: the old code read this WITH A DEFAULT AT THE
       // POINT OF USE (`=== false ? "i" : ""`), so there was no second
       // normalisation to keep together -- the risk was the opposite, and worse.
       // DNR's default is TRUE, so absent means case-SENSITIVE.
-      this._caseSensitive = raw.condition.isUrlFilterCaseSensitive !== false;
-      const redirect = raw.action.redirect;
-      this._substitution = redirect ? redirect.regexSubstitution : undefined;
+      this._caseSensitive = condition.isUrlFilterCaseSensitive !== false;
+      const redirect = action.redirect;
+      this._substitution =
+        redirect && typeof redirect.regexSubstitution === "string"
+          ? redirect.regexSubstitution
+          : undefined;
     }
 
     id() { return this._id; }
