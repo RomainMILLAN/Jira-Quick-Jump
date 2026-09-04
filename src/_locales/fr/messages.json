@@ -706,5 +706,11 @@
   },
   "refuseEngineLimit": {
     "message": "Cela cocherait plus de moteurs de recherche que cette extension ne peut en utiliser."
+  },
+  "unreadableFields": {
+    "message": "Champs qui n'ont pas pu être lus"
+  },
+  "unreadableNote": {
+    "message": "Recalculés à chaque lecture, et disparus dès que la configuration est réécrite."
   }
 }

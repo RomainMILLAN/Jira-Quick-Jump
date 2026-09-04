@@ -1188,6 +1188,17 @@ test("a field of the configuration that could not be read is said, in the sectio
     section.render(stored, ctx);
 
     assert.equal(root.hidden, false, "the section hides itself when there is nothing to say, and there is");
+    // TWO NATURES, TWO LABELS. "Kept, never deleted on your behalf" is true of a
+    // quarantined ENTRY and FALSE of an unreadable FIELD, which is recomputed at
+    // every read. With no entry to keep, that sentence must not be on screen.
+    const labels = root.querySelectorAll(".lbl").map((l) => l.textContent);
+    assert.equal(labels.length, 1, "one label, for the one nature present");
+    assert.ok(labels[0].includes("could not be read"), `got ${labels[0]}`);
+    assert.equal(
+      labels[0].includes("Kept, never deleted"),
+      false,
+      "the persistence note must not cover facts that do not persist",
+    );
     // `.row-msg` rather than ".causes li": the fake DOM implements simple
     // selectors only, and this root holds no quarantine row, so the class is exact.
     const said = root.querySelectorAll(".row-msg").map((li) => li.textContent);

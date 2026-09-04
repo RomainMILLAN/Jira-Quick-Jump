@@ -42,10 +42,22 @@
       Dom.clear(this.body);
       if (this.root.hidden) return;
 
-      this.body.appendChild(label(t("quarantine", "Could not be read back"),
-        t("quarantineNote", "Kept, never deleted on your behalf.")));
-
+      /**
+       * TWO NATURES, TWO LABELS, and the note used to LIE about half of them.
+       *
+       * "Kept, never deleted on your behalf" is true of a quarantined ENTRY: it
+       * persists until the user decides. It is false of an unreadable FIELD, which
+       * is recomputed at every read and gone the moment the configuration is
+       * rewritten -- nothing keeps it, and nothing deletes it either.
+       *
+       * A false sentence in this repository is worse than a missing control: it
+       * tells the next reader not to look. The whole batch that introduced this
+       * list existed to close five of those, so it may not open a sixth.
+       */
       if (unreadable.length > 0) {
+        this.body.appendChild(label(
+          t("unreadableFields", "Fields that could not be read"),
+          t("unreadableNote", "Recomputed at every read, and gone once the configuration is rewritten.")));
         this.body.appendChild(el("ul", { class: "causes" }, unreadable.map((fact) => el("li", {
           class: "row-msg pending",
           // The sentence, or the code. NEVER the message that travelled with the
@@ -55,6 +67,9 @@
         }))));
       }
       if (entries.length === 0) return;
+      // The entries, under the label that is true of THEM.
+      this.body.appendChild(label(t("quarantine", "Could not be read back"),
+        t("quarantineNote", "Kept, never deleted on your behalf.")));
       entries.forEach(({ entry: raw, fingerprint }) => {
         const message = el("div", { class: "row-msg refused", hidden: true });
         // Fixing means EDITING what could not be read, then sending it back

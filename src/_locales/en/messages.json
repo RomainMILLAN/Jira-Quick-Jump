@@ -706,5 +706,11 @@
   },
   "refuseEngineLimit": {
     "message": "That would tick more search engines than this extension can use."
+  },
+  "unreadableFields": {
+    "message": "Fields that could not be read"
+  },
+  "unreadableNote": {
+    "message": "Recomputed at every read, and gone once the configuration is rewritten."
   }
 }
