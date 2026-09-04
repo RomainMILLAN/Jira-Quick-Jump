@@ -60,7 +60,13 @@
     "baseUrl", "oldBaseUrl", "newBaseUrl", "catchAllBaseUrl",
   ];
   const COUNT_FIELDS = ["changedCount", "engineCount", "shortcutCount"];
-  const LIST_FIELDS = ["kinds", "affectedKeys"];
+  // `affectedHosts` beside `affectedKeys`, and the two are NOT interchangeable:
+  // one carries project keys, the other host names. They were one field for a
+  // while -- DomainsAdded reused `affectedKeys` because ShadowingChanged already
+  // had it -- and a field that carries two natures under a name announcing one is
+  // how the first reader writes `affectedKeys.map(k => policy.shortcutFor(k))`
+  // and is right to.
+  const LIST_FIELDS = ["kinds", "affectedKeys", "affectedHosts"];
 
   const text = (value) =>
     typeof value === "string" ? value.slice(0, MAX_FACT_TEXT) : undefined;

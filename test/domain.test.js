@@ -1182,21 +1182,25 @@ test("an added or removed search domain is reported, by name", () => {
   const facts = g.PolicyDiff.between(before, added);
   assert.equal(facts.length, 1, "adding a domain must produce exactly one fact");
   assert.equal(facts[0].type, "DomainsAdded");
-  assert.deepEqual(facts[0].affectedKeys, ["intra.example.org"]);
+  // `affectedHosts`, NOT `affectedKeys`: one field carries project keys, the
+  // other host names, and the journal's published language is a contract with
+  // entries already on disk.
+  assert.deepEqual(facts[0].affectedHosts, ["intra.example.org"]);
+  assert.equal(facts[0].affectedKeys, undefined, "a host must not travel as a key");
 
   // Removed too: a change the user did not make is worth saying even when it is
   // not the dangerous direction.
   const removedFacts = g.PolicyDiff.between(added, before);
   assert.equal(removedFacts.length, 1);
   assert.equal(removedFacts[0].type, "DomainsRemoved");
-  assert.deepEqual(removedFacts[0].affectedKeys, ["intra.example.org"]);
+  assert.deepEqual(removedFacts[0].affectedHosts, ["intra.example.org"]);
 
   // THE MEASURED CASE: a domain that duplicates a granted engine under the other
   // shape. It is reported, and it really does ship a second rule.
   const twin = before.withCustomEngine(engine("google.com", "root-q")).value;
   const twinFacts = g.PolicyDiff.between(before, twin);
   assert.deepEqual(twinFacts.map((f) => f.type), ["DomainsAdded"]);
-  assert.deepEqual(twinFacts[0].affectedKeys, ["google.com"]);
+  assert.deepEqual(twinFacts[0].affectedHosts, ["google.com"]);
 
   let live = twin.withEngines(["google.com", "custom:google.com"]).value;
   live = live.register("a", g.ProjectKey.parse("ABC").value,

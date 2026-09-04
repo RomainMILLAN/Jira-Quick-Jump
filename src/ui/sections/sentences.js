@@ -173,14 +173,14 @@
         return [
           t("factDomainsAdded", "Search domains were added, and searches on them are now intercepted:"),
           " ",
-          plainList(fact.affectedKeys),
+          plainList(fact.affectedHosts),
           ".",
         ];
       case "DomainsRemoved":
         return [
           t("factDomainsRemoved", "Search domains were removed, so their searches go through untouched:"),
           " ",
-          plainList(fact.affectedKeys),
+          plainList(fact.affectedHosts),
           ".",
         ];
       case "UnknownFact":

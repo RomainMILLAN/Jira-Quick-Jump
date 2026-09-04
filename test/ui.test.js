@@ -1085,7 +1085,8 @@ test("every fact type the journal can hand over has a sentence, and none is empt
       oldBaseUrl: "https://was.corp.example",
       newBaseUrl: "https://now.corp.example",
       catchAllBaseUrl: "https://catchall.corp.example",
-      affectedKeys: ["ABC", "OPS"], kinds: ["DestinationChanged"],
+      affectedKeys: ["ABC", "OPS"], affectedHosts: ["intra.example.org"],
+      kinds: ["DestinationChanged"],
       changedCount: 3, engineCount: 2, shortcutCount: 4,
     };
     const render = (fact) =>
@@ -1126,7 +1127,7 @@ test("a search domain added elsewhere is named in the banner", async () => {
   await withDocument(async () => {
     await loadSections();
     const printed = g.SectionSentences
-      .FACT_SENTENCE({ type: "DomainsAdded", affectedKeys: ["intra.example.org", "google.com"] })
+      .FACT_SENTENCE({ type: "DomainsAdded", affectedHosts: ["intra.example.org", "google.com"] })
       .map((node) => (typeof node === "string" ? node : node.textContent))
       .join("");
     // EnginesAdded can only count -- an engine id is opaque at that layer. A custom
