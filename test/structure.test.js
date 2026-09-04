@@ -1849,6 +1849,17 @@ test("the shape catalogue is a Map, and nothing indexes it with a bracket", () =
     "a bracket lookup on SHAPES is the prototype walk this fix removed",
   );
 
+  // AND THE RULE IS WRITTEN DOWN, once, where the project's other vocabulary
+  // convention lives. Eight tables in two notations is a decision taken eight
+  // times; the map in mutation-result.js says which notation a NINTH takes, and
+  // why -- a Map makes the bracket inexpressible, where Object.create(null) only
+  // makes it harmless until somebody refactors the hardening away.
+  const vocabulary = read("src/core/mutation-result.js");
+  assert.match(vocabulary, /WHICH SHAPE A LOOKUP TABLE TAKES/,
+    "the choice between a Map and a prototype-free object must be written, not folklore");
+  assert.match(vocabulary, /A KEY THAT CROSSES A FRONTIER/);
+  assert.match(vocabulary, /A KEY THAT IS A LITERAL OF OURS/);
+
   // The other tables reached by a value rather than a literal. None of them is
   // exploitable today -- their keys are closed sets -- which is exactly when the
   // guard is free, and a file where one table is hardened and its neighbour is not

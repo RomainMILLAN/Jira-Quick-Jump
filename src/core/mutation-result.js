@@ -53,6 +53,39 @@
    * into storage.local by install-outcome.js and read back from receipts written by
    * earlier builds. Renaming it would need a migration, and a migration for a word
    * is not worth its risk. It means "not installed, and here is why".
+   *
+   * ------------------------------------------------------------------------
+   *
+   * WHICH SHAPE A LOOKUP TABLE TAKES -- the second convention this file owns,
+   * here for the same reason as the first: it was decided eight times, in two
+   * notations, and a file where one table is hardened and its neighbour is not
+   * teaches the next reader that the rule is optional.
+   *
+   *   A KEY THAT CROSSES A FRONTIER      ->  `new Map([...])`, read with `.get()`
+   *   A KEY THAT IS A LITERAL OF OURS    ->  `Object.assign(Object.create(null), {...})`
+   *
+   * The frontier is the configuration, the journal, the DNR store, an imported
+   * file -- anywhere the key is authored by somebody else.
+   *
+   * WHY A MAP AND NOT A HARDENED OBJECT, on that side. Both stop the prototype
+   * walk; only one stops the MISTAKE. `Object.create(null)` keeps `table[key]`
+   * writable and working, so the day somebody drops the `Object.create(null)` in
+   * a refactor nothing goes red -- the guard is a habit. A Map makes the bracket
+   * INEXPRESSIBLE: the error stops being possible instead of being caught.
+   *
+   * MEASURED, and this is why the rule exists rather than being taste.
+   * interception/search-engine-catalog.js held its shapes in an object literal
+   * read as `SHAPES[shape]`, with `shape` validated only as `/^[a-z-]{1,32}$/`.
+   * `constructor` matches that pattern AND lives on Object.prototype, so the
+   * lookup answered the Object function -- truthy -- and the guard whose whole job
+   * was "an unknown shape is filtered here" let it through. A TypeError left the
+   * rule factory from inside a loop nothing catches, the installer purged
+   * everything, and NOT ONE RULE was installed: no catch-all, no named shortcut,
+   * on every device the synchronisation reached.
+   *
+   * The seven object literals that remain are keyed by words this repository
+   * writes -- a diagnosis code, a warning kind, a priority band, a separator --
+   * and they are hardened as defence in depth, not as the control.
    */
 
   const MutationResult = {
