@@ -230,9 +230,36 @@
        * not a danger, it is a change the user did not make, and a detector that
        * only reports the alarming half teaches its reader that silence means
        * nothing happened.
+       *
+       * BY ID, THEN FIELD BY FIELD -- the same walk as the shortcuts above, and the
+       * first version of this comparison did only half of it.
+       *
+       * `CustomEngine.id()` is `custom:<host>`: THE SHAPE IS NOT IN THE IDENTITY.
+       * So comparing the sets of ids answered "which domains" and said nothing
+       * about "how each one intercepts". Measured, on this build:
+       *
+       *   id(intra.example.org, search-q) -> custom:intra.example.org
+       *   id(intra.example.org, root-q)   -> custom:intra.example.org   (the same)
+       *   facts between the two policies  -> []
+       *   fingerprint                     -> identical
+       *   search-q intercepts  https://intra.example.org/search?q=…
+       *   root-q   intercepts  https://intra.example.org/?q=…
+       *
+       * A sync account rewriting `shape` therefore moved a LIVE rule onto another
+       * path of a host whose permission is ALREADY GRANTED -- silently, with no
+       * fact and no banner. The destination is still whatever the shortcuts say,
+       * and a change to those was always detected, which is what bounds it; the
+       * interception surface was not.
+       *
+       * The lesson is about the test as much as the code: "the empreinte moves for
+       * every change the diff can report" enumerated mutations, so it covered
+       * exactly the ones its author had imagined. This one was not among them.
        */
-      const domainsBefore = new Set(before.customEngines().map((e) => e.id()));
-      const domainsAfter = new Set(after.customEngines().map((e) => e.id()));
+      const shapeById = (policy) =>
+        new Map(policy.customEngines().map((e) => [e.id(), e.shape()]));
+      const domainsBefore = shapeById(before);
+      const domainsAfter = shapeById(after);
+
       const addedDomains = after.customEngines().filter((e) => !domainsBefore.has(e.id()));
       if (addedDomains.length > 0) {
         facts.push({ type: "DomainsAdded", affectedHosts: addedDomains.map((e) => e.host()) });
@@ -240,6 +267,16 @@
       const removedDomains = before.customEngines().filter((e) => !domainsAfter.has(e.id()));
       if (removedDomains.length > 0) {
         facts.push({ type: "DomainsRemoved", affectedHosts: removedDomains.map((e) => e.host()) });
+      }
+      // AT CONSTANT IDENTITY, THE SHAPE IS A DESTINATION TOO -- for everything the
+      // domain intercepts. The same argument as KeyChanged above: the host stays
+      // put while WHAT IS CAPTURED changes, so the diff saw nothing and the banner
+      // said nothing.
+      const reshapedDomains = after
+        .customEngines()
+        .filter((e) => domainsBefore.has(e.id()) && domainsBefore.get(e.id()) !== e.shape());
+      if (reshapedDomains.length > 0) {
+        facts.push({ type: "DomainsReshaped", affectedHosts: reshapedDomains.map((e) => e.host()) });
       }
 
       if (facts.length > MAX_FACTS_PER_COMMIT) {

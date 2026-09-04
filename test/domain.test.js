@@ -1131,8 +1131,30 @@ test("the empreinte moves for every change the diff can report", () => {
   const engine = (host) => g.CustomEngine.parse({ host, shape: "search-q" }).value;
 
   const before = base();
+  const reshaped = (host, shape) => g.CustomEngine.parse({ host, shape }).value;
   const mutations = [
     ["a domain added", (p) => p.withCustomEngine(engine("intra.example.org")).value],
+    /**
+     * THE MUTATION THIS TEST DID NOT CONTAIN, and that is the point worth keeping.
+     *
+     * `CustomEngine.id()` is `custom:<host>` -- the shape is NOT in the identity --
+     * so a policy whose domain changed shape shared a fingerprint with the policy
+     * before it, and produced no fact. A live rule moved onto another path of a
+     * host whose permission was already granted, in silence.
+     *
+     * The test was green because it enumerated the mutations its author had
+     * imagined. An enumeration covers an imagination, not a space.
+     */
+    ["a domain reshaped", (p) => {
+      const withSearch = p.withCustomEngine(reshaped("intra.example.org", "search-q")).value;
+      // Same host, same id, other shape: rebuilt rather than mutated, because the
+      // aggregate refuses a duplicate id -- which is exactly why only an outside
+      // writer can produce this state.
+      return g.JumpPolicy.restore({
+        ...withSearch.toJSON(),
+        customEngines: [{ host: "intra.example.org", shape: "root-q" }],
+      }).policy;
+    }],
     ["a destination changed", (p) => p.withBaseUrlFor("a",
       g.JiraInstance.parse("https://other.atlassian.net").value).value],
     ["a key changed", (p) => p.withKeyFor("a", g.ProjectKey.parse("XYZ").value).value],
@@ -1148,6 +1170,18 @@ test("the empreinte moves for every change the diff can report", () => {
       `${what} leaves the empreinte unchanged, so a stale claim can silence it`,
     );
   }
+
+  // The reshaping is compared against the SAME base, through the same door, so the
+  // difference measured is the shape and nothing else.
+  const asDocument = (shape) => g.JumpPolicy.restore({
+    ...base().toJSON(),
+    customEngines: [{ host: "intra.example.org", shape }],
+  }).policy;
+  assert.notEqual(
+    asDocument("search-q").fingerprint(),
+    asDocument("root-q").fingerprint(),
+    "two domains that do not intercept the same URLs must not share a fingerprint",
+  );
 
   // And it does NOT move for what changes nothing: an empreinte that shifts on its
   // own is a false alarm, which is the other way this detector can fail.
@@ -1213,6 +1247,44 @@ test("an added or removed search domain is reported, by name", () => {
   ).rules();
   assert.equal(rules.length, 2, "the twin shape is a second interception path, not a duplicate");
   assert.notEqual(rules[0].condition.regexFilter, rules[1].condition.regexFilter);
+});
+
+test("a search domain that changes how it intercepts is reported by name", () => {
+  /**
+   * AT CONSTANT IDENTITY, THE SHAPE IS A DESTINATION -- for everything the domain
+   * captures. `search-q` intercepts `/search?q=…`, `root-q` intercepts `/?q=…`, on
+   * the same host, under the same id, against a permission ALREADY GRANTED.
+   */
+  const document = (shape) => ({
+    schemaVersion: 1, armed: true, shortcuts: [],
+    engines: ["custom:intra.example.org"],
+    customEngines: [{ host: "intra.example.org", shape }],
+  });
+  const before = g.JumpPolicy.restore(document("search-q")).policy;
+  const after = g.JumpPolicy.restore(document("root-q")).policy;
+
+  const facts = g.PolicyDiff.between(before, after);
+  assert.deepEqual(facts.map((f) => f.type), ["DomainsReshaped"]);
+  assert.deepEqual(facts[0].affectedHosts, ["intra.example.org"]);
+  // NOT reported as an addition or a removal: the domain is still there, and
+  // saying "added" about a host the user already had would be a false specific.
+  assert.equal(facts.some((f) => f.type === "DomainsAdded"), false);
+  assert.equal(facts.some((f) => f.type === "DomainsRemoved"), false);
+
+  // AND IT REALLY IS ANOTHER INTERCEPTION PATH, or the fact reports nothing.
+  const pathOf = (policy) =>
+    g.SearchEngineCatalog.forPolicy(policy).find("custom:intra.example.org").pathPattern;
+  assert.notEqual(pathOf(before), pathOf(after));
+
+  // A domain added and one reshaped in the same commit are two facts, not one.
+  const both = g.JumpPolicy.restore({
+    ...document("root-q"),
+    customEngines: [{ host: "intra.example.org", shape: "root-q" }, { host: "other.example.org", shape: "search-q" }],
+  }).policy;
+  assert.deepEqual(
+    g.PolicyDiff.between(before, both).map((f) => f.type).sort(),
+    ["DomainsAdded", "DomainsReshaped"],
+  );
 });
 
 test("the engine cap is what its own sentence says it is", () => {

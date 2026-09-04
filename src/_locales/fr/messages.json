@@ -715,5 +715,11 @@
   },
   "skipQueryParamTooLong": {
     "message": "L'adresse de ce moteur de recherche utilise un nom de paramètre que cette version ne sait pas apparier."
+  },
+  "kindDomainsReshaped": {
+    "message": "la façon dont un domaine de recherche est intercepté"
+  },
+  "factDomainsReshaped": {
+    "message": "L'adresse sur laquelle un domaine de recherche est intercepté a changé, d'autres recherches sont donc capturées :"
   }
 }

@@ -37,6 +37,7 @@
     QuarantinedReadmitted: t("kindReadmitted", "quarantined entries brought back"),
     DomainsAdded: t("kindDomains", "search domains added"),
     DomainsRemoved: t("kindDomainsRemoved", "search domains removed"),
+    DomainsReshaped: t("kindDomainsReshaped", "how a search domain is intercepted"),
     UnknownFact: t("kindUnknown", "a change this version cannot name"),
   }));
 
@@ -192,6 +193,22 @@
       case "DomainsRemoved":
         return [
           t("factDomainsRemoved", "Search domains were removed, so their searches go through untouched:"),
+          " ",
+          plainList(fact.affectedHosts),
+          ".",
+        ];
+      case "DomainsReshaped":
+        /**
+         * THE HOST DID NOT MOVE; WHAT IT CAPTURES DID.
+         *
+         * The dangerous case is the quiet one: the permission for that host is
+         * already granted, so the new interception path is live immediately. So
+         * the sentence sends the reader to the section where the domain can be
+         * removed, and says what actually changed rather than "a domain changed".
+         */
+        return [
+          t("factDomainsReshaped",
+            "The address a search domain is intercepted on changed, so different searches are now captured:"),
           " ",
           plainList(fact.affectedHosts),
           ".",

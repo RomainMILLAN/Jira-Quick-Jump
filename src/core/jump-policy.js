@@ -551,7 +551,13 @@
         //
         // Sorted, like the engine ids beside it: the order of this list decides
         // nothing, and an empreinte that changes when nothing did is a false alarm.
-        this._customEngines.map((e) => e.id()).sort(),
+        // THE SHAPE TRAVELS WITH THE ID, because it is not in it. `id()` is
+        // `custom:<host>`, so two engines that do NOT intercept the same URLs
+        // share one -- and two policies differing only by a domain's shape used
+        // to share a fingerprint, which let a claim posted by an unrelated edit
+        // silence a live change of interception path. See PolicyDiff, which
+        // compares the same signature.
+        this._customEngines.map((e) => `${e.id()}|${e.shape()}`).sort(),
         this._registry.shortcuts().map((s) => [
           s.id(),
           s.keyText(),

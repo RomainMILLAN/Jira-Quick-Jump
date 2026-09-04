@@ -107,7 +107,8 @@
     // Produced by core/policy-diff.js -- the one corpus of both doors.
     "ShortcutAppeared", "CatchAllAppeared", "ShortcutRemoved", "CatchAllRemoved",
     "DestinationChanged", "KeyChanged", "ShortcutArmed", "ShadowingChanged",
-    "PolicyArmed", "EnginesAdded", "EnginesRemoved", "DomainsAdded", "DomainsRemoved",
+    "PolicyArmed", "EnginesAdded", "EnginesRemoved",
+    "DomainsAdded", "DomainsRemoved", "DomainsReshaped",
     "PolicyReplaced",
     // Produced by stored-policy.js, when a quarantined entry is readmitted.
     "QuarantinedReadmitted",

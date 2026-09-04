@@ -715,5 +715,11 @@
   },
   "skipQueryParamTooLong": {
     "message": "This search engine's address uses a parameter name this version cannot match."
+  },
+  "kindDomainsReshaped": {
+    "message": "how a search domain is intercepted"
+  },
+  "factDomainsReshaped": {
+    "message": "The address a search domain is intercepted on changed, so different searches are now captured:"
   }
 }
