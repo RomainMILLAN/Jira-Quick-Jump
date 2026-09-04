@@ -95,7 +95,15 @@
    */
   const UNKNOWN_FACT = "UnknownFact";
 
-  const FACT_TYPES = Object.freeze([
+  /**
+   * TWO NATURES, TWO LISTS, ONE PUBLISHED LANGUAGE -- and the distinction had no
+   * word for it while all three kinds sat in one array.
+   *
+   * A DOMAIN FACT describes a change to the configuration: it names a shortcut, a
+   * key or a destination, and it is a fact in the past that somebody could in
+   * principle have intended. Those come from the diff, or from a readmission.
+   */
+  const DOMAIN_FACTS = Object.freeze([
     // Produced by core/policy-diff.js -- the one corpus of both doors.
     "ShortcutAppeared", "CatchAllAppeared", "ShortcutRemoved", "CatchAllRemoved",
     "DestinationChanged", "KeyChanged", "ShortcutArmed", "ShadowingChanged",
@@ -103,12 +111,26 @@
     "PolicyReplaced",
     // Produced by stored-policy.js, when a quarantined entry is readmitted.
     "QuarantinedReadmitted",
-    // Produced by background.js, on the two paths that have no revision to
-    // attribute themselves to.
-    "PolicyUnreadable", "ProjectionStale",
-    // The reading door's own answer to a type it cannot place.
-    UNKNOWN_FACT,
   ]);
+
+  /**
+   * A READING INCIDENT designates no shortcut and no destination: it says that
+   * something could not be read or could not be attributed. A DEAD LETTER, not an
+   * event of the domain -- and the difference matters the day somebody writes
+   * "for each fact, find the shortcut it concerns".
+   *
+   * Two of them predate the distinction (`PolicyUnreadable`, `ProjectionStale`,
+   * both from background.js, on the paths that have no revision to attribute
+   * themselves to); the third is the reading door's own answer to a type it
+   * cannot place.
+   */
+  const READING_INCIDENTS = Object.freeze([
+    "PolicyUnreadable", "ProjectionStale", UNKNOWN_FACT,
+  ]);
+
+  /** What the journal accepts, which is the union. Published as one list because
+   *  a reader admitting an entry does not care which nature it is. */
+  const FACT_TYPES = Object.freeze([...DOMAIN_FACTS, ...READING_INCIDENTS]);
 
   const KNOWN_TYPE = new Set(FACT_TYPES);
 
@@ -471,6 +493,8 @@
 
   DestinationJournal.MAX_ENTRIES = MAX_ENTRIES;
   DestinationJournal.FACT_TYPES = FACT_TYPES;
+  DestinationJournal.DOMAIN_FACTS = DOMAIN_FACTS;
+  DestinationJournal.READING_INCIDENTS = READING_INCIDENTS;
   DestinationJournal.UNKNOWN_FACT = UNKNOWN_FACT;
   DestinationJournal.CLAIMED = CLAIMED;
   DestinationJournal.UNCLAIMED = UNCLAIMED;

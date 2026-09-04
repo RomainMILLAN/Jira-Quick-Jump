@@ -1099,11 +1099,20 @@ test("every fact any producer can emit is in the journal's own list", () => {
   // silently downgraded to the generic sentence, losing the detail it went to the
   // trouble of carrying.
   const declared = new Set(g.DestinationJournal.FACT_TYPES);
-  const emitted = new Set();
-  for (const file of ["src/core/policy-diff.js", "src/stored-policy.js", "src/background.js"]) {
+  const typesIn = (file) => {
     const source = readFileSync(new URL(`../${file}`, import.meta.url), "utf8");
-    for (const m of source.matchAll(/\btype:\s*"([A-Za-z]+)"/g)) emitted.add(m[1]);
-  }
+    // A SCAN, NOT A PROOF: a type built dynamically -- a template literal, a
+    // constant, a concatenation -- escapes it and would be silently downgraded to
+    // UnknownFact. Acceptable because every fact in this repository is written as
+    // a literal, and worth saying so rather than letting the next reader take a
+    // grep for a type system.
+    return new Set([...source.matchAll(/\btype:\s*"([A-Za-z]+)"/g)].map((m) => m[1]));
+  };
+  const emitted = new Set([
+    ...typesIn("src/core/policy-diff.js"),
+    ...typesIn("src/stored-policy.js"),
+    ...typesIn("src/background.js"),
+  ]);
   assert.ok(emitted.size >= 10, `only ${emitted.size} types found: the scan is broken`);
   for (const type of emitted) {
     assert.ok(declared.has(type), `${type} is produced but the journal door does not know it`);
@@ -1113,5 +1122,33 @@ test("every fact any producer can emit is in the journal's own list", () => {
   for (const type of declared) {
     if (type === g.DestinationJournal.UNKNOWN_FACT) continue;
     assert.ok(emitted.has(type), `${type} is declared but nothing produces it`);
+  }
+});
+
+test("the diff produces facts of the domain, never reading incidents", () => {
+  /**
+   * A BOUNDARY ASSERTION, where the previous one was a head count.
+   *
+   * The journal admits two natures under one published language: facts that name
+   * a shortcut, a key or a destination, and incidents that name none of those.
+   * `policy-diff.js` compares two policies -- it can only ever produce the first
+   * kind. The day it emits a `PolicyUnreadable`, something has been wired the
+   * wrong way round, and this is what says so.
+   */
+  const domain = new Set(g.DestinationJournal.DOMAIN_FACTS);
+  const incidents = new Set(g.DestinationJournal.READING_INCIDENTS);
+  // The two natures do not overlap, or the distinction is decoration.
+  for (const type of domain) assert.equal(incidents.has(type), false, `${type} is in both lists`);
+  assert.equal(
+    domain.size + incidents.size,
+    g.DestinationJournal.FACT_TYPES.length,
+    "the union must be exactly the two lists",
+  );
+
+  const source = readFileSync(new URL("../src/core/policy-diff.js", import.meta.url), "utf8");
+  const produced = [...source.matchAll(/\btype:\s*"([A-Za-z]+)"/g)].map((m) => m[1]);
+  assert.ok(produced.length > 0);
+  for (const type of produced) {
+    assert.ok(domain.has(type), `policy-diff.js emits ${type}, which is a reading incident`);
   }
 });
