@@ -1780,11 +1780,11 @@ test("CI stays in audit mode on purpose, and says so", () => {
 /**
  * THE CORE'S COUNT OF BUILT-IN ENGINES AND THE CATALOGUE AGREE.
  *
- * admission.js derives MAX_ENGINES from `BUILT_IN_ENGINES + MAX_CUSTOM_ENGINES`,
- * and it has to spell the first number itself: the core must not ask the airlock
+ * jump-policy.js PROPOSES a ceiling (24) without being able to verify either
+ * number behind it: the core holds opaque identities and must not ask the airlock
  * how many engines ship -- that is the dependency this project has removed twice.
- * So the agreement is mechanical rather than trusted, and it goes red the day a
- * fifth engine ships without the constant moving.
+ * So the agreement is mechanical rather than trusted, and it goes red the day the
+ * catalogue can no longer carry what the domain proposes.
  *
  * The consequence of a drift is not cosmetic. A ticked id that resolves to no
  * engine still costs a binding (activeBindings cannot consult the catalogue), so a
@@ -1795,24 +1795,22 @@ test("the engine cap and the shipped catalogue cannot drift apart", async () => 
   const { loadCore } = await import("./load-core.js");
   const core = await loadCore();
 
+  const carryable = core.SearchEngineCatalog.all().length + core.ShortcutAdmission.MAX_CUSTOM_ENGINES;
   assert.equal(
-    core.ShortcutAdmission.BUILT_IN_ENGINES,
-    core.SearchEngineCatalog.all().length,
-    "core/admission.js counts a different number of built-in engines than the catalogue ships",
+    core.JumpPolicy.MAX_ENGINES,
+    carryable,
+    "the domain proposes a ceiling the catalogue cannot carry: one of the two numbers moved",
   );
-  assert.equal(
-    core.ShortcutAdmission.MAX_ENGINES,
-    core.ShortcutAdmission.BUILT_IN_ENGINES + core.ShortcutAdmission.MAX_CUSTOM_ENGINES,
-    "the cap must stay derived, never chosen",
-  );
-  // And it is genuinely derived in the SOURCE, not merely equal by coincidence:
-  // a literal that happens to add up today is the shape this replaces.
-  const source = read("src/core/admission.js");
+  // The door reads the aggregate's ceiling rather than keeping its own.
+  assert.equal(core.ShortcutAdmission.MAX_ENGINES, core.JumpPolicy.MAX_ENGINES);
   assert.match(
-    source,
-    /MAX_ENGINES\s*=\s*BUILT_IN_ENGINES\s*\+\s*MAX_CUSTOM_ENGINES/,
-    "MAX_ENGINES must be written as its own justification",
+    read("src/core/admission.js"),
+    /const MAX_ENGINES = JumpPolicy\.MAX_ENGINES;/,
+    "the ceiling has one owner, and it is the aggregate",
   );
+  // AND THE TWO BOUNDS OF THIS DOOR STAY DISTINCT. The raw guard exists for
+  // termination, the ceiling for selection; equal, one of them is decoration.
+  assert.ok(core.ShortcutAdmission.MAX_RAW_ENGINES > core.ShortcutAdmission.MAX_ENGINES);
 });
 
 /**

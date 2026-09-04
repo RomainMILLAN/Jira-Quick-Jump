@@ -56,6 +56,28 @@
   // two constants that are equal today are two different constants tomorrow.
   const MAX_SHORTCUTS = 200;
 
+  /**
+   * How many search engines a policy may have ticked.
+   *
+   * IT LIVES HERE, WITH ITS TWO NEIGHBOURS, because it is a ceiling OF THE DOMAIN:
+   * it bounds what a policy may hold, whatever door the policy came through. It
+   * used to live at the admission door alone -- so `withEngines([...200 ids...])`
+   * produced a valid policy, and the bound was a filter on documents rather than
+   * an invariant of the aggregate. An invariant held at one door is not an
+   * invariant.
+   *
+   * TWENTY-FOUR, and the arithmetic is the airlock's: four engines ship in the
+   * catalogue and a policy may add twenty domains of its own. The domain cannot
+   * verify either number -- it holds opaque identities -- so it PROPOSES a
+   * ceiling and a changelock checks that the catalogue can carry it.
+   *
+   * A ticked id that resolves to no engine still costs a binding (activeBindings
+   * cannot consult the catalogue), which is why this ceiling decides how few live
+   * shortcuts a hostile document can leave a profile with: at 24 the answer is
+   * twelve, the platform's rule ceiling talking rather than an adversary.
+   */
+  const MAX_ENGINES = 24;
+
   class Binding {
     constructor(shortcut, engineId, ruleIndex) {
       this._shortcut = shortcut;
@@ -366,6 +388,12 @@
           `This would create more than ${MAX_SHORTCUTS} shortcuts.`
         );
       }
+      if (policy.engineIds().length > MAX_ENGINES) {
+        return MutationResult.refused(
+          "ENGINE_LIMIT",
+          `This would tick more than ${MAX_ENGINES} search engines.`
+        );
+      }
       if (policy.activeBindings().length > MAX_BINDINGS) {
         return MutationResult.refused(
           "BINDING_LIMIT",
@@ -564,6 +592,7 @@
   });
   JumpPolicy.SCHEMA_VERSION = SCHEMA_VERSION;
   JumpPolicy.MAX_BINDINGS = MAX_BINDINGS;
+  JumpPolicy.MAX_ENGINES = MAX_ENGINES;
   JumpPolicy.MAX_SHORTCUTS = MAX_SHORTCUTS;
 
   /**

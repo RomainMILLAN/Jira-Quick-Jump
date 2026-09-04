@@ -703,5 +703,8 @@
   },
   "refuseTooManyEngines": {
     "message": "Cette configuration coche plus de moteurs de recherche que cette extension n'en lit."
+  },
+  "refuseEngineLimit": {
+    "message": "Cela cocherait plus de moteurs de recherche que cette extension ne peut en utiliser."
   }
 }

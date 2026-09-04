@@ -1218,10 +1218,21 @@ test("the engine cap is what its own sentence says it is", () => {
   // (it cannot consult the catalogue: the core holds opaque identities), so the
   // gap let a synced document push 5 x 64 past MAX_BINDINGS and quarantine every
   // shortcut after the fourth, on every device.
+  // THE CEILING BELONGS TO THE AGGREGATE, and the door reads it from there: it
+  // bounds what a policy may HOLD, whatever door it came through. The door's own
+  // re-export must not drift from it.
+  assert.equal(g.ShortcutAdmission.MAX_ENGINES, g.JumpPolicy.MAX_ENGINES);
+  // AND THE AGGREGATE REFUSES, which is what makes it an invariant rather than a
+  // filter on documents. `withEngines` used to accept any number.
+  const tooMany = g.JumpPolicy.empty()
+    .withEngines(Array.from({ length: g.JumpPolicy.MAX_ENGINES + 1 }, (_, i) => `e${i}.example`));
+  assert.equal(tooMany.ok, false, "the aggregate must refuse a selection it cannot hold");
+  assert.equal(tooMany.code, "ENGINE_LIMIT");
+  // And it accepts exactly the ceiling, which is where an off-by-one would live.
   assert.equal(
-    g.ShortcutAdmission.MAX_ENGINES,
-    g.ShortcutAdmission.BUILT_IN_ENGINES + g.ShortcutAdmission.MAX_CUSTOM_ENGINES,
-    "the cap must be derived from what can exist, not chosen",
+    g.JumpPolicy.empty()
+      .withEngines(Array.from({ length: g.JumpPolicy.MAX_ENGINES }, (_, i) => `e${i}.example`)).ok,
+    true,
   );
   // AND THE ARITHMETIC IS THE POINT, so it is spelled rather than trusted.
   //

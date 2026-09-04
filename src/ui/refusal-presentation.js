@@ -122,6 +122,7 @@
     // Limits and concurrency
     SHORTCUT_LIMIT: t("refuseShortcutLimit", "That would create more shortcuts than this extension keeps."),
     BINDING_LIMIT: t("refuseBindingLimit", "That would create more redirect rules than the browser allows."),
+    ENGINE_LIMIT: t("refuseEngineLimit", "That would tick more search engines than this extension can use."),
     ORDER_STALE: t("refuseOrderStale", "The order changed in another window. Try again."),
     CONFLICT_EXHAUSTED: t("refuseConflict", "Another window changed the configuration at the same time. Try again."),
     QUOTA_EXCEEDED: t("refuseQuota", "There is no room left to save this."),

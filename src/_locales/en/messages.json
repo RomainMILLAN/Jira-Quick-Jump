@@ -703,5 +703,8 @@
   },
   "refuseTooManyEngines": {
     "message": "That configuration ticks more search engines than this extension reads."
+  },
+  "refuseEngineLimit": {
+    "message": "That would tick more search engines than this extension can use."
   }
 }

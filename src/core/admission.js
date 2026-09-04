@@ -33,37 +33,12 @@
   const MAX_CUSTOM_ENGINES = 20;
 
   /**
-   * How many engines this build SHIPS. A number, in core/, about a catalogue that
-   * lives in interception/ -- deliberately, because the alternative is worse: the
-   * core would have to ask the airlock, which is the dependency this project has
-   * removed twice. A changelock in structure.test.js compares it to
-   * SearchEngineCatalog.all().length and goes red the day a fifth ships.
+   * The ceiling on ticked engines belongs to the AGGREGATE, not to this door: it
+   * bounds what a policy may hold, whatever door it came through, so it lives in
+   * jump-policy.js beside MAX_SHORTCUTS and MAX_BINDINGS. Re-exported below,
+   * where the other bounds of this door are read from.
    */
-  const BUILT_IN_ENGINES = 4;
-
-  /**
-   * The built-in catalogue plus every custom domain that may exist. DERIVED, and
-   * that is the fix: it was the literal 64 under a comment that said "the number
-   * of engines that can exist: the built-in catalogue plus the custom domains,
-   * themselves capped" -- which is 24. The cap was 2.7x its own justification.
-   *
-   * WHAT THE GAP COST, and it is not academic. activeBindings() iterates the
-   * ticked ids WITHOUT consulting the catalogue -- it cannot, the core holds only
-   * opaque identities -- so an id that resolves to no engine still consumes a
-   * binding, and _guarded refuses every register past MAX_BINDINGS (300). A
-   * synced document ticking 64 well-formed but non-existent ids, with five armed
-   * shortcuts pointing at ordinary https hosts (hence no warning to acknowledge,
-   * hence live even after the sync door drops the attestations), pushed
-   * 5 x 64 = 320 past the ceiling: every shortcut after the fourth landed in
-   * quarantine, on every device, repairable only by hand.
-   *
-   * At 24 the same document buys nothing a legitimate configuration cannot
-   * reach on its own -- 24 engines ticked allows 12 live shortcuts, which is the
-   * DNR rule ceiling talking, not an adversary. The phantom ids still cost a
-   * binding each; what changes is that the cost is now bounded by what the user
-   * could have done themselves, which is the only bound that means anything here.
-   */
-  const MAX_ENGINES = BUILT_IN_ENGINES + MAX_CUSTOM_ENGINES;
+  const MAX_ENGINES = JumpPolicy.MAX_ENGINES;
   // What a configuration FILE may weigh. It was written as `64 * 1024` inside the
   // options page -- a security bound living on the surface it protects, with no
   // relation to the limits beside it here and nothing testing it.
@@ -576,7 +551,6 @@
 
   ShortcutAdmission.MAX_CUSTOM_ENGINES = MAX_CUSTOM_ENGINES;
   ShortcutAdmission.MAX_ENGINES = MAX_ENGINES;
-  ShortcutAdmission.BUILT_IN_ENGINES = BUILT_IN_ENGINES;
   ShortcutAdmission.MAX_RAW_ENGINES = MAX_RAW_ENGINES;
   ShortcutAdmission.MAX_TRANSFER_BYTES = MAX_TRANSFER_BYTES;
   ShortcutAdmission.MAX_QUARANTINE = MAX_QUARANTINE;
