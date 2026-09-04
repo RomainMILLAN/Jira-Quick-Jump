@@ -69,6 +69,21 @@
   // relation to the limits beside it here and nothing testing it.
   const MAX_TRANSFER_BYTES = 64 * 1024;
 
+  /**
+   * A CHEAP ABSOLUTE GUARD AGAINST UNBOUNDED WORK, and the only bound that runs
+   * before anything is read.
+   *
+   * Generous on purpose: its job is TERMINATION, not selection. The selection
+   * bound (MAX_ENGINES) now applies to the ids that were successfully READ, which
+   * means the loop must be allowed to walk the whole list -- and a list nobody
+   * bounded is a list that can be a megabyte of strings.
+   *
+   * Two bounds, two jobs, the same shape as the 40-character custom domain facing
+   * the RE2 budget: one is refused at the door with a sentence, the other is what
+   * the machine can carry.
+   */
+  const MAX_RAW_ENGINES = 1000;
+
   const refuse = (code, message) => ({ ok: false, code, message });
 
   const ShortcutAdmission = {
@@ -217,6 +232,21 @@
     // configuration over a ticked engine would be the denial of service the bound
     // above exists to prevent." The bound was the one place that broke its own rule.
     //
+    // AND IT COUNTS WHAT WAS READ, NOT WHAT ARRIVED. The first version sliced the
+    // RAW list, before a single identity had been read -- so a malformed id, or a
+    // duplicate, CONSUMED THE PLACE of a real engine. Measured:
+    //
+    //   engines: [ 24 well-formed but non-existent ids…, "google.com" ]
+    //     -> the 24 are kept, google.com is evicted
+    //   engines: [ 24 malformed ids ("foo", "bar"…), "google.com" ]
+    //     -> 24 slots consumed then refused, google.com evicted -> ZERO engines
+    //
+    // The eviction order belonged to whoever wrote the document. The bound now
+    // counts admitted ids, so nothing a later line refuses can cost a slot. What
+    // remains, and it is the right residual: an adversary can still pad with
+    // MAX_ENGINES VALID ids -- which is exactly what a legitimate configuration
+    // can do.
+    //
     // TWO REASONS, and the second is the one that decided it.
     //
     //   1. A DOWNGRADE CLIFF. This cap used to be 64 -- 2.7x the number of engines
@@ -240,8 +270,9 @@
     // prevent -- and truncating `customEngines` would leave ticked ids pointing at
     // domains that no longer exist. A selection is the only one of the three whose
     // excess can be dropped without losing something the user made.
-    const excessEngines = Math.max(0, rawEngines.length - MAX_ENGINES);
-    const tickedEngines = excessEngines === 0 ? rawEngines : rawEngines.slice(0, MAX_ENGINES);
+    if (rawEngines.length > MAX_RAW_ENGINES) {
+      return refuse("TOO_MANY_ENGINES", "This configuration ticks too many search engines.");
+    }
     // Selections written before engines were split per domain would otherwise
     // resolve to nothing, and an existing configuration would quietly stop working.
     // THROUGH THE VALUE OBJECT, which migrates an old spelling AND refuses what
@@ -276,18 +307,15 @@
     const unreadableEngines = [];
     const engines = [];
     const seenEngines = new Set();
-    if (excessEngines > 0) {
-      // SAID, like the arming state below: a selection that arrived longer than
-      // anything that can be selected is a fact about the document, not an entry
-      // that was refused, so it travels in `unreadable` and never in `refused`.
-      unreadableEngines.push({
-        code: "ENGINES_TRUNCATED",
-        // "refused", per the vocabulary map in core/mutation-result.js: it is the
-        // verdict word, and a structure test holds it.
-        message: "The saved list of search engines was longer than the number that can exist, so the extra entries were refused.",
-      });
-    }
-    for (const raw of tickedEngines) {
+    let truncatedEngines = 0;
+    for (const raw of rawEngines) {
+      // THE SELECTION BOUND, on what has been ADMITTED. Placed before the parse
+      // so a full list stops costing work, and after nothing else so a refused or
+      // duplicate id cannot occupy a slot.
+      if (engines.length >= MAX_ENGINES) {
+        truncatedEngines += 1;
+        continue;
+      }
       const parsed = global.EngineId.parse(raw);
       if (!parsed.ok) {
         unreadableEngines.push({ code: parsed.code, message: parsed.message });
@@ -297,6 +325,14 @@
       if (seenEngines.has(written)) continue;
       seenEngines.add(written);
       engines.push(written);
+    }
+    if (truncatedEngines > 0) {
+      // SAID, like the arming state below: a selection that arrived longer than
+      // anything that can be selected is a fact about the document, not an entry
+      // that was refused, so it travels in `unreadable` and never in `refused`.
+      // "refused" is the verdict word, per the vocabulary map in
+      // core/mutation-result.js, and a structure test holds it.
+      unreadableEngines.push({ code: "ENGINES_TRUNCATED" });
     }
     const customEngines = raw.customEngines === undefined ? [] : raw.customEngines;
     if (!Array.isArray(customEngines)) {
@@ -541,6 +577,7 @@
   ShortcutAdmission.MAX_CUSTOM_ENGINES = MAX_CUSTOM_ENGINES;
   ShortcutAdmission.MAX_ENGINES = MAX_ENGINES;
   ShortcutAdmission.BUILT_IN_ENGINES = BUILT_IN_ENGINES;
+  ShortcutAdmission.MAX_RAW_ENGINES = MAX_RAW_ENGINES;
   ShortcutAdmission.MAX_TRANSFER_BYTES = MAX_TRANSFER_BYTES;
   ShortcutAdmission.MAX_QUARANTINE = MAX_QUARANTINE;
   global.ShortcutAdmission = ShortcutAdmission;

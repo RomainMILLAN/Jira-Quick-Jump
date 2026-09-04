@@ -700,5 +700,8 @@
   },
   "unreadableEngineIdType": {
     "message": "Un moteur de recherche enregistré n'a pas pu être lu, il n'est donc plus sélectionné."
+  },
+  "refuseTooManyEngines": {
+    "message": "Cette configuration coche plus de moteurs de recherche que cette extension n'en lit."
   }
 }

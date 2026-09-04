@@ -700,5 +700,8 @@
   },
   "unreadableEngineIdType": {
     "message": "A saved search engine could not be read, so it is no longer selected."
+  },
+  "refuseTooManyEngines": {
+    "message": "That configuration ticks more search engines than this extension reads."
   }
 }

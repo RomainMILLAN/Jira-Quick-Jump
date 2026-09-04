@@ -291,7 +291,7 @@ test("a flood of ticked engines cannot quarantine the whole configuration", () =
   // document written by a future build with more built-in engines (same schema
   // version, so SCHEMA_TOO_NEW never fires) would have been refused ENTIRELY on
   // the way back.
-  const flood = Array.from({ length: 5000 }, (_, i) => `engine-${i}.example`);
+  const flood = Array.from({ length: 500 }, (_, i) => `engine-${i}.example`);
   const restored = g.JumpPolicy.restore({
     schemaVersion: 1,
     armed: true,
@@ -314,6 +314,56 @@ test("a flood of ticked engines cannot quarantine the whole configuration", () =
     restored.unreadable.some((f) => f.code === "ENGINES_TRUNCATED"),
     "a truncated selection must be reported, not swallowed",
   );
+});
+
+test("a refused or duplicate engine id costs no place a real engine needed", () => {
+  /**
+   * THE EVICTION ORDER USED TO BELONG TO WHOEVER WROTE THE DOCUMENT.
+   *
+   * The bound sliced the RAW list, before a single identity had been read, so an
+   * id the door refuses three lines later had already consumed a slot. Measured
+   * before the fix: 24 malformed ids followed by "google.com" left ZERO engines.
+   */
+  const junk = Array.from({ length: g.ShortcutAdmission.MAX_ENGINES }, (_, i) => `not an id ${i}`);
+  const restored = g.JumpPolicy.restore({
+    schemaVersion: 1,
+    armed: true,
+    engines: [...junk, "google.com"],
+    shortcuts: [],
+  });
+  assert.equal(restored.ok, true);
+  assert.deepEqual(
+    restored.policy.engineIds(),
+    ["google.com"],
+    "a malformed id must not occupy the place of a real engine",
+  );
+  // Each refusal is still SAID, one per id, and no truncation is claimed: nothing
+  // was dropped for want of room.
+  assert.equal(restored.unreadable.filter((f) => f.code === "ENGINE_ID_SHAPE").length, junk.length);
+  assert.equal(restored.unreadable.some((f) => f.code === "ENGINES_TRUNCATED"), false);
+
+  // Same for duplicates: a list of one engine repeated cannot crowd out the rest.
+  const duplicated = g.JumpPolicy.restore({
+    schemaVersion: 1,
+    armed: true,
+    engines: [...Array.from({ length: 100 }, () => "google.com"), "bing.com"],
+    shortcuts: [],
+  });
+  assert.deepEqual(duplicated.policy.engineIds(), ["google.com", "bing.com"]);
+});
+
+test("a list longer than anything this door reads is refused outright", () => {
+  // The OTHER bound, and it has the other job: termination, not selection. The
+  // loop must be allowed to walk the whole list for the selection bound to count
+  // admitted ids -- so the raw length needs a cheap absolute guard of its own.
+  const enormous = Array.from({ length: g.ShortcutAdmission.MAX_RAW_ENGINES + 1 }, (_, i) => `e${i}.example`);
+  const restored = g.JumpPolicy.restore({
+    schemaVersion: 1, armed: true, engines: enormous, shortcuts: [],
+  });
+  assert.equal(restored.ok, false, "a payload is not a selection");
+  assert.equal(restored.code, "TOO_MANY_ENGINES");
+  // And the two bounds are not the same number, or one of them is decoration.
+  assert.ok(g.ShortcutAdmission.MAX_RAW_ENGINES > g.ShortcutAdmission.MAX_ENGINES);
 });
 
 test("a selection that fits is left exactly as it is", () => {
