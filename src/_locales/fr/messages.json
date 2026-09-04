@@ -712,5 +712,8 @@
   },
   "unreadableNote": {
     "message": "Recalculés à chaque lecture, et disparus dès que la configuration est réécrite."
+  },
+  "skipQueryParamTooLong": {
+    "message": "L'adresse de ce moteur de recherche utilise un nom de paramètre que cette version ne sait pas apparier."
   }
 }

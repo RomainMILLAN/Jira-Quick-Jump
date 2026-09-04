@@ -68,7 +68,11 @@
    */
   const noEarlier = (queryParam) => {
     if (queryParam.length !== 1) {
-      throw new Error(`query parameter ${queryParam}: only single-character names are budgeted`);
+      // A NAMED REFUSAL, absorbed by rule-factory's per-engine catch, so one
+      // costly engine loses its catch-all instead of the whole programme being
+      // purged under the anonymous cause UNKNOWN. A bare Error here was the last
+      // mute path of this file.
+      throw global.Re2Budget.refusal("QUERY_PARAM_TOO_LONG", { word: queryParam });
     }
     return `(?:(?:[^=&%${queryParam}][^=&]*|${queryParam}[^=&]+)?=[^&]*&)*`;
   };

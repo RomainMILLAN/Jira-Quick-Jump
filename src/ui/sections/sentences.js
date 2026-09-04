@@ -334,6 +334,7 @@
     RUN_OVER_BUDGET: t("skipRunOverBudget", "The reserved-prefix guard is too long for the browser."),
     ENVELOPE_OVER_BUDGET: t("skipEnvelopeOverBudget", "This search engine's address leaves no room for a rule."),
     KEY_LENGTH_OVER_BUDGET: t("skipKeyLengthOverBudget", "The catch-all claims longer keys than the browser can match."),
+    QUERY_PARAM_TOO_LONG: t("skipQueryParamTooLong", "This search engine's address uses a parameter name this version cannot match."),
   });
 
   /** Lazy and translated, like DIAGNOSIS: these four never went through t(). */

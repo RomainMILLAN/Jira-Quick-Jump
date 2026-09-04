@@ -101,6 +101,14 @@
     ENVELOPE_OVER_BUDGET: "ENVELOPE_OVER_BUDGET",
     // The domain claims a key length the measured RE2 ceiling cannot carry.
     KEY_LENGTH_OVER_BUDGET: "KEY_LENGTH_OVER_BUDGET",
+    // An engine whose query parameter is longer than one character. A budget
+    // question rather than a free one -- a longer name needs one alternative per
+    // position in the "no earlier parameter of this name" prefix -- so it is a
+    // NAMED refusal and not a bare throw. It used to be the latter, which is the
+    // mute path SHAPES-as-a-Map has just closed next door: a plain Error leaves
+    // buildRules, rule-installer cannot name it, and the whole programme is purged
+    // under the cause UNKNOWN.
+    QUERY_PARAM_TOO_LONG: "QUERY_PARAM_TOO_LONG",
     UNKNOWN: "UNKNOWN",
   });
 

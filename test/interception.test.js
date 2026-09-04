@@ -1365,3 +1365,40 @@ test("a substitution that is not text cannot become a destination", () => {
   }]);
   assert.equal(verdict.ok, false, "a substitution that is not text must not be rendered");
 });
+
+test("changelock: an engine parameter this build cannot match refuses BY NAME", () => {
+  /**
+   * A CHANGELOCK, NOT A REACHABLE PATH -- and saying which it is matters.
+   *
+   * Every shape this build ships uses a single-character parameter, and `SHAPES`
+   * is a closed Map, so nothing can reach this refusal today. It exists for
+   * whoever adds a shape whose parameter is longer: "no earlier parameter of this
+   * name" needs one alternative per position, which is a real budget question.
+   *
+   * What it guards is the SPECIES of the failure. A bare `throw new Error(...)`
+   * leaves buildRules from inside the binding loop, where nothing catches it --
+   * rule-installer's outer catch fires, the whole programme is purged, and the
+   * cause is reported as UNKNOWN, because only a Re2Budget.Refusal can be named.
+   * That is the exact shape SHAPES-as-a-Map closed one function away, and this one
+   * was still open.
+   */
+  const source = readFileSync(new URL("../src/interception/search-engine-catalog.js", import.meta.url), "utf8");
+  const guard = /only single-character names|queryParam\.length !== 1/;
+  assert.match(source, guard, "the guard on the parameter length must still exist");
+  assert.match(
+    source,
+    /throw global\.Re2Budget\.refusal\("QUERY_PARAM_TOO_LONG"/,
+    "it must refuse by name: a bare Error is purged under the cause UNKNOWN",
+  );
+  assert.equal(
+    /throw new Error\(/.test(source),
+    false,
+    "no bare throw may remain in the catalogue: rule-factory can only absorb a named refusal",
+  );
+
+  // The reason exists, and rule-factory absorbs it per engine rather than globally.
+  assert.equal(g.Re2Budget.REASONS.QUERY_PARAM_TOO_LONG, "QUERY_PARAM_TOO_LONG");
+  const refusal = g.Re2Budget.refusal("QUERY_PARAM_TOO_LONG", { word: "query" });
+  assert.ok(refusal instanceof g.Re2Budget.Refusal);
+  assert.equal(refusal.reason, "QUERY_PARAM_TOO_LONG");
+});
