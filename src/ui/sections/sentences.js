@@ -40,10 +40,16 @@
     UnknownFact: t("kindUnknown", "a change this version cannot name"),
   }));
 
-  const FACT_SENTENCE = (fact) => {
-    /**
-     * BOTH GO THROUGH Dom.visibleText, and the reason is not the same as the
-     * quarantine's -- it is the same DANGER.
+  /**
+   * THE THREE NODE FACTORIES, OUTSIDE the switch that uses them.
+   *
+   * They were declared INSIDE FACT_SENTENCE, so three closures were rebuilt for
+   * every fact -- up to twenty per render. No measurable cost at this scale, but
+   * it reads "encapsulate what varies" backwards: these three are the STABLE part
+   * and the fact is what varies.
+   *
+   * BOTH `host` AND `plain` GO THROUGH Dom.visibleText, and the reason is not the
+   * same as the quarantine's -- it is the same DANGER.
      *
      * A fact comes back from `storage.local` through DestinationJournal.entryOf,
      * which bounds the LENGTH of a text field and validates nothing else. It is
@@ -56,23 +62,25 @@
      * Only a LOCAL writer can put one there (the facts this build produces come
      * from an already-admitted policy, and the sync channel does not reach
      * storage.local), so this is defence in depth in a zone SECURITY.md declares
-     * out of scope. It costs two calls.
-     */
-    const host = (text) => el("span", { class: "dest host", text: Dom.visibleText(text) });
-    // NOT `.dest`: this paints a key, or a phrase standing in for one -- never a
-    // destination. One class for three meanings made a rule about where traffic
-    // goes govern the word beside it.
-    const plain = (text) => el("span", { class: "mono-token", text: Dom.visibleText(text) });
-    /**
-     * A list of values from the journal, printed as one token.
-     *
-     * Joining first and cleaning after is safe HERE, and only because
-     * DECEPTIVE_SOURCE deliberately excludes the ordinary space: the ", "
-     * separators this composes survive. Were the space ever added to that class,
-     * this would have to clean each member and join afterwards -- which is why
-     * the exclusion is argued in project-shortcut.js rather than assumed.
-     */
-    const plainList = (values) => plain((values || []).join(", "));
+   * out of scope. It costs two calls.
+   */
+  const host = (text) => el("span", { class: "dest host", text: Dom.visibleText(text) });
+  // NOT `.dest`: this paints a key, or a phrase standing in for one -- never a
+  // destination. One class for three meanings made a rule about where traffic
+  // goes govern the word beside it.
+  const plain = (text) => el("span", { class: "mono-token", text: Dom.visibleText(text) });
+  /**
+   * A list of values from the journal, printed as one token.
+   *
+   * Joining first and cleaning after is safe HERE, and only because the deceptive
+   * class deliberately excludes the ordinary space: the ", " separators this
+   * composes survive. Were the space ever added to that class, this would have to
+   * clean each member and join afterwards -- which is why the exclusion is argued
+   * in project-shortcut.js rather than assumed.
+   */
+  const plainList = (values) => plain((values || []).join(", "));
+
+  const FACT_SENTENCE = (fact) => {
     switch (fact.type) {
       case "ShortcutAppeared":
       case "CatchAllAppeared":
