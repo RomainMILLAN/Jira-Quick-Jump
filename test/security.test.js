@@ -742,6 +742,70 @@ test("every origin the airlock collects is a pattern a browser can parse", () =>
 });
 
 /**
+ * THE BOUND THAT MAKES A PORTLESS PERMISSION ACCEPTABLE, asserted on EVERY rule.
+ *
+ * `permissionOrigin()` carries no port, so a granted origin covers every port of
+ * that host -- a permission wider than the rule, which is the direction
+ * search-engine-catalog.js spends a paragraph refusing for the engines. It is
+ * admitted here for a reason that does not apply there: a match pattern cannot
+ * express a port, so the narrow form is INEXPRESSIBLE rather than merely unasked.
+ *
+ * What bounds it is not the permission but the SUBSTITUTION: the redirect target
+ * is the literal base URL, port included, so no rule of this build can reach
+ * another port of that host. That property was pinned on ONE example, and a
+ * property that justifies a wider permission deserves better than an example --
+ * the first refactoring of substitutionFor would have taken the argument away
+ * without making the suite red.
+ */
+test("no emitted rule can redirect anywhere but its own literal destination", () => {
+  let p = g.JumpPolicy.empty().withEngines(["google.com", "bing.com", "duckduckgo.com"]).value;
+  const destinations = [
+    ["a", "ABC", "http://jira:8080"],
+    ["b", "OPS", "https://jira.example.org:8443/tickets"],
+    ["c", "DEV", "https://example.atlassian.net"],
+    ["d", "OPS2", "https://intra.example.org/jira"],
+  ];
+  for (const [id, key, baseUrl] of destinations) {
+    p = p.register(id, g.ProjectKey.parse(key).value, g.JiraInstance.parse(baseUrl).value).value;
+    for (const kind of p.shortcutFor(id).unacknowledgedWarnings()) {
+      p = p.acknowledge(id, kind.kind).value;
+    }
+    p = p.armShortcut(id).value;
+  }
+  // A catch-all too: its substitution carries a backreference for the KEY, which
+  // is the shape most likely to drift.
+  p = p.registerCatchAll("all", g.JiraInstance.parse("https://catchall.atlassian.net").value).value;
+  p = p.acknowledge("all", "CATCH_ALL").value;
+  p = p.armShortcut("all").value;
+
+  const set = g.RuleFactory.buildRules(
+    p,
+    g.SearchEngineCatalog.forPolicy(p),
+    (engine) => g.Re2Budget.forEnvelope(engine.guardEnvelopeCost()),
+  );
+  const byDestination = new Map(p.shortcuts().map((s) => [s.id(), s.destination()]));
+  let checked = 0;
+  for (const rule of set.rules()) {
+    if (rule.action.type !== "redirect") continue;
+    const target = rule.action.redirect.regexSubstitution;
+    // The rule carries its engine but not its shortcut, so the assertion is that
+    // SOME configured destination owns this target -- and that the target is that
+    // destination followed by the fixed path, with nothing inserted between them.
+    const owner = [...byDestination.values()].find((base) => target.startsWith(base + "/browse/"));
+    assert.ok(owner, `no configured destination owns ${target}`);
+    // AND NOTHING BEYOND THE REFERENCE. A backreference may follow /browse/; a
+    // second host, a query or a path segment may not.
+    assert.match(
+      target.slice((owner + "/browse/").length),
+      /^(?:\\1-\\2|[A-Z0-9_]+-\\1)$/,
+      `${target} puts something other than an issue reference after /browse/`,
+    );
+    checked += 1;
+  }
+  assert.ok(checked >= 12, `only ${checked} redirect rules examined: the corpus got smaller`);
+});
+
+/**
  * A SHAPE THAT RESOLVES THROUGH Object.prototype IS NOT A SHAPE.
  *
  * `shape` comes from the configuration and is validated only as `/^[a-z-]{1,32}$/`.
