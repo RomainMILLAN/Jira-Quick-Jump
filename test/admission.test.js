@@ -352,6 +352,36 @@ test("a refused or duplicate engine id costs no place a real engine needed", () 
   assert.deepEqual(duplicated.policy.engineIds(), ["google.com", "bing.com"]);
 });
 
+test("a truncation is announced only when something usable was left out", () => {
+  /**
+   * THE BOUND COUNTS WHAT WOULD HAVE BEEN ADMITTED.
+   *
+   * Tested before the parse, it called anything past the ceiling truncated --
+   * duplicates included. Measured then: 24 distinct ids followed by 10 duplicates
+   * OF THOSE kept all 24 and still announced "the extra entries were refused". The
+   * direction was safe; the sentence was false, on the surface this trust model
+   * says must be believed.
+   */
+  const distinct = Array.from({ length: g.ShortcutAdmission.MAX_ENGINES }, (_, i) => `e${i}.example`);
+  const announces = (engines) =>
+    g.JumpPolicy.restore({ schemaVersion: 1, armed: true, engines, shortcuts: [] })
+      .unreadable.some((f) => f.code === "ENGINES_TRUNCATED");
+
+  // Duplicates of ids already admitted cost nothing, so nothing is announced.
+  assert.equal(announces([...distinct, ...distinct.slice(0, 10)]), false,
+    "a duplicate is not a loss, and must not be reported as one");
+  // Malformed ids likewise: they are refused one by one, with their own code.
+  assert.equal(announces([...distinct, "not an id", "nor this"]), false);
+  // A genuinely new id past the ceiling IS a loss, and is announced.
+  assert.equal(announces([...distinct, "z1.example"]), true,
+    "an id that would have been admitted must be reported as refused");
+  // And the ceiling still holds in every case.
+  for (const engines of [[...distinct, ...distinct.slice(0, 10)], [...distinct, "z1.example"]]) {
+    const restored = g.JumpPolicy.restore({ schemaVersion: 1, armed: true, engines, shortcuts: [] });
+    assert.equal(restored.policy.engineIds().length, g.ShortcutAdmission.MAX_ENGINES);
+  }
+});
+
 test("a list longer than anything this door reads is refused outright", () => {
   // The OTHER bound, and it has the other job: termination, not selection. The
   // loop must be allowed to walk the whole list for the selection bound to count

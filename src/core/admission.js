@@ -284,13 +284,21 @@
     const seenEngines = new Set();
     let truncatedEngines = 0;
     for (const raw of rawEngines) {
-      // THE SELECTION BOUND, on what has been ADMITTED. Placed before the parse
-      // so a full list stops costing work, and after nothing else so a refused or
-      // duplicate id cannot occupy a slot.
-      if (engines.length >= maxEngines) {
-        truncatedEngines += 1;
-        continue;
-      }
+      /**
+       * THE BOUND COUNTS WHAT WOULD HAVE BEEN ADMITTED -- so it is tested LAST,
+       * after the parse and after the deduplication.
+       *
+       * Tested first, it counted anything past the ceiling as truncated, including
+       * ids that would have cost nothing. Measured: 24 distinct ids followed by 10
+       * duplicates OF THOSE kept all 24 and still announced a truncation. The
+       * direction is safe -- over-signalling -- but the sentence the user reads is
+       * "the extra entries were refused" about entries that were duplicates, on
+       * the surface this whole trust model says must be believed.
+       *
+       * Parsing before capping does not reopen the unbounded work the other bound
+       * exists for: MAX_RAW_ENGINES has already refused the document by the time
+       * this loop starts, so the walk is bounded whatever this line does.
+       */
       const parsed = global.EngineId.parse(raw);
       if (!parsed.ok) {
         unreadableEngines.push({ code: parsed.code, message: parsed.message });
@@ -298,6 +306,10 @@
       }
       const written = parsed.value.toString();
       if (seenEngines.has(written)) continue;
+      if (engines.length >= maxEngines) {
+        truncatedEngines += 1;
+        continue;
+      }
       seenEngines.add(written);
       engines.push(written);
     }
