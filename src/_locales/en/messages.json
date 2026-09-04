@@ -721,5 +721,11 @@
   },
   "factDomainsReshaped": {
     "message": "The address a search domain is intercepted on changed, so different searches are now captured:"
+  },
+  "importSurface": {
+    "message": "This file also chooses where searches are intercepted:"
+  },
+  "importDomains": {
+    "message": "and it adds these search domains:"
   }
 }

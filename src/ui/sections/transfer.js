@@ -136,6 +136,28 @@
           ? el("p", { class: "row-msg refused",
               text: t("importRefused", "Some entries were refused and will not be imported.") })
           : null,
+        /**
+         * THE FILE ALSO CHOOSES WHERE SEARCHES ARE INTERCEPTED, and this screen
+         * used to show only the destinations.
+         *
+         * `toTransfer()` carries `engines` and `customEngines` beside the
+         * shortcuts, and the lede above promises "check where each key would send
+         * you". Measured: a file adding `intra.attacker.example` and ticking it
+         * showed one row -- the shortcut -- and, once the user armed that shortcut,
+         * emitted TWO rules, the second on a host that had never appeared on
+         * screen.
+         *
+         * WHAT BOUNDED IT, and why this is transparency rather than a breach: the
+         * Access section then asks for that host's origin and the browser prompt
+         * names it, so nothing fires unseen; and the destination is still the
+         * shortcut's, which IS shown. The gap was consent to the SURFACE, one step
+         * before the permission catches it.
+         *
+         * The engines are printed by id, which is what the user ticked; a custom
+         * domain is printed by host, because that is the word they would
+         * recognise. Both go through Dom.visibleText: they come from a file.
+         */
+        this.surface(),
         el("p", { class: "hint", text: t("importDisarmed",
           "Everything arrives disarmed, and warnings you accepted before are not carried over.") }),
         el("div", { class: "btn-row" }, [
@@ -144,6 +166,28 @@
           el("button", { class: "btn primary", text: t("importConfirm", "Import, disarmed"),
             onClick: () => this.confirm(ctx) }),
         ]),
+      ]);
+    },
+
+    /** What the file selects, beside the destinations. `null` when it selects
+     *  nothing, so a file carrying only shortcuts adds no line. */
+    surface() {
+      const policy = this.proposal.policy;
+      const engines = policy.engineIds();
+      const domains = policy.customEngines().map((e) => e.host());
+      if (engines.length === 0 && domains.length === 0) return null;
+      return el("p", { class: "row-msg pending" }, [
+        t("importSurface", "This file also chooses where searches are intercepted:"),
+        " ",
+        el("span", { class: "mono-token", text: Dom.visibleText(engines.join(", ")) }),
+        domains.length > 0 ? " " : null,
+        domains.length > 0
+          ? el("span", {}, [
+              t("importDomains", "and it adds these search domains:"),
+              " ",
+              el("span", { class: "mono-token", text: Dom.visibleText(domains.join(", ")) }),
+            ])
+          : null,
       ]);
     },
 

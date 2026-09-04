@@ -162,7 +162,22 @@ const contextFor = (initial, applied) => {
   };
 };
 
-const shortcutsSection = async () => (await loadSections())[1];
+/**
+ * SECTIONS BY NAME, NOT BY INDEX.
+ *
+ * Two tests written against `[7]` believed they were exercising Transfer and were
+ * exercising Storage -- whose render happens to throw nothing, so the mistake read
+ * as a failing assertion about the section under test rather than as the wrong
+ * section. Indexing a list whose order is a product decision is a trap that only
+ * springs when somebody inserts a section.
+ */
+const sectionNamed = async (name) => {
+  const found = (await loadSections()).find((s) => s === g[name]);
+  assert.ok(found, `no section registered as ${name}`);
+  return found;
+};
+
+const shortcutsSection = async () => sectionNamed("SectionShortcuts");
 
 test("the shortcuts section mounts and paints one row per shortcut", async () => {
   await withDocument(async (doc) => {
@@ -1173,7 +1188,7 @@ test("the export releases its object URL on the next turn, not in this one", asy
  */
 test("a field of the configuration that could not be read is said, in the section named for it", async () => {
   await withDocument(async (doc) => {
-    const section = (await loadSections())[6];
+    const section = await sectionNamed("SectionQuarantine");
     const stored = new g.StoredPolicy(g.JumpPolicy.empty(), []);
     const root = doc.createElement("div");
     const ctx = {
@@ -1218,7 +1233,7 @@ test("a field of the configuration that could not be read is said, in the sectio
 
 test("the section stays hidden when nothing was set aside and nothing was unreadable", async () => {
   await withDocument(async (doc) => {
-    const section = (await loadSections())[6];
+    const section = await sectionNamed("SectionQuarantine");
     const stored = new g.StoredPolicy(g.JumpPolicy.empty(), []);
     const root = doc.createElement("div");
     const ctx = contextFor(stored, []);
@@ -1255,5 +1270,69 @@ test("every code the admission door can put in `unreadable` has a sentence", asy
     for (const code of Object.keys(table)) {
       assert.ok(produced.has(code), `${code} has a sentence but nothing produces it`);
     }
+  });
+});
+
+/**
+ * THE REVIEW SCREEN SHOWS THE SURFACE, NOT ONLY THE DESTINATIONS.
+ *
+ * `toTransfer()` carries `engines` and `customEngines` beside the shortcuts, and
+ * this screen built its rows from shortcuts alone while its lede promised "check
+ * where each key would send you". Measured before the fix: a file adding
+ * `intra.attacker.example` and ticking it showed ONE row, and once the user armed
+ * that shortcut it emitted TWO rules -- the second on a host that had never
+ * appeared on screen.
+ *
+ * The Access section and the browser prompt caught it one step later, which is why
+ * this was consent to the surface rather than a breach. The screen is now
+ * complete at the first step.
+ */
+test("the import review names the engines and domains the file selects", async () => {
+  await withDocument(async (doc) => {
+    const section = await sectionNamed("SectionTransfer");
+    const stored = new g.StoredPolicy(g.JumpPolicy.empty(), []);
+    const root = doc.createElement("div");
+    const ctx = contextFor(stored, []);
+    section.mount(root, ctx);
+
+    section.proposal = g.JumpPolicy.proposeImport({
+      schemaVersion: 1,
+      engines: ["google.com", "custom:intra.attacker.example"],
+      customEngines: [{ host: "intra.attacker.example", shape: "root-q" }],
+      shortcuts: [{ id: "11111111-1111-4111-8111-111111111111", key: "ABC", baseUrl: "https://example.atlassian.net" }],
+    });
+    assert.equal(section.proposal.ok, true);
+    section.render(stored, ctx);
+
+    const shown = root.textContent;
+    assert.ok(shown.includes("example.atlassian.net"), "the destination is still shown");
+    assert.ok(shown.includes("google.com"), "the ticked engines must be named");
+    assert.ok(
+      shown.includes("intra.attacker.example"),
+      "a domain the file adds must appear before the user confirms",
+    );
+    assert.ok(shown.includes("where searches are intercepted"), "and it must say what that list is");
+  });
+});
+
+test("a file that carries only shortcuts adds no surface line", async () => {
+  await withDocument(async (doc) => {
+    const section = await sectionNamed("SectionTransfer");
+    const stored = new g.StoredPolicy(g.JumpPolicy.empty(), []);
+    const root = doc.createElement("div");
+    const ctx = contextFor(stored, []);
+    section.mount(root, ctx);
+    section.proposal = g.JumpPolicy.proposeImport({
+      schemaVersion: 1,
+      shortcuts: [{ id: "11111111-1111-4111-8111-111111111111", key: "ABC", baseUrl: "https://example.atlassian.net" }],
+    });
+    section.render(stored, ctx);
+    // A section that has nothing to say says nothing -- the same rule as the
+    // quarantine's two labels.
+    assert.equal(
+      root.textContent.includes("where searches are intercepted"),
+      false,
+      "no engines and no domains means no line",
+    );
   });
 });

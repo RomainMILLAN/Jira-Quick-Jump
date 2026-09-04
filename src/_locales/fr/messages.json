@@ -721,5 +721,11 @@
   },
   "factDomainsReshaped": {
     "message": "L'adresse sur laquelle un domaine de recherche est intercepté a changé, d'autres recherches sont donc capturées :"
+  },
+  "importSurface": {
+    "message": "Ce fichier choisit aussi où les recherches sont interceptées :"
+  },
+  "importDomains": {
+    "message": "et il ajoute ces domaines de recherche :"
   }
 }
