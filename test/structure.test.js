@@ -1123,11 +1123,24 @@ test("a refused string is shown with its bidi controls REMOVED, not merely isola
   // character class as a source string, which put three unwritten obligations on
   // this file -- wrap, compile, and remember the `g`. Forgetting the `g` replaces
   // only the FIRST character: a control that works halfway, in silence.
-  assert.equal(
-    /new RegExp\(/.test(codeOf(read("src/ui/dom.js"))),
-    false,
-    "ui/dom.js must compile no regex of its own: the domain owns rule and application",
-  );
+  //
+  // THE WHOLE INTERFACE, not just dom.js. This assertion covered one file while
+  // SECURITY.md claimed "a test refuses any regex compiled in the interface" --
+  // a sentence wider than its test, which is the class of defect that batch
+  // existed to close. The code already passed; only the pin was narrow.
+  //
+  // Why the interface at all: a regex compiled in `ui/` is either a rule that
+  // belongs to the domain (and will drift from it) or a parser on a surface that
+  // has no business parsing. Both have doors. If a legitimate need ever appears,
+  // it gets a reviewed exit like downloadFile and dragHandle -- not a widening.
+  for (const file of srcFiles()) {
+    if (!file.startsWith("src/ui/")) continue;
+    assert.equal(
+      /new RegExp\(/.test(codeOf(read(file))),
+      false,
+      `${file} compiles a regex: the domain owns the rule AND its application`,
+    );
+  }
 
   // THE WIDER CLASS IS WHAT IS ACTUALLY STRIPPED. The bidi loop above is the
   // attack that was measured; these are the characters the previous copy dropped.

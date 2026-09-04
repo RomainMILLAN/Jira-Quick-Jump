@@ -140,8 +140,11 @@ trade rather than leave stale rules firing under a badge that says `off`.
   the duplication and opened something worse: a control whose correctness rested
   on the caller remembering three things, one of which — the global flag — halves
   it in silence, replacing only the first character. The domain owns the rule and
-  its application, the interface asks, and a test refuses any regex compiled in
-  the interface at all.
+  its application, the interface asks, and a test refuses any regex compiled
+  anywhere under `src/ui/`.
+  That test used to read one file while this sentence said "the interface" — a
+  claim wider than its pin, which is exactly the defect the batch was closing. The
+  code passed either way; the sentence was the part that was wrong.
 - **A change nobody claims raises the banner, and "nobody claims" now includes the
   added search domains.** The detector compared the ticked *selection* and ignored
   the *catalogue* it draws from, in both of its halves: no fact was produced for a
