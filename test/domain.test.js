@@ -1183,6 +1183,39 @@ test("the empreinte moves for every change the diff can report", () => {
     "two domains that do not intercept the same URLs must not share a fingerprint",
   );
 
+  /**
+   * THE COMPOSED PARTS ARE SERIALISED, NOT CONCATENATED.
+   *
+   * A domain's entry was `${e.id()}|${e.shape()}` -- a joined key, the shape
+   * local-acknowledgements.js refuses in eight lines ("the parts are pasted with a
+   * separator that a part could contain"). Latent, because neither part can hold a
+   * `|`; and latent is exactly the status this repository decided not to live with
+   * for the twin table.
+   *
+   * Pinned STRUCTURALLY, because no input can exhibit the collision: the parse
+   * refuses a `|` in both parts, so a behavioural test would be vacuous.
+   */
+  const domainsOf = (policy) => JSON.parse(policy.fingerprint())[2];
+  const oneDomain = base().withCustomEngine(engine("intra.example.org")).value;
+  assert.deepEqual(domainsOf(oneDomain), [["custom:intra.example.org", "search-q"]],
+    "a domain's entry must be a PAIR, not a string with a separator in it");
+  for (const entry of domainsOf(oneDomain)) {
+    assert.ok(Array.isArray(entry), "a composed key is serialised, never joined");
+  }
+
+  // AND THE ORDER OF THAT LIST DECIDES NOTHING. The default comparator would
+  // coerce each pair to "id,shape" -- a joined string one axis over -- and a
+  // collision under that coercion would order by input position, so the
+  // fingerprint would depend on the order of a list nothing orders.
+  const pair = (a, b) => base()
+    .withCustomEngine(engine(a)).value
+    .withCustomEngine(engine(b)).value.fingerprint();
+  assert.equal(
+    pair("a.example.org", "b.example.org"),
+    pair("b.example.org", "a.example.org"),
+    "the order of the added domains must not move the fingerprint",
+  );
+
   // And it does NOT move for what changes nothing: an empreinte that shifts on its
   // own is a false alarm, which is the other way this detector can fail.
   assert.equal(base().fingerprint(), before.fingerprint(), "the same policy, twice");

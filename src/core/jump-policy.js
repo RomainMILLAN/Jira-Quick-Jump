@@ -570,13 +570,35 @@
         //
         // Sorted, like the engine ids beside it: the order of this list decides
         // nothing, and an empreinte that changes when nothing did is a false alarm.
-        // THE SHAPE TRAVELS WITH THE ID, because it is not in it. `id()` is
-        // `custom:<host>`, so two engines that do NOT intercept the same URLs
-        // share one -- and two policies differing only by a domain's shape used
-        // to share a fingerprint, which let a claim posted by an unrelated edit
-        // silence a live change of interception path. See PolicyDiff, which
-        // compares the same signature.
-        this._customEngines.map((e) => `${e.id()}|${e.shape()}`).sort(),
+        /**
+         * THE SHAPE TRAVELS WITH THE ID, because it is not in it. `id()` is
+         * `custom:<host>`, so two engines that do NOT intercept the same URLs
+         * share one -- and two policies differing only by a domain's shape used
+         * to share a fingerprint, which let a claim posted by an unrelated edit
+         * silence a live change of interception path. See PolicyDiff, which
+         * compares the same pair.
+         *
+         * A PAIR, NOT A JOINED STRING, and local-acknowledgements.js spends eight
+         * lines on why: "`[id, baseUrl, nature].join(" ")` reads as a key and is
+         * not one: the parts are pasted with a separator that a part could
+         * contain, so two different triples can spell the same row […] latent
+         * flaws in a table that decides whether a universal redirector may arm
+         * itself are exactly the ones to close early." That file closed it with
+         * JSON; this one WAS `${e.id()}|${e.shape()}` -- the same flaw, in the
+         * claim token of the detector itself. Neither part can hold a `|` today,
+         * so it was latent, which is precisely the status the repository decided
+         * not to live with.
+         *
+         * SORTED BY ID, EXPLICITLY. The default comparator would coerce each pair
+         * to `"id,shape"` -- a joined string again, one axis over -- and two pairs
+         * colliding under that coercion would order by input position, making the
+         * fingerprint depend on the order of a list that decides nothing. Sorting
+         * on the id alone is total because an id is unique within a policy:
+         * withCustomEngine refuses a duplicate.
+         */
+        this._customEngines
+          .map((e) => [e.id(), e.shape()])
+          .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0)),
         this._registry.shortcuts().map((s) => [
           s.id(),
           s.keyText(),
