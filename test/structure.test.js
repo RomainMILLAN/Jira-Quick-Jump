@@ -1929,3 +1929,43 @@ test("the host keeps the last read as one value, not as two variables", () => {
   const writes = body.match(/\bread = \{/g) || [];
   assert.equal(writes.length, 3, `three assignments expected (the initial one and the two reads), got ${writes.length}`);
 });
+
+/**
+ * A RULE READ BACK FROM THE STORE ENTERS BY ITS DOOR, and the constructor is not
+ * one.
+ *
+ * `InstalledRule.of` was introduced to close a fail-open: a condition carrying
+ * `urlFilter` and no `regexFilter` -- a shape DNR allows and this build never
+ * writes -- made `new RegExp(undefined)` into `/(?:)/`, which matches EVERY url,
+ * so the preview would affirm a destination for any input at all.
+ *
+ * Introducing the door EMPTIED the constructor of every check, which was the
+ * point. It also rearmed the fail-open for whoever calls it directly. Measured,
+ * after the door shipped:
+ *
+ *   InstalledRule.of(rule without regexFilter)  ->  undefined        (refused)
+ *   new InstalledRule(the same raw rule)        ->  an object
+ *     .regexFilter()                            ->  undefined
+ *     new RegExp(undefined)                     ->  /(?:)/  matches everything
+ *
+ * The caller's guard (`if (!rule) continue`) only protects the door: an object
+ * built directly is truthy. So the door is the only entrance, and this says so.
+ */
+test("a rule read back from the store enters only by InstalledRule.of", () => {
+  for (const file of srcFiles()) {
+    if (file === "src/interception/installed-rule.js") continue;
+    assert.equal(
+      /new InstalledRule\(/.test(codeOf(read(file))),
+      false,
+      `${file}: the constructor validates NOTHING -- go through InstalledRule.of`,
+    );
+  }
+  // And inside its own file, exactly one construction: the door's.
+  const owner = codeOf(read("src/interception/installed-rule.js"));
+  const built = owner.match(/new InstalledRule\(/g) || [];
+  assert.equal(built.length, 1, "the door is the only place that constructs one");
+  assert.match(owner, /InstalledRule\.of = function/, "the door must still exist");
+  // The constructor takes NAMED FIELDS, so a raw DNR rule handed to it cannot be
+  // mistaken for a valid call -- it would destructure to undefined everywhere.
+  assert.match(owner, /constructor\(\{ band, id, actionType, regexFilter, caseSensitive, substitution \}\)/);
+});
