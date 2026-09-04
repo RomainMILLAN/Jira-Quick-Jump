@@ -162,6 +162,18 @@ trade rather than leave stale rules firing under a badge that says `off`.
   the fingerprint. A test asserts the general rule rather than the field: anything
   the diff can report must move the fingerprint, or an unrelated edit can silence
   it.
+  **AND THE SHAPE FOLLOWS THE HOST, which that first fix did not cover.** A custom
+  domain's identity is `custom:<host>` — **the shape is not in it** — so the two
+  comparisons answered "which domains" and said nothing about "how each one
+  intercepts". Measured: the same host under `search-q` and under `root-q` shares
+  an id, produces no fact and yields an identical fingerprint, while one
+  intercepts `/search?q=…` and the other `/?q=…`. A sync account rewriting that
+  one field moved a live rule onto another path of a host whose permission was
+  **already granted**, in silence. Both readers now compare the host *and* its
+  shape, and a reshaping is a fact of its own, named after what changed. The
+  lesson is about the test as much as the code: the pin meant to hold this
+  enumerated mutations, so it covered the ones its author had imagined — and this
+  was not among them.
 - **A search-engine shape is looked up in a Map, and that is a security control.**
   The URL shape of a custom domain is chosen from a closed set — a user-supplied
   path or query parameter would mean a user-supplied regex — and the airlock is
