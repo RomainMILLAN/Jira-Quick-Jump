@@ -134,6 +134,14 @@ trade rather than leave stale rules firing under a badge that says `off`.
   already-admitted policy, and the sync channel does not reach `storage.local`),
   so this half is defence in depth. The falsified sentence was the real defect:
   it is what would have stopped the next reader from looking.
+  **THE DOMAIN ANSWERS THE QUESTION; IT NO LONGER HANDS OVER THE CLASS.** The
+  first version of this fix *exported* the character class as a source string,
+  which the interface then wrapped in brackets and compiled itself. That closed
+  the duplication and opened something worse: a control whose correctness rested
+  on the caller remembering three things, one of which — the global flag — halves
+  it in silence, replacing only the first character. The domain owns the rule and
+  its application, the interface asks, and a test refuses any regex compiled in
+  the interface at all.
 - **A change nobody claims raises the banner, and "nobody claims" now includes the
   added search domains.** The detector compared the ticked *selection* and ignored
   the *catalogue* it draws from, in both of its halves: no fact was produced for a
@@ -169,6 +177,13 @@ trade rather than leave stale rules firing under a badge that says `off`.
   rather than a literal is now prototype-free too — none of them was reachable,
   which is exactly when the guard is free, and a file where one table is hardened
   and its neighbour is not teaches the next reader that the rule is optional.
+  **WHICH OF THE TWO SHAPES A TABLE TAKES IS NOW WRITTEN DOWN**, beside the
+  project's other vocabulary convention: a key that crosses a frontier — the
+  configuration, the journal, the rule store, an imported file — takes a `Map`,
+  read with `.get()`; a key that is a literal of ours may stay a prototype-free
+  object. The distinction is not taste. Both stop the prototype walk; only the
+  `Map` stops the *mistake*, because the bracket becomes inexpressible instead of
+  merely harmless until somebody refactors the hardening away.
 - **The cap on ticked search engines is derived from what can exist.** It was 64,
   under a comment reading "the number of engines that can exist: the built-in
   catalogue plus the custom domains, themselves capped" — which is 24. A ticked id
@@ -193,6 +208,25 @@ trade rather than leave stale rules firing under a badge that says `off`.
   it is visible: an id that is not kept is an engine whose chip shows unticked.
   `shortcuts` and `customEngines` keep refusing the document, three lines away,
   because truncating those would delete something the user made.
+  **THE BOUND COUNTS WHAT WAS READ, NOT WHAT ARRIVED**, and the first version of
+  this fix got that wrong. It sliced the raw list before a single identity had
+  been read, so an id the door refuses three lines later had already consumed a
+  slot — and the eviction order therefore belonged to whoever wrote the document.
+  Measured: 24 malformed ids followed by `google.com` left **zero** engines. There
+  are now two bounds with two jobs, the same shape as the 40-character custom
+  domain facing the RE2 budget: a cheap absolute guard on the raw length, whose
+  job is termination and which refuses the document outright, and the selection
+  ceiling, which counts admitted ids so that nothing a later line refuses can cost
+  a place. The residual, stated: an adversary can still pad with a full ceiling's
+  worth of **valid** ids — which is exactly what a legitimate configuration can do.
+  **AND THE CEILING BELONGS TO THE AGGREGATE.** It lived at the admission door
+  alone, so a policy built anywhere else could hold any number of ticked engines:
+  an invariant held at one door is a filter, not an invariant. The domain now
+  refuses it beside its two neighbours (200 shortcuts, 300 rules), and the door
+  receives from the layer that knows the catalogue what *this build* can actually
+  use — a value it may only narrow, never widen, with a post-condition that throws
+  rather than clamps. The number 4 has left `core/`, where it asserted something
+  the domain cannot verify.
 - **Reordering goes through one door, whatever the affordance.** The arrows and the
   drag handle share a single write path: an absolute intention carrying the whole
   ordered list, settled by a compare-and-set that refuses any mismatch of the id
