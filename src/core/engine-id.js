@@ -45,21 +45,25 @@
    * `google` would otherwise resolve to nothing, and an existing configuration
    * would quietly stop working.
    *
-   * NULL-PROTOTYPED, because `raw` comes from the configuration.
+   * A MAP, because `raw` comes from the CONFIGURATION -- see the table-shape rule
+   * in core/mutation-result.js.
    *
    * `LEGACY[raw]` with `raw === "constructor"` answered the Object function on a
    * plain literal, and `const written = LEGACY[raw] || raw` then carried a
    * FUNCTION into SHAPE.test() -- which refused it, so the door failed closed by
    * accident rather than by design. The sibling table in
    * search-engine-catalog.js had the same shape and did NOT fail closed (it
-   * purged every rule), which is what makes this worth changing rather than
-   * arguing about.
+   * purged every rule).
+   *
+   * Prototype-free would have been enough to make it safe; a Map makes the
+   * bracket inexpressible, which is what keeps it safe through the next
+   * refactoring.
    */
-  const LEGACY = Object.freeze(Object.assign(Object.create(null), {
-    google: "google.com",
-    bing: "bing.com",
-    duckduckgo: "duckduckgo.com",
-  }));
+  const LEGACY = new Map([
+    ["google", "google.com"],
+    ["bing", "bing.com"],
+    ["duckduckgo", "duckduckgo.com"],
+  ]);
 
   // A domain, or a domain behind the custom prefix. Deliberately narrow: this
   // value reaches a Map key, a rule label and a permission origin.
@@ -100,7 +104,7 @@
     if (typeof raw !== "string") {
       return { ok: false, code: "ENGINE_ID_NOT_A_STRING", message: "A search engine id must be text." };
     }
-    const written = LEGACY[raw] || raw;
+    const written = LEGACY.get(raw) ?? raw;
     if (!SHAPE.test(written)) {
       return { ok: false, code: "ENGINE_ID_SHAPE", message: "That is not a search engine identifier." };
     }

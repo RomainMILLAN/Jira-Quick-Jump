@@ -1864,15 +1864,35 @@ test("the shape catalogue is a Map, and nothing indexes it with a bracket", () =
   // exploitable today -- their keys are closed sets -- which is exactly when the
   // guard is free, and a file where one table is hardened and its neighbour is not
   // teaches the next reader that the rule is optional.
+  // A KEY THAT CROSSES A FRONTIER TAKES A MAP. The configuration, the journal, the
+  // DNR store, an imported file: anywhere the key is authored by somebody else.
   for (const [file, table] of [
-    ["src/core/engine-id.js", "LEGACY"],
+    ["src/interception/search-engine-catalog.js", "SHAPES"],   // a stored `shape`
+    ["src/core/engine-id.js", "LEGACY"],                        // a ticked engine id
+    ["src/ui/sections/sentences.js", "KIND_NOUN"],              // a journalled fact kind
+  ]) {
+    const body = codeOf(read(file));
+    // The arrow form is admitted: a table of TRANSLATED nouns has to be rebuilt at
+    // call time, because Platform.t is only answerable once the locale is loaded.
+    assert.match(body, new RegExp(`const ${table} = (?:\\(\\) => )?new Map\\(`),
+      `${file}: ${table} is keyed from a frontier, so it takes a Map`);
+    assert.equal(new RegExp(`${table}\\s*\\[`).test(body), false,
+      `${file}: a bracket lookup on ${table} is the prototype walk a Map removes`);
+  }
+
+  // A KEY THAT IS A LITERAL OF OURS may stay an object, hardened. None of these is
+  // exploitable -- a diagnosis code, a warning kind, a priority band, a separator
+  // -- which is exactly when the guard is free, and a file where one table is
+  // hardened and its neighbour is not teaches the next reader that the rule is
+  // optional.
+  for (const [file, table] of [
     ["src/interception/rule-ranking.js", "BANDS"],
     ["src/interception/reference-pattern.js", "IN_URL"],
     ["src/core/shortcut-warning.js", "SCOPES"],
-    ["src/ui/sections/sentences.js", "KIND_NOUN"],
     ["src/ui/sections/sentences.js", "WARNING_MESSAGE"],
     ["src/ui/sections/sentences.js", "PREVIEW_MISS"],
     ["src/ui/sections/sentences.js", "SKIPPED_SENTENCE"],
+    ["src/ui/sections/sentences.js", "UNREADABLE_SENTENCE"],
     ["src/background.js", "BADGE_COLOUR"],
     ["src/ui/diagnosis-presentation.js", "ENTRIES"],
   ]) {

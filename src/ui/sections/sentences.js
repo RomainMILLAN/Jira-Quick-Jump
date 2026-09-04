@@ -15,13 +15,17 @@
   const { CatchAllKey, Dom } = global;
 
   /**
-   * The nouns behind the fact types carried by PolicyReplaced. No prototype: the
-   * keys come from a stored fact, and `{ kinds: ["constructor"] }` would otherwise
-   * resolve through Object.prototype -- the same trap SKIPPED_SENTENCE closes.
-   * An unknown kind maps to undefined and is refused, which is the safe direction:
-   * the count is still said.
+   * The nouns behind the fact types carried by PolicyReplaced.
+   *
+   * A MAP, because the keys come from a STORED FACT -- `{ kinds: ["constructor"] }`
+   * would resolve through Object.prototype on a literal, and `.get()` makes the
+   * bracket inexpressible rather than merely harmless. See the table-shape rule in
+   * core/mutation-result.js.
+   *
+   * An unknown kind answers `undefined` and is filtered out, which is the safe
+   * direction: the count is still said.
    */
-  const KIND_NOUN = () => Object.assign(Object.create(null), {
+  const KIND_NOUN = () => new Map(Object.entries({
     DestinationChanged: t("kindDestination", "destinations"),
     KeyChanged: t("kindKey", "keys"),
     ShortcutArmed: t("kindArmed", "shortcuts switched on"),
@@ -34,7 +38,7 @@
     DomainsAdded: t("kindDomains", "search domains added"),
     DomainsRemoved: t("kindDomainsRemoved", "search domains removed"),
     UnknownFact: t("kindUnknown", "a change this version cannot name"),
-  });
+  }));
 
   const FACT_SENTENCE = (fact) => {
     /**
@@ -113,7 +117,8 @@
         // changed" while ONE read the old and the new host by name. The kinds are
         // a closed vocabulary this repository writes -- unlike an engine id, none
         // of these words is authored by whoever wrote the policy.
-        const said = (fact.kinds || []).map((kind) => KIND_NOUN()[kind]).filter(Boolean);
+        const nouns = KIND_NOUN();
+        const said = (fact.kinds || []).map((kind) => nouns.get(kind)).filter(Boolean);
         if (said.length === 0) {
           return [t("factReplaced", "The whole configuration changed elsewhere. Check every destination.")];
         }
