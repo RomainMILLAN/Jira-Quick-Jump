@@ -140,7 +140,11 @@
   };
 
   const ReferencePattern = {
-    IN_URL,
+    // IN_URL IS NOT PUBLISHED. It is read here, by emit() and by
+    // reservedPrefixGuards, and nothing outside this file ever read the export --
+    // which made it an address with no destinataire on a shared `globalThis`. The
+    // separator forms are URL knowledge; a caller that needed them would be a
+    // caller emitting notation, which is what this file exists to prevent.
 
     /**
      * Everything the airlock needs for one key, decided in ONE place.

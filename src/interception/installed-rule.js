@@ -135,7 +135,13 @@
     });
   };
 
+  // DNR_DEFAULT_PRIORITY is published because a TEST reads it -- "absent means the
+  // DNR default" is the assertion that keeps the normalisation honest.
+  //
+  // DNR_MINIMUM_PRIORITY is NOT, and it arrived with the door: nothing outside
+  // this file ever read it. On a project where every file shares `globalThis` and
+  // "a global name is an address", an address with no destinataire widens the
+  // surface for nothing.
   InstalledRule.DNR_DEFAULT_PRIORITY = DNR_DEFAULT_PRIORITY;
-  InstalledRule.DNR_MINIMUM_PRIORITY = DNR_MINIMUM_PRIORITY;
   global.InstalledRule = InstalledRule;
 })(globalThis);
