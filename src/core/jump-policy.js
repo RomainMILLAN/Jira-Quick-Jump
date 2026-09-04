@@ -388,6 +388,25 @@
           `This would create more than ${MAX_SHORTCUTS} shortcuts.`
         );
       }
+      /**
+       * A CHANGELOCK WITH A SENTENCE, and NOT dead code -- said here so nobody
+       * deletes it as unreachable, and nobody trusts it as a live check either.
+       *
+       * No surface can reach it today: the Engines section builds its selection
+       * from the catalogue itself (four built-in plus at most twenty custom, so 24
+       * by construction), and the storage door truncates before calling
+       * withEngines. Its translated sentence is therefore one no user will read.
+       *
+       * It stays because the two alternatives are worse. Remove the refusal and
+       * the ceiling goes back to being enforced at one door only -- a filter on
+       * documents, not an invariant of the aggregate, which is what let
+       * `withEngines([...200 ids...])` produce a valid policy. Remove the sentence
+       * and the day it becomes reachable a bare code appears on screen.
+       *
+       * What would make it reachable: a section that ticks an id it did not get
+       * from the catalogue, or a door that stops truncating. Both are exactly the
+       * changes this refusal exists to catch.
+       */
       if (policy.engineIds().length > MAX_ENGINES) {
         return MutationResult.refused(
           "ENGINE_LIMIT",

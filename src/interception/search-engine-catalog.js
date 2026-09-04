@@ -72,6 +72,14 @@
       // costly engine loses its catch-all instead of the whole programme being
       // purged under the anonymous cause UNKNOWN. A bare Error here was the last
       // mute path of this file.
+      //
+      // `global.Re2Budget` IS RESOLVED AT CALL TIME, and it has to be: this file
+      // is loaded BEFORE interception/re2-budget.js in all five lists. What makes
+      // that safe is that `build()` only ATTACHES searchUrlPattern and
+      // guardEnvelopeCost -- it never calls them -- so no resolution happens while
+      // the module is loading. Call either one at load time and this line becomes
+      // a TypeError at service-worker startup. Verified, and written down because
+      // the safety rests on a non-invocation rather than on the order.
       throw global.Re2Budget.refusal("QUERY_PARAM_TOO_LONG", { word: queryParam });
     }
     return `(?:(?:[^=&%${queryParam}][^=&]*|${queryParam}[^=&]+)?=[^&]*&)*`;
