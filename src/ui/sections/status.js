@@ -126,6 +126,14 @@
       try {
         await this.renderBanner(ctx);
       } catch (error) {
+        // THE FALLBACK NAMES THE JOURNAL, and one cause it cannot name is not the
+        // journal: FACT_SENTENCE prints through Dom.visibleText, which asks
+        // ProjectKey for the deceptive-character class. If the load order ever put
+        // ui/ before core/, that call would throw and this sentence would accuse
+        // the record of being unreadable when the record is fine. The five loading
+        // lists are pinned against each other by structure.test.js, so the case is
+        // remote -- and the direction is right either way: it fails closed and
+        // loud rather than printing an unsanitised host.
         this.banner.hidden = false;
         Dom.clear(this.banner);
         this.banner.appendChild(el("div", {
