@@ -199,6 +199,15 @@ trade rather than leave stale rules firing under a badge that says `off`.
   object. The distinction is not taste. Both stop the prototype walk; only the
   `Map` stops the *mistake*, because the bracket becomes inexpressible instead of
   merely harmless until somebody refactors the hardening away.
+  **WHAT THAT TRADE COST, and it was a real one:** `Object.freeze` does nothing to
+  a Map, so converting a frozen table lost the freezing. Measured, one
+  `EngineId.LEGACY.set("google", "evil.example")` from any file loaded afterwards
+  turned that id's migration into another host — and every file of this extension
+  shares one global scope, which is the argument the parsers freeze their own
+  constants on. A Map cannot be frozen, so the equivalent is not to publish it:
+  the three tables keyed from a frontier are now module-private, which was free
+  because nothing outside their own file ever read them. A test refuses any of
+  them reappearing on the global object.
 - **The cap on ticked search engines is derived from what can exist.** It was 64,
   under a comment reading "the number of engines that can exist: the built-in
   catalogue plus the custom domains, themselves capped" — which is 24. A ticked id
@@ -308,6 +317,19 @@ trade rather than leave stale rules firing under a badge that says `off`.
   catch-all can never outlive its guards; the cost is availability, per engine.
   A domain long enough to reach that point is also refused at the door it is typed
   at, which is the only place a sentence can still help.
+- **An imported file is reviewed for its destinations AND for its surface.**
+  Everything imported arrives disarmed with no acknowledgements, so no rule can
+  install until each shortcut is armed in front of its destination — and the review
+  screen shows those destinations was/now. What it did **not** show is that a
+  configuration file also chooses *where searches are intercepted*: which engines
+  are ticked, and which search domains are added. Measured: a file adding one
+  domain and ticking it displayed a single row — the shortcut — and, once that
+  shortcut was armed, emitted two rules, the second on a host that had never
+  appeared on screen. Nothing fired unseen (the Access section then asks for that
+  host and the browser prompt names it, which is what bounded this to a
+  transparency gap rather than a breach), but the consent given at the first step
+  did not cover what the file had chosen. The screen now names the engines and the
+  added domains before the confirm button.
 - **No acknowledgement travels with the configuration. Not one.** Accepting a
   warning — the catch-all's, or a destination's — is recorded in local storage,
   outside the configuration, so a compromised sync account cannot accept a
