@@ -630,3 +630,34 @@ test("a custom domain cannot spend the whole alternation budget", () => {
   assert.equal(refused.ok, false);
   assert.equal(refused.code, "HOST_TOO_LONG");
 });
+
+test("the door may narrow the aggregate's ceiling, never widen it", () => {
+  /**
+   * TWO CEILINGS THAT ARE NOT THE SAME THING.
+   *
+   * `JumpPolicy.MAX_ENGINES` bounds what a policy may HOLD, whatever door it came
+   * through. `maxEngines` bounds what THIS BUILD can actually use, and only the
+   * layer that knows the catalogue can say it. A caller passing a wider value
+   * would bypass the aggregate's invariant through a parameter -- the mode flag
+   * admission.js condemns in its own header.
+   */
+  const engines = Array.from({ length: 10 }, (_, i) => `e${i}.example`);
+  const document = { schemaVersion: 1, armed: true, engines, shortcuts: [] };
+
+  // Narrower: honoured.
+  assert.deepEqual(
+    g.JumpPolicy.restore(document, { maxEngines: 3 }).policy.engineIds(),
+    engines.slice(0, 3),
+  );
+  // Absent: the domain's own ceiling, never the absence of one.
+  assert.equal(g.JumpPolicy.restore(document).policy.engineIds().length, 10);
+
+  // Wider, or nonsense: a programming error, loud.
+  for (const bad of [g.JumpPolicy.MAX_ENGINES + 1, 0, -1, 1.5, "24", null, NaN]) {
+    assert.throws(
+      () => g.JumpPolicy.restore(document, { maxEngines: bad }),
+      /cannot widen/,
+      `maxEngines ${JSON.stringify(bad)} was accepted`,
+    );
+  }
+});

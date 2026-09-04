@@ -166,7 +166,7 @@
     }
   };
 
-  const readDocument = (raw) => {
+  const readDocument = (raw, maxEngines) => {
     if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
       return refuse("NOT_A_DOCUMENT", "The configuration must be an object.");
     }
@@ -287,7 +287,7 @@
       // THE SELECTION BOUND, on what has been ADMITTED. Placed before the parse
       // so a full list stops costing work, and after nothing else so a refused or
       // duplicate id cannot occupy a slot.
-      if (engines.length >= MAX_ENGINES) {
+      if (engines.length >= maxEngines) {
         truncatedEngines += 1;
         continue;
       }
@@ -478,8 +478,32 @@
    * hardened validator rejects entries that were legitimate before, and it hits
    * the self-hosted user first.
    */
-  JumpPolicy.restore = function (raw, { trustsSavedConsent = false } = {}) {
-    const document = readDocument(raw);
+  JumpPolicy.restore = function (raw, { trustsSavedConsent = false, maxEngines = MAX_ENGINES } = {}) {
+    /**
+     * THE DOOR MAY BE STRICTER THAN THE AGGREGATE, NEVER LOOSER.
+     *
+     * Two ceilings that are NOT the same thing, and conflating them is what this
+     * post-condition exists to prevent:
+     *
+     *   JumpPolicy.MAX_ENGINES  what a policy may HOLD -- the domain's decision,
+     *                           enforced by _guarded, whatever door it came through.
+     *   maxEngines              what THIS BUILD can actually use -- known to the
+     *                           catalogue alone, and passed in by the layer that
+     *                           knows both sides.
+     *
+     * A caller passing a wider ceiling would bypass the aggregate's invariant
+     * THROUGH A PARAMETER, which is the mode flag this file's header condemns. It
+     * throws rather than clamping: a caller asking for more than the domain allows
+     * is a programming error, not a refusal a user should read.
+     *
+     * The default is the domain's own value -- so a caller who forgets the option
+     * gets the ceiling, never the absence of one. Same shape as
+     * `trustsSavedConsent = false`: forgetting costs a click, never a control.
+     */
+    if (!Number.isInteger(maxEngines) || maxEngines < 1 || maxEngines > MAX_ENGINES) {
+      throw new Error("the door cannot widen the aggregate's ceiling on ticked engines");
+    }
+    const document = readDocument(raw, maxEngines);
     if (!document.ok) return document;
 
     const seeded = JumpPolicy.empty().withEngines(document.value.engines);
@@ -524,7 +548,9 @@
         }
       }
     }
-    const document = readDocument(raw);
+    // The IMPORT door takes the domain's ceiling and nothing else: a file is not
+    // a device, so there is no build-specific narrowing to apply to it.
+    const document = readDocument(raw, MAX_ENGINES);
     if (!document.ok) return document;
 
     const seeded = JumpPolicy.empty().withEngines(document.value.engines);

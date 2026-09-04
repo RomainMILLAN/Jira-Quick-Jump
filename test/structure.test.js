@@ -1811,6 +1811,15 @@ test("the engine cap and the shipped catalogue cannot drift apart", async () => 
   // AND THE TWO BOUNDS OF THIS DOOR STAY DISTINCT. The raw guard exists for
   // termination, the ceiling for selection; equal, one of them is decoration.
   assert.ok(core.ShortcutAdmission.MAX_RAW_ENGINES > core.ShortcutAdmission.MAX_ENGINES);
+
+  // AND THE REPOSITORY WIRES THE REAL SIZE. Without this the injection point
+  // exists and nobody uses it, so the door silently falls back to the domain's
+  // ceiling and the catalogue's real size stops being consulted at all.
+  assert.match(
+    read("src/policy-repository.js"),
+    /maxEngines:\s*global\.SearchEngineCatalog\.all\(\)\.length\s*\+\s*ShortcutAdmission\.MAX_CUSTOM_ENGINES/,
+    "policy-repository must pass what this build can actually use",
+  );
 });
 
 /**

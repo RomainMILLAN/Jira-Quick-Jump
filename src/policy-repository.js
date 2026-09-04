@@ -67,6 +67,16 @@
     ) {
       if (value === undefined) return { ok: true, stored: StoredPolicy.empty(), refused: [], unreadable: [] };
       const restored = JumpPolicy.restore(value.policy === undefined ? value : value.policy, {
+        /**
+         * WHAT THIS BUILD CAN ACTUALLY USE, passed by the layer that knows both
+         * sides. `core/` holds opaque engine identities and must not ask the
+         * catalogue how many engines ship -- it used to spell the number 4 itself,
+         * under a name that asserted what it could not verify.
+         *
+         * The aggregate keeps its own ceiling and refuses anything above it; this
+         * only NARROWS, and restore() throws if a caller tries to widen.
+         */
+        maxEngines: global.SearchEngineCatalog.all().length + ShortcutAdmission.MAX_CUSTOM_ENGINES,
         // ONLY THE LOCAL AREA IS BELIEVED about what a user was shown. A synced
         // document is written by an account, not by this browser: see
         // Consent.toJSON for the measured attack this closes.
