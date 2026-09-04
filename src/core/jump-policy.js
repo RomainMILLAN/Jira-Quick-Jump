@@ -523,6 +523,14 @@
      * IT CARRIES NOTHING OF THE STORAGE ENVELOPE -- no revision, no writer token.
      * That is the whole point: a claim built on this cannot be forged by copying
      * an envelope, because there is no envelope in it.
+     *
+     * ITS CONTRACT IS "EVERYTHING THE DIFF CAN REPORT", and the contract is held
+     * by a test rather than by this comment: `test/domain.test.js`, "the empreinte
+     * moves for every change the diff can report", walks the mutations one by one.
+     *
+     * Read that test before adding a field to PolicyDiff: a diffed field absent
+     * from here means a claim posted by an unrelated edit can cover somebody
+     * else's change, which is how the added domains stayed silent.
      */
     fingerprint() {
       return JSON.stringify([
