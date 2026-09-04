@@ -319,12 +319,12 @@ test("InstalledRule normalises ONCE, and the forge keeps its own canary", () => 
     action: { type: "redirect", redirect: { regexSubstitution: "https://x.example.org/browse/\\1" } },
     condition: { regexFilter: "ABC-(\\d+)", isUrlFilterCaseSensitive: false },
   };
-  const absent = new g.InstalledRule(raw);
+  const absent = g.InstalledRule.of(raw);
   assert.equal(absent.band(), g.InstalledRule.DNR_DEFAULT_PRIORITY, "absent means the DNR default");
   assert.equal(absent.isCatchAll(), true, "the default band IS the catch-all band");
-  assert.equal(new g.InstalledRule({ ...raw, priority: 0 }).isCatchAll(), true, "0 is below the floor");
-  assert.equal(new g.InstalledRule({ ...raw, priority: 7 }).isCatchAll(), false, "7 is kept as it is");
-  assert.equal(new g.InstalledRule({ ...raw, priority: g.RuleRanking.NAMED }).isCatchAll(), false);
+  assert.equal(g.InstalledRule.of({ ...raw, priority: 0 }).isCatchAll(), true, "0 is below the floor");
+  assert.equal(g.InstalledRule.of({ ...raw, priority: 7 }).isCatchAll(), false, "7 is kept as it is");
+  assert.equal(g.InstalledRule.of({ ...raw, priority: g.RuleRanking.NAMED }).isCatchAll(), false);
 
   // The three NAMED accessors, which is what makes a membrane rather than a wrapper:
   // no caller reads .condition. or .action. any more.
@@ -334,7 +334,7 @@ test("InstalledRule normalises ONCE, and the forge keeps its own canary", () => 
   // DNR's own default for isCaseSensitive is TRUE, so ABSENT means case-SENSITIVE.
   assert.equal(absent.caseSensitive(), false, "explicit false");
   assert.equal(
-    new g.InstalledRule({ ...raw, condition: { regexFilter: "X" } }).caseSensitive(),
+    g.InstalledRule.of({ ...raw, condition: { regexFilter: "X" } }).caseSensitive(),
     true,
     "absent means the platform default, which is sensitive");
 
@@ -1308,8 +1308,9 @@ test("a rule read back without a usable regex is unreadable, never universal", (
   // The language's own answer, pinned so the reason this matters stays visible.
   assert.equal(new RegExp(undefined).test("https://anything.example/"), true);
 
-  const rule = new g.InstalledRule(raw);
-  assert.equal(rule.regexFilter(), undefined, "an absent regex must read as unreadable");
+  // THE DOOR ANSWERS NOTHING, rather than an object whose accessors answer
+  // nothing. One guard at the caller instead of three.
+  assert.equal(g.InstalledRule.of(raw), undefined, "a rule with no regex is an absence");
 
   // And the preview SKIPS it rather than compiling it.
   const verdict = g.JumpPreview.forSearchUrl("https://www.google.com/search?q=ABC-1", [raw]);
@@ -1328,12 +1329,21 @@ test("a rule read back with no action or no condition does not throw", () => {
     { id: 4, priority: 3, action: null, condition: null },
     {},
   ]) {
-    const rule = new g.InstalledRule(raw);
-    assert.equal(typeof rule.band(), "number", `band unreadable for ${JSON.stringify(raw)}`);
-    // Whatever is missing, nothing here is a compiled universal regex.
-    if (rule.regexFilter() !== undefined) assert.equal(typeof rule.regexFilter(), "string");
-    if (rule.substitution() !== undefined) assert.equal(typeof rule.substitution(), "string");
+    const rule = g.InstalledRule.of(raw);
+    // Every one of these is missing something the simulation needs, so the door
+    // answers nothing -- and nothing here is ever a compiled universal regex.
+    assert.equal(rule, undefined, `${JSON.stringify(raw)} produced a rule`);
   }
+  // AND A COMPLETE RULE STILL COMES THROUGH, or the door refuses everything and
+  // the test above would pass on a broken one.
+  const whole = g.InstalledRule.of({
+    id: 5, priority: g.RuleRanking.NAMED,
+    action: { type: "redirect", redirect: { regexSubstitution: "https://x.example/browse/\\1" } },
+    condition: { regexFilter: "ABC-(\\d+)", isUrlFilterCaseSensitive: false },
+  });
+  assert.equal(typeof whole.band(), "number");
+  assert.equal(whole.regexFilter(), "ABC-(\\d+)");
+  assert.equal(whole.caseSensitive(), false);
   // And the preview survives a store full of them, saying NO_MATCH rather than
   // blaming the user's text.
   const verdict = g.JumpPreview.forSearchUrl("https://www.google.com/search?q=ABC-1", [

@@ -75,15 +75,12 @@
       // which rule-ranking.js says it is careful never to depend on. It plays in our
       // favour (the allow wins, the guard holds) but it becomes DECISIVE instead of
       // occasional.
-      const rule = new InstalledRule(raw);
-      // A RULE WITH NO READABLE REGEX TELLS US NOTHING, and it must not be
-      // compiled. `new RegExp(undefined)` is `/(?:)/`, which matches EVERY url --
-      // so a condition carrying `urlFilter` instead of `regexFilter` (a shape DNR
-      // allows and this build never writes) would make the preview affirm a
-      // destination for any input at all. Skipped, exactly like an action we
-      // cannot simulate twelve lines below: silence about a rule we cannot read
-      // beats an answer we never computed.
-      if (rule.regexFilter() === undefined) continue;
+      // ONE GUARD, at the door, instead of three accessors that could each answer
+      // nothing. A rule this build cannot simulate tells us nothing about where
+      // this reference goes -- see InstalledRule.of for the two shapes and for
+      // why one of them was a fail-open.
+      const rule = InstalledRule.of(raw);
+      if (!rule) continue;
       // Flags are DERIVED FROM THE RULE, never hand-written: otherwise the
       // regression net would validate a different regex from the one shipped.
       const flags = rule.caseSensitive() ? "" : "i";

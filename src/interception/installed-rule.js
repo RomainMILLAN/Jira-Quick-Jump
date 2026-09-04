@@ -39,61 +39,24 @@
 
   class InstalledRule {
     /**
-     * The band is normalised HERE, once.
+     * ASSIGNMENTS ONLY -- see InstalledRule.of below for the reading.
      *
-     * A foreign store: priority absent => the DNR default (1) => the catch-all
-     * band, the MOST alarming label. And the `>= 1` is NOT decoration: without it
-     * the door validates the TYPE and not the DOMAIN, so 0 and -3 would sail
-     * through and answer MATCHED_SHORTCUT, the LEAST alarming label. One assumption
-     * remains, deliberately: any integer >= 1 is presumed to be one of our three
-     * bands, for want of a band registry.
+     * It used to take the raw DNR rule and do six computations before five
+     * assignments: a PARSER wearing a constructor. And it could not refuse, so
+     * three of its accessors answered `undefined` and every caller had to ask
+     * whether the object it held was usable. An object valid by halves is a form,
+     * not an object.
      *
-     * THE OTHER THREE FIELDS ARE NORMALISED TOO, and reading them bare was an
-     * exception this docstring used to defend: "`condition` and `action` are read
-     * bare because DNR makes them MANDATORY -- that is a rule rather than a case".
-     * The rule is real; the conclusion did not follow, because this class reads a
-     * FOREIGN STORE and the very next paragraph of jump-preview.js says so. Two
-     * shapes DNR allows and this build does not write:
-     *
-     *   a condition with `urlFilter` and no `regexFilter`
-     *     -> `new RegExp(undefined)` is `/(?:)/`, which MATCHES EVERY URL.
-     *        Measured: new RegExp(undefined).test("http://anything/") === true.
-     *        On a redirect rule carrying a substitution, the preview would then
-     *        affirm a destination for ANY input -- the organ built to be faithful,
-     *        and the only place a user can check where ABC-1 goes.
-     *   a rule with no `action` or no `condition` at all
-     *     -> a TypeError out of a constructor, which the preview renders as
-     *        "could not read the installed rules": honest, but it is a crash
-     *        wearing a sentence, not the normalisation this door promises.
-     *
-     * Nothing writes those shapes today -- a structure test pins that
-     * updateDynamicRules has ONE caller, and it always emits a regexFilter. That
-     * is precisely why this costs nothing, and why leaving it would have been a
-     * doctrine applied to one field out of four.
-     *
-     * An absent regex reads as UNREADABLE (`undefined`), never as the empty regex
-     * the language would hand back. jump-preview.js skips such a rule, exactly as
-     * it already skips an action it cannot simulate.
+     * Named fields rather than six positional parameters: `of()` is the only
+     * caller, and a six-argument call is a line nobody can read at the call site.
      */
-    constructor(raw) {
-      const source = raw && typeof raw === "object" ? raw : {};
-      const condition = source.condition && typeof source.condition === "object" ? source.condition : {};
-      const action = source.action && typeof source.action === "object" ? source.action : {};
-      const readable = Number.isInteger(source.priority) && source.priority >= DNR_MINIMUM_PRIORITY;
-      this._band = readable ? source.priority : DNR_DEFAULT_PRIORITY;
-      this._id = source.id;
-      this._actionType = typeof action.type === "string" ? action.type : undefined;
-      this._regexFilter = typeof condition.regexFilter === "string" ? condition.regexFilter : undefined;
-      // NOT normalised elsewhere: the old code read this WITH A DEFAULT AT THE
-      // POINT OF USE (`=== false ? "i" : ""`), so there was no second
-      // normalisation to keep together -- the risk was the opposite, and worse.
-      // DNR's default is TRUE, so absent means case-SENSITIVE.
-      this._caseSensitive = condition.isUrlFilterCaseSensitive !== false;
-      const redirect = action.redirect;
-      this._substitution =
-        redirect && typeof redirect.regexSubstitution === "string"
-          ? redirect.regexSubstitution
-          : undefined;
+    constructor({ band, id, actionType, regexFilter, caseSensitive, substitution }) {
+      this._band = band;
+      this._id = id;
+      this._actionType = actionType;
+      this._regexFilter = regexFilter;
+      this._caseSensitive = caseSensitive;
+      this._substitution = substitution;
     }
 
     id() { return this._id; }
@@ -118,6 +81,59 @@
       return RuleRanking.isCatchAllBand(this._band);
     }
   }
+
+  /**
+   * THE DOOR, and it may answer "nothing".
+   *
+   * The DNR store is a foreign system -- jump-preview.js says so in its own
+   * header -- and it is this project's own past. Two shapes DNR allows and this
+   * build never writes:
+   *
+   *   a condition with `urlFilter` and no `regexFilter`
+   *     -> `new RegExp(undefined)` is `/(?:)/`, which MATCHES EVERY URL.
+   *        Measured: new RegExp(undefined).test("http://anything/") === true.
+   *        On a redirect rule carrying a substitution, the preview would then
+   *        affirm a destination for ANY input -- the organ built to be faithful,
+   *        and the only place a user can check where ABC-1 goes. A FAIL-OPEN.
+   *   a rule with no `action` or no `condition` at all
+   *     -> a TypeError out of the constructor, which the preview renders as
+   *        "could not read the installed rules": honest, but a crash wearing a
+   *        sentence rather than a reading.
+   *
+   * So a rule this build cannot simulate is not half a rule: it is an ABSENCE,
+   * and the door says so once instead of three accessors saying it separately.
+   * `jump-preview.js` skips what it gets nothing for, exactly as it already skips
+   * an action it cannot simulate.
+   *
+   * THE BAND IS NORMALISED RATHER THAN REFUSED, and that asymmetry is the point.
+   * Priority absent => the DNR default (1) => the catch-all band, the MOST
+   * alarming label; and the `>= 1` is not decoration, since without it 0 and -3
+   * would answer MATCHED_SHORTCUT, the LEAST alarming one. A missing band is a
+   * question we can still answer safely; a missing regex is not.
+   */
+  InstalledRule.of = function (raw) {
+    const source = raw && typeof raw === "object" ? raw : {};
+    const condition = source.condition && typeof source.condition === "object" ? source.condition : {};
+    const action = source.action && typeof source.action === "object" ? source.action : {};
+    if (typeof condition.regexFilter !== "string") return undefined;
+    if (typeof action.type !== "string") return undefined;
+    const readable = Number.isInteger(source.priority) && source.priority >= DNR_MINIMUM_PRIORITY;
+    const redirect = action.redirect;
+    return new InstalledRule({
+      band: readable ? source.priority : DNR_DEFAULT_PRIORITY,
+      id: source.id,
+      actionType: action.type,
+      regexFilter: condition.regexFilter,
+      // DNR's default is TRUE, so absent means case-SENSITIVE. Normalised here
+      // rather than at the point of use, where it used to be spelled
+      // `=== false ? "i" : ""` -- a default sitting next to the only reader.
+      caseSensitive: condition.isUrlFilterCaseSensitive !== false,
+      substitution:
+        redirect && typeof redirect.regexSubstitution === "string"
+          ? redirect.regexSubstitution
+          : undefined,
+    });
+  };
 
   InstalledRule.DNR_DEFAULT_PRIORITY = DNR_DEFAULT_PRIORITY;
   InstalledRule.DNR_MINIMUM_PRIORITY = DNR_MINIMUM_PRIORITY;
