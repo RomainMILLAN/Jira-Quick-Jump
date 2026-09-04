@@ -1098,9 +1098,10 @@ test("a refused string is shown with its bidi controls REMOVED, not merely isola
   // repair field intact and hid part of a host name in a field the user is asked
   // to read.
   //
-  // ProjectKey.DECEPTIVE_SOURCE is now the single author and Dom builds its RegExp
-  // from it, so there is nothing left to drift. A second file spelling a range is
-  // the regression this pins.
+  // The domain is now the single author of the class AND of its application:
+  // ProjectKey.withoutDeceptiveCharacters. There is nothing left to drift, and
+  // nothing left for a caller to remember. A second file spelling a range is the
+  // regression this pins.
   const owners = [];
   for (const file of walkJs("src")) {
     if (/\\u202e|\\u2066/i.test(read(file))) owners.push(file);
@@ -1115,8 +1116,17 @@ test("a refused string is shown with its bidi controls REMOVED, not merely isola
   // forgetting to replace it with anything would satisfy the assertion above.
   assert.match(
     read("src/ui/dom.js"),
-    /ProjectKey\.DECEPTIVE_SOURCE/,
-    "Dom must build its class from the owner, not from nothing",
+    /ProjectKey\.withoutDeceptiveCharacters/,
+    "Dom must ask the owner, not rebuild the class",
+  );
+  // AND IT ASKS FOR THE ANSWER, NOT FOR THE NOTATION. The first fix exported the
+  // character class as a source string, which put three unwritten obligations on
+  // this file -- wrap, compile, and remember the `g`. Forgetting the `g` replaces
+  // only the FIRST character: a control that works halfway, in silence.
+  assert.equal(
+    /new RegExp\(/.test(codeOf(read("src/ui/dom.js"))),
+    false,
+    "ui/dom.js must compile no regex of its own: the domain owns rule and application",
   );
 
   // THE WIDER CLASS IS WHAT IS ACTUALLY STRIPPED. The bidi loop above is the

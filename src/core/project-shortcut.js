@@ -99,11 +99,22 @@
   // than a convenience.
   //
   // DECEPTIVE_SOURCE is the set that LIES ON SCREEN: invisible, zero-width, or
-  // reordering. `Dom.visibleText` replaces exactly these before displaying a
-  // value the parser refused, and it must not spell them a second time -- a
-  // second regex somewhere else is how the two drift, and the drift costs a
-  // character nobody notices. So the class is exported from here, its only
-  // author, and the UI builds its own RegExp from this source.
+  // reordering. `withoutDeceptiveCharacters` below replaces exactly these before
+  // a value the parser refused is displayed, and nothing else may spell them --
+  // a second regex somewhere else is how the two drift, and the drift costs a
+  // character nobody notices.
+  //
+  // IT IS PRIVATE, AND IT USED TO BE EXPORTED. The UI received this string and
+  // built its own `new RegExp("[" + source + "]", "g")` -- so the domain
+  // published NOTATION, and the caller carried three unwritten obligations:
+  // wrap it in brackets, compile it, and remember the `g`. Forget the `g` and
+  // only the FIRST character is replaced: a control that works halfway, in
+  // silence, on the one screen whose job is to have a value read.
+  //
+  // This file's neighbour states the rule in capitals -- "NO REGEX NOTATION IN
+  // THIS FILE", said of the core in interception/reference-pattern.js -- and
+  // this export was the same violation mirrored. The domain owns the RULE and
+  // its APPLICATION; `ui/` asks the question.
   //
   // The ORDINARY SPACE is deliberately NOT in it. The parsers refuse a space
   // (a base URL or a key holding one is not what the user sees), which is why
@@ -119,6 +130,10 @@
   // from the source above rather than restated, so the pair cannot drift on a
   // range -- the post-condition below holds the one added character.
   const INVISIBLE = new RegExp("[\\u0020" + DECEPTIVE_SOURCE + "]");
+
+  // COMPILED ONCE, at load, and never by a caller. The `g` lives here, with the
+  // class it belongs to, instead of being an obligation the UI had to remember.
+  const DECEPTIVE_GLOBAL = new RegExp("[" + DECEPTIVE_SOURCE + "]", "g");
 
   /**
    * The parsers refuse everything the display replaces, plus the space. Asserted
@@ -308,13 +323,33 @@
     enumerable: true,
   });
 
+  /**
+   * A STRING SAFE TO SHOW, for the surfaces that display a value to be read
+   * rather than trusted: the quarantine repair fields, and the change banner.
+   *
+   * THE DOMAIN ANSWERS, IT DOES NOT HAND OVER THE CLASS. `DECEPTIVE_SOURCE` used
+   * to be exported and `ui/dom.js` compiled it itself -- see the note on that
+   * constant for why three unwritten obligations, one of which silently halves
+   * the control, is not a contract worth keeping.
+   *
+   * REPLACED, never deleted: a silent deletion makes the field the user is asked
+   * to repair differ from the bytes on file, which is the gap both parsers spend
+   * their headers refusing. U+FFFD says "something was here".
+   *
+   * `lastIndex` is not a hazard: `String.prototype.replace` with a global regex
+   * resets it before returning, so the shared instance is safe to reuse.
+   */
+  const withoutDeceptiveCharacters = (text) =>
+    String(text ?? "").replace(DECEPTIVE_GLOBAL, "�");
+
   // Frozen for the SAME reason as its neighbour: every file shares globalThis, so
   // an assignment before the airlock builds its pattern would turn the extension
-  // into a universal redirector. DECEPTIVE_SOURCE joins them on the same ground:
-  // it is what Dom.visibleText strips, so a writable copy would let a file loaded
-  // afterwards empty the class and put an RTL override back on screen.
+  // into a universal redirector. withoutDeceptiveCharacters joins them on the
+  // same ground: it is what the repair screen and the change banner print
+  // through, so a writable copy would let a file loaded afterwards return its
+  // argument untouched and put an RTL override back on screen.
   for (const [name, value] of [["MAX_LENGTH", MAX_LENGTH],
-                               ["DECEPTIVE_SOURCE", DECEPTIVE_SOURCE],
+                               ["withoutDeceptiveCharacters", withoutDeceptiveCharacters],
                                ["caseInsensitiveShape", caseInsensitiveShape]]) {
     Object.defineProperty(ProjectKey, name, {
       value, writable: false, configurable: false, enumerable: true,

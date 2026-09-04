@@ -97,36 +97,36 @@
    * value from the labels around it is still worth having, it was simply never
    * the control the comment claimed.
    *
-   * THE SET IS NOT SPELLED HERE ANY MORE, and that is the second fix. It listed
-   * the bidi controls alone, while the parsers refuse a wider class -- so a
-   * zero-width space (U+200B), a soft hyphen (U+00AD), a NBSP or a U+FEFF reached
-   * the repair field intact and hid part of a host name in a field the user is
-   * asked to read. Two regexes for one rule, and the narrower one was the one on
-   * screen.
+   * THE SET IS NOT SPELLED HERE, and it is not compiled here either.
    *
-   * ProjectKey.DECEPTIVE_SOURCE is now the single author: it is the class the
-   * parsers refuse, minus the ordinary space (visible in a field, so replacing it
-   * would mangle a legitimate value). Written as escapes there, never as the
-   * characters themselves, for the reason that file gives: a regex literal
-   * holding invisible characters cannot be reviewed and cannot be grepped.
+   * This file listed the bidi controls alone, while the parsers refuse a wider
+   * class -- so a zero-width space (U+200B), a soft hyphen (U+00AD), a NBSP or a
+   * U+FEFF reached the repair field intact and hid part of a host name in a field
+   * the user is asked to read. Two regexes for one rule, and the narrower one was
+   * the one on screen.
+   *
+   * The first fix made the domain EXPORT its class as a source string, which this
+   * file then wrapped in brackets and compiled with `g`. It closed the
+   * duplication and opened something worse: a control whose correctness depended
+   * on the caller remembering three things, one of which -- the `g` -- silently
+   * halves it. `ProjectKey.withoutDeceptiveCharacters` now owns the rule AND its
+   * application, and this method is the door to it.
    */
-  const DECEPTIVE = () => new RegExp("[" + global.ProjectKey.DECEPTIVE_SOURCE + "]", "g");
-
   const Dom = {
     /**
-     * A string safe to SHOW, for the one surface that shows what the parsers
-     * refused. See BIDI_CONTROLS above for why CSS could not do this.
+     * A string safe to SHOW, for the two surfaces that display a value to be
+     * read rather than trusted. See the note above for why CSS could not do
+     * this, and why the class has one author in the domain.
      *
      * It is `Dom`'s and not the section's for the usual reason: the next surface
      * to display untrusted text must find a door, not a recipe -- the same
      * argument as downloadFile and dragHandle below.
      */
     visibleText(raw) {
-      // Built at CALL TIME, not at load: this file is loaded before
-      // core/project-shortcut.js in no list, but resolving the owner lazily is
-      // what keeps the load order from deciding whether a security control
-      // exists -- the same reason shortcut-key.js resolves CatchAllKey lazily.
-      return String(raw ?? "").replace(DECEPTIVE(), "�");
+      // Resolved at CALL TIME, never destructured at the top of the file: the
+      // load order must not decide whether a security control exists -- the same
+      // reason shortcut-key.js resolves CatchAllKey lazily.
+      return global.ProjectKey.withoutDeceptiveCharacters(raw);
     },
 
     el(tag, props = {}, children = []) {
