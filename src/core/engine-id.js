@@ -58,6 +58,19 @@
    * Prototype-free would have been enough to make it safe; a Map makes the
    * bracket inexpressible, which is what keeps it safe through the next
    * refactoring.
+   *
+   * AND IT IS NOT EXPORTED, which the frozen object it replaced could afford to
+   * be. `Object.freeze` does nothing to a Map: measured, a single
+   * `EngineId.LEGACY.set("google", "evil.example")` from any file loaded
+   * afterwards turned `EngineId.parse("google")` into `evil.example` -- and every
+   * file of this project shares `globalThis`. project-shortcut.js freezes its own
+   * constants for exactly that reason ("an assignment before the airlock builds
+   * its pattern would turn the extension into a universal redirector"); trading
+   * the freeze for the Map lost half of what was there.
+   *
+   * The export had ZERO readers, so removing it costs nothing. If a reader ever
+   * appears, the safe form is a function -- `EngineId.migrated(raw)` -- and not
+   * the table.
    */
   const LEGACY = new Map([
     ["google", "google.com"],
@@ -117,7 +130,6 @@
     return new EngineId(CUSTOM + host);
   };
 
-  EngineId.LEGACY = LEGACY;
   EngineId.CUSTOM_PREFIX = CUSTOM;
   global.EngineId = EngineId;
 })(globalThis);

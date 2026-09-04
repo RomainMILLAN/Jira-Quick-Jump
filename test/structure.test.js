@@ -1982,3 +1982,36 @@ test("a rule read back from the store enters only by InstalledRule.of", () => {
   // mistaken for a valid call -- it would destructure to undefined everywhere.
   assert.match(owner, /constructor\(\{ band, id, actionType, regexFilter, caseSensitive, substitution \}\)/);
 });
+
+/**
+ * A LOOKUP TABLE ON `globalThis` IS EITHER FROZEN OR ABSENT.
+ *
+ * `Object.freeze` does nothing to a Map. So the rule that sent frontier-keyed
+ * tables to a Map traded one protection for another instead of adding them:
+ * measured, `EngineId.LEGACY.set("google", "evil.example")` from any file loaded
+ * afterwards turned `EngineId.parse("google")` into `evil.example`, and every file
+ * of this project shares `globalThis`.
+ *
+ * project-shortcut.js freezes its own constants on exactly that argument. A Map
+ * cannot be frozen, so the only equivalent is not to publish it -- which is free
+ * when nobody reads it.
+ */
+test("no Map that decides a domain question is reachable from globalThis", async () => {
+  const { loadCore } = await import("./load-core.js");
+  const core = await loadCore();
+  for (const [owner, name] of [
+    ["EngineId", "LEGACY"],
+    ["SearchEngineCatalog", "SHAPES_TABLE"],
+    ["ReferencePattern", "IN_URL_TABLE"],
+  ]) {
+    const published = core[owner] && core[owner][name];
+    assert.equal(
+      published instanceof Map,
+      false,
+      `${owner}.${name} publishes a mutable Map: freeze does not apply, so do not export it`,
+    );
+  }
+  // The catalogue publishes the KEYS of its shape table, never the table.
+  assert.ok(Array.isArray(core.SearchEngineCatalog.SHAPES));
+  assert.equal(core.SearchEngineCatalog.SHAPES.some((s) => typeof s !== "string"), false);
+});
