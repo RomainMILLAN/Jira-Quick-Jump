@@ -36,29 +36,32 @@
       const apply = (intention, coalesceKey) => writes.apply(intention, coalesceKey);
       const cancel = (coalesceKey) => writes.cancel(coalesceKey);
       const flush = () => writes.flush();
-      let stored = null;
       /**
-       * WHAT THE LAST READ COULD NOT MAKE SENSE OF, kept rather than computed and
-       * thrown away.
+       * WHAT THE LAST READ PRODUCED -- ONE memory, not two.
        *
-       * PolicyRepository.load returns `unreadable` beside `stored` -- document-scoped
-       * facts, one per field the admission door could not read: an arming state that
-       * was not a boolean, a ticked engine id that is not an identity, a selection
-       * longer than anything selectable. admission.js called their absent reader
-       * "named debt, not an oversight", and it stayed absent while the list of
-       * producers grew to three.
+       * `PolicyRepository.load` answers a folder AND what it could not make sense
+       * of: document-scoped facts, one per field the admission door could not read
+       * (an arming state that was not a boolean, a ticked engine id that is not an
+       * identity, a selection longer than anything selectable). admission.js called
+       * their absent reader "named debt, not an oversight", and it stayed absent
+       * while the producers grew to three -- a signal about the integrity of the
+       * saved configuration, computed and then thrown away.
        *
-       * A signal about the integrity of the saved configuration that is computed and
-       * then discarded is the same defect as a status line reading READY over a
-       * failed install. It is kept HERE, beside `stored`, because it belongs to the
-       * READ and not to the folder: a section asks the host what the last load could
-       * not read, exactly as it asks for the folder itself.
+       * THEY WERE TWO `let`s, and that was the defect worth naming. Both are
+       * written at the same two sites, on adjacent lines, and read together: two
+       * assignments that must stay in agreement are an invariant with no owner. Two
+       * clocks tell the time until one of them runs slow.
+       *
+       * One value, one assignment, and the invariant stops existing. It belongs to
+       * the READ rather than to the folder, which is why it lives here and not on
+       * StoredPolicy: a section asks the host what the last load could not read,
+       * exactly as it asks for the folder itself.
        */
-      let unreadable = [];
+      let read = { stored: null, unreadable: [] };
       let disposed = false;
 
       const ctx = {
-        stored: () => stored,
+        stored: () => read.stored,
         apply,
         /**
          * The ten-times-copied idiom, named once. It also removes the chance of
@@ -90,7 +93,7 @@
         /** Document-scoped facts from the last read. Always an array, never
          *  absent: a field that shows up only sometimes is the meaningful absence
          *  mutation-result.js bans. */
-        unreadable: () => unreadable,
+        unreadable: () => read.unreadable,
       };
 
       /**
@@ -111,7 +114,7 @@
         // threw "stored is not a function" on the first commit, which is to say on
         // the first gesture the user made: an error no unit test reached, because
         // no test ever ran SectionHost.start itself.
-        const proposed = intention(stored);
+        const proposed = intention(read.stored);
         if (proposed.ok) await DestinationJournal.claimAhead(proposed.value.policy().fingerprint());
         const result = await PolicyRepository.apply(intention);
         // `result.events` without a presence test: every result carries it. The
@@ -176,8 +179,8 @@
           // so the page rendered zero causes while the receipt held six. The
           // parameter is gone; the receipt is the only source on this surface.
           lastReport = await RuleInstaller.report({
-            policy: stored.policy(),
-            quarantinedCount: stored.quarantinedCount(),
+            policy: read.stored.policy(),
+            quarantinedCount: read.stored.quarantinedCount(),
             reality: await InstallOutcome.read(),
             source: "PAGE",
           });
@@ -210,8 +213,7 @@
           condemn();
           return;
         }
-        stored = loaded.stored;
-        unreadable = loaded.unreadable ?? [];
+        read = { stored: loaded.stored, unreadable: loaded.unreadable ?? [] };
         lastReport = null;
         // A SUCCESSFUL reload hides the banner -- but ONLY the one whose cause is a
         // READ. Nothing ever set banner.hidden back to true, so a stale failure
@@ -294,12 +296,12 @@
           // the CQRS line of this file: a section's pending command leaves by a
           // timer, not by the render, so a deferred render must not be able to
           // strand it. reconcile never redraws; it may speak.
-          section.reconcile(stored, ctx);
+          section.reconcile(read.stored, ctx);
           if (isHeldByUser(section)) {
             section.hold();
             continue;
           }
-          await section.render(stored, ctx);
+          await section.render(read.stored, ctx);
           } catch (error) {
             // The section paints its own alarming state (see Status.render). Here we
             // only make sure the loop continues and the section is not left dirty,
@@ -464,8 +466,7 @@
         loaded = { ok: false, code: "POLICY_UNREADABLE", message: String(error && error.message) };
       }
       if (loaded.ok) {
-        stored = loaded.stored;
-        unreadable = loaded.unreadable ?? [];
+        read = { stored: loaded.stored, unreadable: loaded.unreadable ?? [] };
         await render();
       } else {
         showFailure(loaded, "load");

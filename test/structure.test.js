@@ -1870,3 +1870,31 @@ test("the shape catalogue is a Map, and nothing indexes it with a bracket", () =
     assert.match(body, declaration, `${file}: ${table} must have no prototype to walk into`);
   }
 });
+
+/**
+ * WHAT THE LAST READ PRODUCED IS ONE MEMORY, NOT TWO.
+ *
+ * `PolicyRepository.load` answers a folder and what it could not make sense of.
+ * Those were two `let`s in the host's closure, written at the same two sites on
+ * adjacent lines and read together: two assignments that must stay in agreement
+ * are an invariant with no owner, and the closure was up to eight mutable
+ * memories.
+ *
+ * The pin is on the SHAPE rather than on the count, because a count would go red
+ * for a legitimate new state and say nothing about this one.
+ */
+test("the host keeps the last read as one value, not as two variables", () => {
+  const host = read("src/ui/section-host.js");
+  const body = codeOf(host);
+  assert.match(body, /let read = \{ stored: null, unreadable: \[\] \};/,
+    "the last read must be one memory");
+  // No second variable shadowing half of it.
+  assert.equal(/\blet stored\b/.test(body), false, "`stored` must not be a memory of its own");
+  assert.equal(/\blet unreadable\b/.test(body), false, "`unreadable` must not be a memory of its own");
+  // And it is written in ONE gesture at every site: an assignment to half of it
+  // is the invariant coming back.
+  assert.equal(/\bread\.stored\s*=/.test(body), false, "half of the read must never be assigned alone");
+  assert.equal(/\bread\.unreadable\s*=/.test(body), false, "half of the read must never be assigned alone");
+  const writes = body.match(/\bread = \{/g) || [];
+  assert.equal(writes.length, 3, `three assignments expected (the initial one and the two reads), got ${writes.length}`);
+});
