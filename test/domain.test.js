@@ -1359,3 +1359,32 @@ test("the engine cap is what its own sentence says it is", () => {
     "the derived cap must cost an adversary reach, not merely look tidier",
   );
 });
+
+test("one engine per host, and the fingerprint's comparator depends on it", () => {
+  /**
+   * THE PROPERTY UNDER THE SORT, pinned where it is decided.
+   *
+   * `fingerprint()` orders the added domains on their id alone, which is total
+   * ONLY because an id is unique within a policy. Nothing asserted that: the
+   * refusal existed in `withCustomEngine`, had a translated sentence, and zero
+   * test coverage. Were it to go, the comparator would answer 0 on a duplicate,
+   * the stable sort would fall back to input position, and the empreinte would
+   * depend on the order of a list nothing orders.
+   */
+  const engine = (shape) => g.CustomEngine.parse({ host: "intra.example.org", shape }).value;
+  const once = g.JumpPolicy.empty().withCustomEngine(engine("search-q"));
+  assert.equal(once.ok, true);
+
+  // THE SHAPE IS NOT IN THE IDENTITY, so both spellings collide -- including the
+  // one that intercepts a different path, which is why a reshaping can only come
+  // from an outside writer and never from this door.
+  for (const shape of ["search-q", "root-q"]) {
+    const again = once.value.withCustomEngine(engine(shape));
+    assert.equal(again.ok, false, `a second ${shape} on the same host was accepted`);
+    assert.equal(again.code, "DUPLICATE_ENGINE");
+  }
+
+  // And the invariant the comparator needs, stated directly.
+  const ids = once.value.customEngines().map((e) => e.id());
+  assert.equal(new Set(ids).size, ids.length, "ids must be unique within a policy");
+});

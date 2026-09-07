@@ -514,6 +514,23 @@
 
     /** Adding a domain is additive and idempotent: the id derives from the host. */
     withCustomEngine(engine) {
+      /**
+       * ONE ENGINE PER HOST, and this refusal carries more than it looks.
+       *
+       * `CustomEngine.id()` is `custom:<host>` -- the SHAPE is not in it -- so the
+       * same host under two shapes collides here and the second is refused. That
+       * is what makes an id UNIQUE within a policy, and fingerprint()'s comparator
+       * leans on exactly that: it orders on the id alone, so a duplicate would
+       * make it answer 0, the stable sort would fall back to input position, and
+       * the empreinte would depend on the order of a list nothing orders -- a
+       * false alarm from the detector, which is the second way it can fail.
+       *
+       * Its neighbour ENGINE_LIMIT carries twenty lines saying it is an
+       * unreachable changelock. This one is REACHABLE (the add-a-domain form leads
+       * here) and had neither test nor comment, so the imbalance read as "the
+       * documented one matters". A test now pins it, named after what depends on
+       * it.
+       */
       if (this._customEngines.some((e) => e.id() === engine.id())) {
         return MutationResult.refused("DUPLICATE_ENGINE", `${engine.host()} is already listed.`);
       }
