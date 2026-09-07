@@ -206,8 +206,15 @@ trade rather than leave stale rules firing under a badge that says `off`.
   shares one global scope, which is the argument the parsers freeze their own
   constants on. A Map cannot be frozen, so the equivalent is not to publish it:
   the three tables keyed from a frontier are now module-private, which was free
-  because nothing outside their own file ever read them. A test refuses any of
-  them reappearing on the global object.
+  because nothing outside their own file ever read them. A test refuses **any**
+  `Map` reachable from **any** global this project publishes, taking the list of
+  globals from the sources rather than naming them.
+  That last sentence used to promise more than the test did, for the second time
+  on this page: the pin listed three names, and two of them had never existed, so
+  it asserted that absent properties were not `Map`s while the regression it
+  claimed to guard — re-exporting one of the tables — walked past it green.
+  Measured, then fixed by removing the enumeration: a control that lists what it
+  guards only guards what its author imagined.
 - **The cap on ticked search engines is derived from what can exist.** It was 64,
   under a comment reading "the number of engines that can exist: the built-in
   catalogue plus the custom domains, themselves capped" — which is 24. A ticked id
