@@ -56,9 +56,11 @@ trade rather than leave stale rules firing under a badge that says `off`.
   no rule of this build can ever match. A test now asserts **both** directions:
   no rule outside the permission (a rule that could never fire), and no permission
   outside the rules (an octroi nobody needs).
-  **If you granted access under version 1.1.0 or earlier, that wildcard is still
-  granted**: a browser does not revoke a permission because a later version asks
-  for less. Narrowing it is done by hand — Chrome: *Extensions → Quick Jump for
+  **If you granted access under version 1.0.0, that wildcard is still granted**: a
+  browser does not revoke a permission because a later version asks for less.
+  1.0.0 is the only version that ever shipped it — `v1.0.0` is the only tag, here
+  and on the remote — so the narrowing lands in the release this paragraph is part
+  of, and no other version can have asked for the wildcard. Narrowing it is done by hand — Chrome: *Extensions → Quick Jump for
   Jira → Site access*; Firefox: *Add-ons → Quick Jump for Jira → Permissions*.
   Removing it and re-granting through the Access section leaves you with the two
   narrow origins.
