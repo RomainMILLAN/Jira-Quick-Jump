@@ -1995,23 +1995,54 @@ test("a rule read back from the store enters only by InstalledRule.of", () => {
  * project-shortcut.js freezes its own constants on exactly that argument. A Map
  * cannot be frozen, so the only equivalent is not to publish it -- which is free
  * when nobody reads it.
+ *
+ * IT ENUMERATES NOTHING, and that is the whole fix. The first version listed three
+ * names, and TWO OF THEM HAD NEVER EXISTED (`SHAPES_TABLE`, `IN_URL_TABLE` -- the
+ * real names are `SHAPES` and `IN_URL`). So two thirds of it asserted that absent
+ * properties are not Maps, and the regression it claimed to guard walked straight
+ * past: measured, re-exporting `ReferencePattern.IN_URL` as a Map left it green.
+ * A named control that controls nothing teaches the next reader to trust the name.
+ *
+ * The names now come from the SOURCES -- every `global.X =` this project writes,
+ * the same scan the load-order pin uses -- so a table cannot hide behind a name
+ * this test forgot to imagine.
  */
-test("no Map that decides a domain question is reachable from globalThis", async () => {
+test("no Map is reachable from any global this project publishes", async () => {
   const { loadCore } = await import("./load-core.js");
   const core = await loadCore();
-  for (const [owner, name] of [
-    ["EngineId", "LEGACY"],
-    ["SearchEngineCatalog", "SHAPES_TABLE"],
-    ["ReferencePattern", "IN_URL_TABLE"],
-  ]) {
-    const published = core[owner] && core[owner][name];
-    assert.equal(
-      published instanceof Map,
-      false,
-      `${owner}.${name} publishes a mutable Map: freeze does not apply, so do not export it`,
-    );
+
+  const published = new Set();
+  for (const file of srcFiles()) {
+    for (const [, name] of read(file).matchAll(/^\s*global\.([A-Z][A-Za-z0-9]*)\s*=/gm)) {
+      published.add(name);
+    }
   }
-  // The catalogue publishes the KEYS of its shape table, never the table.
+  assert.ok(published.size > 20, `only ${published.size} globals found: the scan is broken`);
+
+  const offenders = [];
+  for (const owner of published) {
+    const held = core[owner];
+    if (held === undefined || held === null) continue;
+    if (held instanceof Map) offenders.push(owner);
+    if (typeof held !== "object" && typeof held !== "function") continue;
+    for (const name of Object.getOwnPropertyNames(held)) {
+      // A getter may exist -- JumpPolicy.DIAGNOSES is one -- and reading it must
+      // not decide whether this test runs.
+      let value;
+      try { value = held[name]; } catch { continue; }
+      if (value instanceof Map) offenders.push(`${owner}.${name}`);
+    }
+  }
+  assert.deepEqual(
+    offenders,
+    [],
+    "a published Map cannot be frozen, so it is mutable from every file: keep it module-private",
+  );
+
+  // AND THE ONE TABLE WHOSE KEYS ARE LEGITIMATELY PUBLISHED stays a list of
+  // strings. `SearchEngineCatalog.SHAPES` is the shape NAMES, never the table --
+  // and it is the assertion that saved the previous version of this test from
+  // being vacuous on all three of its rows instead of two.
   assert.ok(Array.isArray(core.SearchEngineCatalog.SHAPES));
   assert.equal(core.SearchEngineCatalog.SHAPES.some((s) => typeof s !== "string"), false);
 });
