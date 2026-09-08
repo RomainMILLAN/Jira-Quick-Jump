@@ -20,6 +20,51 @@
   const { MutationResult, ShortcutAdmission } = global;
 
   /**
+   * THE READING DOOR OF A SET-ASIDE ENTRY -- the half of this class that
+   * destination-journal.js closed and this one did not.
+   *
+   * That file rebuilds a journalled fact FIELD BY FIELD and says why: "two things
+   * this closes, and neither is an injection: a surplus field written back for
+   * ever, and a field with NO BOUND -- a 5 MB `newBaseUrl` freezes the banner,
+   * and twenty of them freeze it for good". Every clause is true here, and this is
+   * the half that reaches an `<input>`: a quarantined entry is by hypothesis
+   * attacker-shaped, `toJSON` wrote it back verbatim at every commit, and
+   * MAX_QUARANTINE bounded the NUMBER of entries while nothing bounded their SIZE
+   * or their SHAPE. Measured, before this door: an entry carrying a 1 000-character
+   * field nobody reads survived the round trip intact and was re-persisted for ever.
+   *
+   * THE BOUND CANNOT MANGLE A REPAIRABLE VALUE, and that is why it is 256 rather
+   * than a number chosen to be generous: JiraInstance.parse refuses a base URL
+   * longer than 256, ProjectKey.parse a key longer than 20 and ShortcutId an
+   * identifier longer than 64. Anything this truncates was already unrepairable.
+   *
+   * NEVER DROPPED, EVEN EMPTY, and that is the opposite choice from the journal's.
+   * There, a corrupt byte promoted to a synthetic fact made noise inevictable.
+   * Here the count feeds PARTIAL_POLICY -- "the configuration is incomplete" -- so
+   * dropping an entry would make the diagnosis say the policy is whole. An entry
+   * with nothing readable in it becomes an empty row that the Fix button refuses,
+   * which is over-signalling, the direction this project requires.
+   *
+   * ONE CONSEQUENCE, STATED: the handle is a fingerprint OF THE CONTENT, so
+   * filtering changes every handle once, at the first read after this ships --
+   * harmless, since a handle only lives as long as the render that shows it. And
+   * two entries that differ only in what this door drops become byte-identical,
+   * hence one handle for two rows: deleting twice removes both, which is already
+   * this file's stated reading of two identical entries.
+   */
+  const QUARANTINE_FIELDS = ["id", "key", "baseUrl"];
+  const MAX_QUARANTINE_TEXT = 256;
+
+  const admitted = (raw) => {
+    const entry = {};
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return entry;
+    for (const field of QUARANTINE_FIELDS) {
+      if (typeof raw[field] === "string") entry[field] = raw[field].slice(0, MAX_QUARANTINE_TEXT);
+    }
+    return entry;
+  };
+
+  /**
    * A quarantined entry is addressed BY WHAT IT IS, never by where it sits.
    *
    * Both gestures took an index, captured from a rendered snapshot -- and
@@ -187,6 +232,20 @@
       return { policy: this._policy.toJSON(), quarantine: this._quarantine };
     }
   }
+
+  /**
+   * The door, for the one layer that reads the folder from storage.
+   *
+   * On StoredPolicy rather than on the repository because the shape of a
+   * quarantined entry is this class's business -- it is what `readmit`,
+   * `duplicatedIds` and `fingerprintOf` read -- while the repository only knows
+   * WHERE the bytes came from.
+   */
+  StoredPolicy.admitting = function (entries) {
+    return (Array.isArray(entries) ? entries : []).map(admitted);
+  };
+  StoredPolicy.QUARANTINE_FIELDS = Object.freeze([...QUARANTINE_FIELDS]);
+  StoredPolicy.MAX_QUARANTINE_TEXT = MAX_QUARANTINE_TEXT;
 
   StoredPolicy.empty = function () {
     return new StoredPolicy(global.JumpPolicy.empty(), []);

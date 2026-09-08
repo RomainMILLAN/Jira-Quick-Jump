@@ -175,14 +175,24 @@
     },
 
     /**
-     * The doorbell. It FILTERS THE AREA, which onPolicyChanged deliberately does
-     * not -- the policy may live in sync. Without the filter, any writer of
+     * The doorbell. It FILTERS THE AREA: without the filter, any writer of
      * storage.sync would wake every open page.
+     *
+     * This note used to read "which onPolicyChanged deliberately does not". That
+     * stopped being true the day that method took the same filter, for the same
+     * words -- a comment asserting an asymmetry its neighbour had removed, which
+     * is the shape of claim this project treats as worse than a missing one.
+     * Both filter now, and both say why.
+     *
+     * IT RETURNS ITS OWN UNSUBSCRIPTION, like onPolicyChanged, so a page can
+     * actually be torn down. See the note there.
      */
     onRecorded(listener) {
-      Platform.api.storage.onChanged.addListener((changes, areaName) => {
+      const handler = (changes, areaName) => {
         if (areaName === "local" && changes[ENTRY]) listener();
-      });
+      };
+      Platform.api.storage.onChanged.addListener(handler);
+      return () => Platform.api.storage.onChanged.removeListener(handler);
     },
   };
 

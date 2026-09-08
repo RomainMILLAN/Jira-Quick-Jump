@@ -3,7 +3,7 @@
 ## Reporting a vulnerability
 
 Report privately through
-[GitHub's advisory form](https://github.com/RomainMILLAN/jira-quick-jump/security/advisories/new).
+[GitHub's advisory form](https://github.com/RomainMILLAN/Jira-Quick-Jump/security/advisories/new).
 Please do not open a public issue for anything exploitable.
 
 Expect an acknowledgement within **five working days** and an assessment within
@@ -64,8 +64,9 @@ trade rather than leave stale rules firing under a badge that says `off`.
   Jira → Site access*; Firefox: *Add-ons → Quick Jump for Jira → Permissions*.
   Removing it and re-granting through the Access section leaves you with the two
   narrow origins.
-- **A DESTINATION'S PERMISSION CARRIES NO PORT, and that is the one place this
-  page's "exactly the hosts a rule can match" is knowingly wider than the rule.**
+- **A DESTINATION'S PERMISSION CARRIES NEITHER ITS PORT NOR ITS PATH, and those
+  are the two places this page's "exactly the hosts a rule can match" is
+  knowingly wider than the rule.**
   It used to carry one: `permissionOrigin()` read `URL.host`, so `http://jira:8080`
   asked for `http://jira:8080/*`. **A match pattern cannot hold a port.** Firefox
   refuses one outright ([bug 1362809](https://bugzil.la/1362809)), so the
@@ -82,12 +83,111 @@ trade rather than leave stale rules firing under a badge that says `off`.
   the redirect target is the literal base URL, port included, so no rule of this
   build can reach another port. A test asserts both — that every origin collected
   is a pattern a browser can parse, and that the emitted rule keeps the port.
-  **The residual, stated:** a destination written as an IPv6 literal
-  (`http://[::1]:8080`) is accepted by the parser and produces `http://[::1]/*`,
-  which some browsers do not accept as a match pattern either. The failure is
-  visible and fail-closed — the browser's own refusal is shown in the Access
-  section — and no rule fires. It is not refused at the door because refusing a
-  legitimate destination costs more than a visible, explained failure.
+  **AND IT CARRIES NO PATH EITHER, which this page used to call "the one place"
+  while there were two.** A base URL may hold up to four path segments, and a
+  match pattern *can* express a path — `https://intra.example.org/jira/*` is legal
+  — yet `permissionOrigin()` asks for `https://intra.example.org/*`, the whole
+  host. So a self-hosted Jira at a sub-path grants more than any rule of this
+  build can reach.
+  It is **declared rather than narrowed**, and half of that decision is now
+  measured — which changes the reason without changing the answer.
+  **Measured** (Chrome 152.0.7977.82, 2026-09-07, from a loaded extension
+  declaring the same ceiling): a path-bearing request **is accepted** by the
+  manifest check. `permissions.request({origins: ["https://intra.example.org/jira/*"]})`
+  fails with *"This function must be called during a user gesture"* — the same
+  error as the whole-host form, and nothing about the manifest; a malformed pattern
+  fails differently and by name (*"Invalid host wildcard"*). So narrowing is
+  expressible and accepted, and the fear that it would throw and take the whole
+  single-call grant down with it was **wrong**.
+  **What is still unknown is whether it buys anything:** does Chrome *retain* the
+  path once granted, or normalise the grant to the host? That decides between a
+  real narrowing and theatre, and it cannot be measured from a desk. It needs a
+  permission actually granted, which needs the bubble accepted by hand — verified,
+  with a real CDP-dispatched click, that the gesture reaches the handler and that
+  `request` then **never settles**: the bubble is views-based browser UI, not a
+  CDP target, and seeding `granted_permissions` in the profile does not stand in,
+  because loading the extension reinstalls it and clears them.
+  So the width stays, bounded by the same thing that bounds the port: the redirect
+  target is the literal base URL, path included, so no rule of this build can reach
+  another path of that host — pinned on every emitted rule, not on an example. The
+  next step is a human clicking Allow once and reading `permissions.getAll()`.
+  **The other spelling of that same fault is now closed at the parser, and the
+  paragraph that left it open was wrong about both of its reasons.** It read: "a
+  destination written as an IPv6 literal (`http://[::1]:8080`) is accepted by the
+  parser and produces `http://[::1]/*`, which some browsers do not accept as a
+  match pattern either. The failure is visible and fail-closed […] and no rule
+  fires. It is not refused at the door because refusing a legitimate destination
+  costs more than a visible, explained failure."
+  Neither clause held. **The failure was not contained:** origins are requested in
+  ONE call — the sentence four lines above says so about the port — so a single
+  bracketed destination made `permissions.request` throw and *nothing at all* was
+  granted: not the search engines, not the other shortcuts. One row, and the whole
+  extension permanently inert behind an Access button that appeared to do nothing.
+  **And the destination was not legitimate in any working sense:** it could never
+  obtain its permission, so it could never fire. Refusing it therefore takes away
+  nothing that ever worked, and moves the moment the user learns it from a
+  diagnostics panel to the field they are typing in.
+  A bracketed host is now refused as `BASE_IPV6_LITERAL`, *after* the
+  forbidden-host list so that `[::]`, `[fe80::1]` and every IPv4-mapped spelling
+  of the metadata endpoint keep their own, more specific sentence. The bracketed
+  clauses inside the warning catalogue survive as **changelocks** — they answer
+  for nothing today, and `shortcut-warning.js` says so in those words, so the day
+  this refusal is relaxed a loopback cannot arrive unwarned. The test that used to
+  vouch for the bracketed form as "a pattern a browser will accept" — the one
+  place this repository asserted the opposite of what this page conceded — now
+  asserts that nothing which parses can produce a colon in its host.
+- **AND THE THIRD SPELLING OF THAT SAME FAULT WAS THE ONE THAT WIDENED RATHER
+  THAN BROKE: the `*`.** The port makes a pattern unparseable, the bracket makes
+  it unparseable — and a wildcard makes it *valid and enormous*. `new URL()`
+  admits `*` as a host code point, so `https://*` had no forbidden host, no
+  bracket, no port, a canonical form and pure ASCII: it **parsed**, and
+  `permissionOrigin()` produced the all-https-hosts match pattern — word for word
+  one of the two `optional_host_permissions` this manifest declares. A browser
+  does not refuse that; **it grants it**. `https://*.corp.example` is the quieter
+  half: it carries *no warning at all* (it has a dot, it is not an IP, it is not
+  punycode), reads as an ordinary destination on the import review screen, and
+  hands over one company's entire subdomain tree.
+  Measured end to end, from a configuration file shaped exactly as `toTransfer()`
+  writes one, carrying those two rows: import accepted, zero refused, zero
+  warnings on the first row, **both disarmed** — and the origins handed to
+  `permissions.request` were the two Google ones plus the all-subdomains pattern
+  for `corp.example` plus the ceiling itself. Being disarmed protects nothing
+  here, and that is not an oversight either: `requiredOrigins` deliberately
+  collects the origins of every shortcut, armed or not, so that granting access is
+  one prompt and not one per arming. One click on the button this extension asks
+  the user to press, and the grant is made — **persistently**, since a permission
+  already granted is not revoked when a later version asks for less, which is the
+  sentence this page already makes about the `https://*.google.com/*` wildcard of
+  1.0.0.
+  The other characters are the port's blast radius one notation further, and that
+  half is **measured** rather than reasoned about. Chrome 152.0.7977.82,
+  2026-09-07, `permissions.contains({origins: ["https://a.*/*"]})`:
+  *"Invalid value for origin pattern https://a.\*/\*: Invalid host wildcard."* It
+  **throws** — `Platform.grantedOrigins` catches that and answers `false`, so the
+  badge reads `off` for ever, and `permissions.request` throws the same way, so
+  "Grant access" reports a refusal. Origins are requested in ONE call, so a single
+  such row makes the grant fail for the search engines and for every other
+  shortcut too. `*` is legal in a match pattern only as the whole host or as a
+  leading `*.`, which is why the wildcard forms **widen** and these **break**. **One predicate closes both halves,
+  because they are one fact:** a host that is not a plain sequence of LDH labels
+  either widens the pattern or breaks it. It is refused at the field the user is
+  typing in (`BASE_HOST_SHAPE`), *after* the bracket refusal so that a bracketed
+  literal keeps its own more specific sentence. What it takes away is stated
+  rather than discovered: a trailing dot, a label ending in `-`, an empty label
+  and an underscore stop being accepted; the underscore is the one judgement call,
+  and it is refused rather than assumed because no measurement here says whether a
+  match pattern carrying one is accepted.
+  **THE TEST IS THE PART THAT WAS WRONG, and that is the lesson worth keeping.**
+  Three tests claimed this property and `PRIVACY.md` said "a test pins that it
+  never asks for a wildcard". All three fed `requiredOrigins` a policy *the test
+  had built*, out of host names the test had chosen, and the minimality half only
+  ever walked the four engines that ship. They asserted that clean input produces
+  clean output — true, and not the question. The pin now walks every base URL of
+  the hostile corpus **and** of the legitimate one, in one document, through
+  `proposeImport` and then through `requiredOrigins`, and requires a plain host
+  pattern out of whatever went in. It goes red on this defect, by name. Same
+  failure mode as the two this page already records: *a control that enumerates
+  what it guards only guards what its author imagined.*
 - **Project keys and base URLs are the two security functions.** A key is
   concatenated literally into a regex filter, so it is held to a closed character
   set; a base URL becomes a redirect target, so it is refused rather than cleaned
@@ -110,6 +210,16 @@ trade rather than leave stale rules firing under a badge that says `off`.
   mapping is now unwrapped before the list is consulted, and the same address
   feeds the private-network warning, so a mapped RFC 1918 host is called private
   for the right reason instead of incidentally.
+  **BOTH EMBEDDINGS, AND THE FIRST FIX COVERED ONE.** The pattern required
+  `ffff:`, so it unwrapped the IPv4-**mapped** form and not the
+  IPv4-**compatible** one (RFC 4291 §2.5.5.1, deprecated) — and `[::a9fe:a9fe]`
+  denotes that same `169.254.169.254`. Measured: refused as `[::ffff:a9fe:a9fe]`,
+  accepted as `[::a9fe:a9fe]`. Whether a browser would route the deprecated form
+  is doubtful, so what closing it buys for CERTAIN is this paragraph's own claim:
+  it said the list judges an ADDRESS and not a spelling, and one spelling sat
+  outside it. A claim wider than its code is what stops the next reader from
+  looking. Nothing legitimate is lost — every address in `::/96` is one of the two
+  embeddings or is non-routable, and `[::1]` and `[::]` carry no second group.
 - **A value shown to be checked by eye is displayed with its deceptive characters
   removed.** An RTL override inside a host name makes the displayed destination
   read backwards — so what you check is not where the traffic would go. This used
@@ -118,24 +228,33 @@ trade rather than leave stale rules firing under a badge that says `off`.
   character-for-character the rendering without it, and no value of the property
   helps. The characters are stripped and replaced with `U+FFFD` at render time
   instead; the CSS rule stays as what it always was, typography.
-  **TWO SURFACES, NOT ONE, AND A WIDER CLASS THAN BIDI.** This paragraph used to
-  name the quarantine repair screen as "the only surface that shows a value
-  validation rejected", and the code said the same in stronger words: "a host on
-  any other screen has survived `JiraInstance.parse`, hence `/^[\x21-\x7e]+$/`".
-  That is false for the **change banner**: its facts come back from
-  `storage.local` through the journal's reading door, which bounds the *length* of
-  a text field and validates nothing else — they are never re-parsed at render
-  time. Both surfaces now go through the same door. And the door was too narrow:
-  it stripped the bidi controls alone, while the parsers refuse a wider class, so
-  a zero-width space, a soft hyphen, a NBSP or a `U+FEFF` reached the repair field
-  intact and hid part of a host name. The class now has **one author** — the
-  parser's own list, minus the ordinary space, which is visible in a field and
-  whose replacement would mangle a legitimate value — and a test refuses a second
-  file spelling a range. The limit, stated: only a **local** writer can put such a
-  character in the journal (the facts this build produces come from an
-  already-admitted policy, and the sync channel does not reach `storage.local`),
-  so this half is defence in depth. The falsified sentence was the real defect:
-  it is what would have stopped the next reader from looking.
+  **THE COUNT OF SURFACES WAS WRONG TWICE, SO WHAT IS WRITTEN DOWN IS THE
+  CRITERION.** This paragraph first named the quarantine repair screen as "the
+  only surface that shows a value validation rejected", and the code said the same
+  in stronger words: "a host on any other screen has survived
+  `JiraInstance.parse`, hence `/^[\x21-\x7e]+$/`". That was false for the **change
+  banner**, whose facts come back from `storage.local` through the journal's
+  reading door. It was then rewritten to say *two*, and that was false for the
+  **cause lists** — the reasons an installation was refused, read back through
+  `InstallOutcome.read`, painted in the status line *and* in the preview panel.
+  Each door bounds the *length* of a text field and validates nothing else; none
+  of these values is re-parsed at render time. So the rule is no longer a list to
+  be recounted:
+  **a surface needs this door when it prints a string that is not re-parsed at
+  render time** — not "a value the parser refused", not "a host". The three that
+  match today are the quarantine rows, the change banner and the cause lists, and
+  a test walks them by field rather than counting calls.
+  And the door itself was too narrow: it stripped the bidi controls alone, while
+  the parsers refuse a wider class, so a zero-width space, a soft hyphen, a NBSP
+  or a `U+FEFF` reached the repair field intact and hid part of a host name. The
+  class now has **one author** — the parser's own list, minus the ordinary space,
+  which is visible in a field and whose replacement would mangle a legitimate
+  value — and a test refuses a second file spelling a range. The limit, stated:
+  only a **local** writer can put such a character in the journal or the receipt
+  (the facts and subjects this build produces come from an already-admitted
+  policy, and the sync channel does not reach `storage.local`), so those two
+  thirds are defence in depth. The falsified sentence was the real defect, both
+  times: it is what would have stopped the next reader from looking.
   **THE DOMAIN ANSWERS THE QUESTION; IT NO LONGER HANDS OVER THE CLASS.** The
   first version of this fix *exported* the character class as a source string,
   which the interface then wrapped in brackets and compiled itself. That closed
@@ -176,6 +295,26 @@ trade rather than leave stale rules firing under a badge that says `off`.
   lesson is about the test as much as the code: the pin meant to hold this
   enumerated mutations, so it covered the ones its author had imagined — and this
   was not among them.
+- **A claim covers a change once, not for as long as it sits on the ring.** The
+  token that tells an *act* from a *discovery* is the fingerprint of a policy's
+  content, kept in a four-slot ring in `storage.local`. Nothing used to spend it —
+  so **any state the interface had committed within the last four commits could be
+  written back by the sync channel and covered by its own stale claim.** The
+  cheapest route, measured on this build: you arm a shortcut from the options page
+  (the door claims that content), you press **Alt+Shift+J**, and the adversary
+  puts the armed document back. The kill switch claims nothing and emits no fact —
+  disarming is deliberately silent, or the emergency stop would raise the alarm it
+  exists to silence — so the claim was not even pushed off the ring. Result: no
+  journal entry, no banner, a quiet badge. The emergency stop undone without a
+  word, on the one fact the diff calls *the gesture the attacker needs last*.
+  A claim is now **forgotten by the single writer as soon as the projection carries
+  its content**, which is the instant no legitimate gap is left for it to cover.
+  Not on the reading side, deliberately: on an installation that keeps failing the
+  projection stays stale and the same gap is re-diffed at every wake-up, so a
+  claim consumed by the first of those reads would report your own edit as
+  `UNKNOWN` — the exact false alarm the waterline exists to prevent. Both
+  directions are pinned, and the replay is walked end to end through the worker
+  rather than through the journal alone.
 - **A search-engine shape is looked up in a Map, and that is a security control.**
   The URL shape of a custom domain is chosen from a closed set — a user-supplied
   path or query parameter would mean a user-supplied regex — and the airlock is
@@ -217,6 +356,18 @@ trade rather than leave stale rules firing under a badge that says `off`.
   claimed to guard — re-exporting one of the tables — walked past it green.
   Measured, then fixed by removing the enumeration: a control that lists what it
   guards only guards what its author imagined.
+  **AND IT NOW REFUSES A THAWED ARRAY ON THE SAME GROUND, which was open on three
+  of them.** A `Map` must stay private because freezing does nothing to it; an
+  array CAN be frozen, so the rule there is that it must be — and
+  `IssueReference.SEPARATORS`, `ShortcutWarning.KINDS` and
+  `SearchEngineCatalog.SHAPES` were published writable. Measured: one
+  `SEPARATORS.push(".")` from any file loaded afterwards put an EMPTY branch in the
+  emitted alternation, so the separator became **optional** and `ABC1234` matched a
+  rule written for `ABC-1234` — a matcher wider than the validator, which is the
+  direction this page refuses everywhere else; and `KINDS.push("FORGED")` made
+  `Consent.parse` admit an acknowledgement kind nothing knows. The airlock now
+  refuses a separator it cannot spell, by name, so the widening is closed whatever
+  its source: the freeze stops the mutation, the refusal stops the empty branch.
 - **The cap on ticked search engines is derived from what can exist.** It was 64,
   under a comment reading "the number of engines that can exist: the built-in
   catalogue plus the custom domains, themselves capped" — which is 24. A ticked id
@@ -252,6 +403,18 @@ trade rather than leave stale rules firing under a badge that says `off`.
   ceiling, which counts admitted ids so that nothing a later line refuses can cost
   a place. The residual, stated: an adversary can still pad with a full ceiling's
   worth of **valid** ids — which is exactly what a legitimate configuration can do.
+  **AND AN ENGINE IDENTITY IS BOUNDED IN SIZE TOO**, which it was not: the shape
+  it is held to is narrow and was mute about length, so it was the one string this
+  project admitted with no bound at all. Measured: a 20 004-character id passed,
+  was kept, and was re-persisted at every commit, while every neighbour bounded
+  its text (256 in the quarantine door, 256 in the journal, 200 in the receipt, 40
+  for a custom host). The ceiling is **derived, never chosen** — the longest
+  identity this build can mint, which is the custom prefix plus the longest host
+  the domain parser admits — because anything above it can resolve to no engine in
+  any catalogue, so refusing it costs no selection a user could have made. It
+  degrades the way this door's rule requires: the id is dropped, the rest of the
+  configuration lives, and the drop is reported under a code that already has a
+  translated sentence.
   **AND THE CEILING BELONGS TO THE AGGREGATE.** It lived at the admission door
   alone, so a policy built anywhere else could hold any number of ticked engines:
   an invariant held at one door is a filter, not an invariant. The domain now
@@ -269,8 +432,8 @@ trade rather than leave stale rules firing under a badge that says `off`.
   gesture and is refused before its payload is even read. A catch-all copies the key you typed
   into that path, so the key's character set is asserted at emission and the
   captured text can contain no `/`, `.`, `%`, `?`, `#` or backslash.
-- **A catch-all claims only SHORT keys, and the bound is a domain decision.** Two to
-  six characters, hyphen only. A key of seven to twenty stays perfectly usable —
+- **A catch-all claims only SHORT keys, and the bound is a domain decision.**
+  2 to 6 characters, hyphen only. A key of seven to twenty stays perfectly usable —
   declared by name, where its rule is a literal. The narrowing is deliberate: fewer
   ordinary searches leave the engines for the Jira instance. What it does NOT cover
   is stated too: two-character keys are claimed, although the model elsewhere calls
@@ -296,6 +459,19 @@ trade rather than leave stale rules firing under a badge that says `off`.
   **Never widen the query pattern back, and never raise the key bound, which is a
   domain decision.** Re-measure before touching either number: no test in this
   repository executes RE2.
+  **RE-MEASURED 2026-09-07** (Chrome 152.0.7977.82, Firefox 154.0), and the
+  campaign replaced an unknown with a number and a number with a caveat. The
+  alternation ceiling, on this project's own cost scalar, in google.com's guard
+  envelope: **cost 108 accepted, cost 114 refused** — so 50 keeps better than
+  two-fold margin, and the "(70, 107] — unknown" above is now bounded. **Firefox
+  is not the constraint**: Gecko accepted every question asked, cost 294 included.
+  And the caveat, which is the finding that matters: **the scalar is a proxy, not
+  the quantity RE2 charges.** The 2026-09-01 note records cost 107 *refused*; cost
+  108 was accepted six days later. Length is not it either — a guard of 154
+  characters is accepted while the catch-all's redirect of 137 is refused. What
+  RE2 charges is *program* size, dominated by the unrolled `{1,5}` over a
+  63-character class and its capture groups. The margin is what protects, not the
+  arithmetic.
   **The query pattern was NARROWED once since, by one character, and that
   direction is the one this paragraph protects.** "No earlier parameter of this
   name" is spelled by enumerating what a *different* name looks like, and the
@@ -310,6 +486,62 @@ trade rather than leave stale rules firing under a badge that says `off`.
   whole prefix fail, so nothing matches and nothing redirects. What it does **not**
   change is the assumed cost of a catch-all: a page could already force
   `?q=ANYTHING-1` directly, so this closes a fidelity gap, not a capability.
+- **The last spelling of that same divergence — the CASE — is now closed too.**
+  It was open for a year, so here is what it was: every condition shipped
+  `isUrlFilterCaseSensitive: false`, because `abc-1` has to reach `/browse/ABC-1`,
+  and that flag is global to the pattern — so it also reached the **path** and the
+  **parameter name**, which Google reads case-sensitively. `/SEARCH?Q=ABC-1` fired
+  the rule on a URL that is not a search. Same class as `%71`, the rule firing on
+  something the engine does not read; unlike `%71` it granted **nothing**, since a
+  page that wants the redirect writes `?q=ABC-1` and gets it. A fidelity gap with
+  no capability behind it, which is why it could wait for a measurement rather
+  than a guess.
+  The half that carried the security always **held**, and it is worth saying how,
+  because the repair changed one of its two answers *for the better*. Under the old
+  insensitive flag RE2 folded the negated class, so `[^=&%q]` excluded `Q` as well
+  as `q`: neither `?Q=hello&q=ABC-1` nor `?q=hello&Q=ABC-1` matched — fail-closed
+  in both directions, over-cautiously in the first. Under the sensitive flag `Q=`
+  is genuinely a *different* parameter, so `?Q=hello&q=ABC-1` now matches, and it
+  should: `q=ABC-1` **is** the first parameter Google reads there. The other one
+  still does not match, and must not — Google reads `q=hello`. Both directions are
+  pinned by a test that compiles the delivered `regexFilter` **under the flag the
+  rule actually ships with**, which the test before it did not.
+  **IT IS CLOSED, AND THE REMEDY WAS NOT THE ONE THIS PAGE NAMED.** The
+  precondition was met on 2026-09-07, Chrome 152.0.7977.82 and Firefox 154.0, by
+  asking `isRegexSupported` from a loaded extension's own service worker.
+  `(?-i:…)` turned out **affordable and unusable**: Chrome accepts it everywhere
+  and it moves no boundary, but `interception/jump-preview.js` compiles the
+  *delivered* `regexFilter` with `new RegExp`, and **JavaScript has no inline flag
+  groups** — measured, `SyntaxError: Invalid group`. Every rule would have broken
+  the one organ where a user can check this extension against itself, permanently,
+  behind the preview's own `catch`. Worse than the gap, on a surface this page
+  calls verifiable.
+  **What shipped needs no engine feature at all.** A two-element character class is
+  the same construct in RE2 and in JavaScript, so the named key spells its own two
+  cases — `[Aa][Bb][Cc]` — and the **redirect** conditions go
+  `isUrlFilterCaseSensitive: true`. The path and the parameter name stop being
+  folded: `/SEARCH?Q=ABC-1` no longer fires a redirect, while `?q=abc-1` — the
+  whole reason the flag was ever insensitive — still lands on `/browse/ABC-1`,
+  because only the *matcher* learned both cases and the substitution still writes
+  the canonical key. Nothing else moved: the catch-all's fragment is
+  `[A-Za-z][A-Za-z0-9_]{1,5}`, already explicit, and the separators, `\d+` and the
+  host are case-free.
+  **The guards keep the insensitive flag, and that half carries the leak.** The
+  reserved-prefix list ships in upper case; the typing does not. Measured against
+  real RE2: a case-sensitive guard stops matching `q=cve-1`, so `CVE-1` would leave
+  for the Jira instance. A guard exists to *stop* a redirect — wider only ever
+  stops more, narrower is the one direction that leaks — and the flag being
+  per-rule is what makes the pair expressible. Both halves are pinned, each red
+  without its own fix, and the guard test walks all 49 prefixes in both cases.
+  **AND IT GAVE BUDGET BACK.** Zero rules that installed before stop installing,
+  and both custom-host boundaries moved *outward*: the catch-all's from 26 to 28, a
+  twenty-character named key's from 32 to 34. Under an insensitive flag RE2 folds
+  the path, the parameter name and the host itself, and the folding costs more
+  program than the explicit class replacing it. The deferral had assumed for a year
+  that closing this would cost margin; it returned some.
+  One correctness improvement came free: under a sensitive flag `Q=` is genuinely a
+  different parameter, so `?Q=hello&q=ABC-1` now matches — `q=ABC-1` *is* the first
+  parameter Google reads there — where the insensitive form refused it.
 - **A custom search domain is bounded at 40 characters, and that bound is an RE2
   budget rather than tidiness.** The margin above pays for an engine envelope the
   measurement never covered, and a user-typed domain spends it: the worst case was
@@ -318,6 +550,47 @@ trade rather than leave stale rules firing under a badge that says `off`.
   instead of shipping Google's runs inside its own rule. The four engines that ship
   are byte-identical under the new arithmetic — their envelopes sit at or below the
   one the budget was measured on — and a test pins that.
+- **A CUSTOM DOMAIN OF 27 CHARACTERS OR MORE LOSES ITS CATCH-ALL ON CHROME, and
+  the bound that was supposed to prevent that was measuring the wrong rule.**
+  This is the one finding no desk review of this repository could reach, because
+  nothing here executes RE2. `CustomEngine.MAX_HOST_LENGTH` is 40, and justified
+  itself on "at 40 the costliest parseable host produces an envelope that exhausts
+  the budget, so the two bounds meet almost exactly". Measured 2026-09-07 on
+  Chrome 152.0.7977.82, against the rules this build actually emits:
+  the catch-all's **redirect** is accepted up to a host of **28** characters and
+  refused from **29**; a twenty-character named key's redirect is accepted up to
+  **34** and refused from **35**; and the reserved-prefix **guards** are accepted
+  even at 40. Firefox 154 accepts all of it. (Both redirect numbers were two lower
+  before the case repair landed — see the bullet above: going case-sensitive
+  stopped RE2 folding the literals, which gave two characters of host back on
+  each.)
+  So the guards — the thing the per-engine budget was invented for, and the thing
+  the sentence above was about — are the **cheap** rules. What blows is the
+  catch-all's redirect, which carries the unrolled `{1,5}` and two capture groups
+  and has **no budget of any kind**.
+  **What it costs a user, and why it is not a leak:** a domain of 29 to 40
+  characters keeps its named shortcuts and loses its catch-all on Chrome.
+  Per-unit atomicity takes the guards down with it, so `ISO-9001` cannot leave;
+  `coverageSatisfied` comes out false, the status line says the catch-all could not
+  be installed, and `skipped` carries `REGEX_UNSUPPORTED` and `UNIT_INCOMPLETE`.
+  Fail-closed, reported, one engine, not silent — **and that sentence is now
+  pinned rather than asserted.** A test seeds a 38-character domain, injects a
+  fault shaped like the measured one (one rule of a unit refused, its neighbours
+  accepted) and requires all three halves of the claim: the guards fall *with*
+  their catch-all so `ISO-9001` cannot leave, the other engine keeps its catch-all
+  and the named shortcut keeps its rule on the long domain, and the receipt comes
+  back with `coverageSatisfied: false`, `REGEX_UNSUPPORTED`, `UNIT_INCOMPLETE` and
+  a diagnosis of `CATCH_ALL_NOT_INSTALLED`. The fault is a **model** and the test
+  says so: a length threshold cannot reproduce RE2's ordering — program size, not
+  characters — so what it reproduces is the shape of the failure, which is what
+  the reporting has to survive. The measured numbers stay a changelock elsewhere,
+  where nothing pretends to execute RE2.
+  **The bound stays at 40, deliberately.** Lowering it to 28 would refuse at the
+  door — this project's usual preference — and would also take away named
+  shortcuts that work perfectly on those hosts. The excess is over-budget for
+  **one feature**, not for the domain, and a per-feature refusal is what already
+  happens. A changelock now pins both measured boundaries against the constant, so
+  the gap is a number somebody chose rather than a number nobody knows.
 - **An engine that cannot be guarded costs only itself.** Past a point an envelope
   leaves nothing to spend, and that is refused by name: the engine loses its
   catch-all, the other engines keep theirs, and the status line reports an
@@ -339,6 +612,23 @@ trade rather than leave stale rules firing under a badge that says `off`.
   transparency gap rather than a breach), but the consent given at the first step
   did not cover what the file had chosen. The screen now names the engines and the
   added domains before the confirm button.
+- **A SET-ASIDE ENTRY GOES THROUGH A READING DOOR, like a journalled fact.** The
+  journal rebuilds a fact field by field, on the argument that a surplus field is
+  written back for ever and a field with no bound freezes the surface that shows
+  it. The quarantine is the other half of that class and had no door: it is
+  attacker-shaped by hypothesis, `toJSON` wrote it back verbatim at every commit,
+  and its fields are rendered into the two inputs the user is asked to read.
+  `MAX_QUARANTINE` bounded the NUMBER of entries; nothing bounded their size or
+  their shape — measured, a 5 kB field nobody reads survived the round trip and
+  was re-persisted for ever. Three fields are kept now (`id`, `key`, `baseUrl`),
+  each at 256 characters, which cannot mangle a repairable value because the
+  parsers already refuse a base URL over 256, a key over 20 and an identifier over
+  64. An entry with nothing readable left is **kept, empty**, and not dropped: the
+  count feeds `PARTIAL_POLICY`, so losing one would make the diagnosis call an
+  amputated configuration whole. The limit, stated: only a local writer reaches
+  this entry, and such a writer already holds the journal and the projection — this
+  removes an unbounded, unspecified shape from a surface that displays, it does
+  not separate a new adversary.
 - **No acknowledgement travels with the configuration. Not one.** Accepting a
   warning — the catch-all's, or a destination's — is recorded in local storage,
   outside the configuration, so a compromised sync account cannot accept a
@@ -372,6 +662,23 @@ trade rather than leave stale rules firing under a badge that says `off`.
   a LOCAL door already claimed — and the journal never leaves local storage. The
   residual window is narrowed, not closed: an attribution landing after a divergence
   has been written is not caught.
+- **Every unreadable spelling of the saved policy leaves a line, `null` included.**
+  When the configuration cannot be read, the rules are emptied *and the journal
+  says so* — that entry is what distinguishes "what was saved stopped being
+  readable" from an ordinary disarm, and a quiet `off` badge is indistinguishable
+  from the latter. One spelling did not reach it. `PolicyRepository` read
+  `value.policy` straight through, so `{"rev": 1, "value": null}` — one byte of
+  hostile write — threw a **TypeError** out of `load()` instead of returning a
+  refusal, on the one path in this project whose every failure is a *value*. The
+  fail-closed still held (purge, receipt `installed: false`, badge `off`); what the
+  jet skipped was the door: `recordUnclaimable([PolicyUnreadable])` hangs off the
+  `!loaded.ok` branch, and a throw lands in the outer `catch` thirty lines past it.
+  Measured: `journal: []`, where `5`, `"x"`, `[]`, `{policy: null}` and a
+  too-new schema version all wrote their line. Absence now means a fresh profile
+  and only that; anything a writer actually wrote is reduced to the document the
+  admission door already refuses by name. The pin walks the spellings as a table,
+  because the defect was an **asymmetry** between them — a test on `null` alone
+  would go green the day another shape starts throwing.
 - **The change detector survives a restart.** The last installed policy is kept
   locally and compared on every wake-up, so a write pushed while the service
   worker was dead is still reported. Its absence is treated as a change, never as
@@ -452,7 +759,7 @@ reads the workflow and refuses a return to compiling in the publish job.
 Anyone can therefore check what they downloaded:
 
 ```sh
-gh attestation verify jira-quick-jump-chrome-<version>.zip -R RomainMILLAN/jira-quick-jump
+gh attestation verify jira-quick-jump-chrome-<version>.zip -R RomainMILLAN/Jira-Quick-Jump
 sha256sum -c SHA256SUMS
 ```
 

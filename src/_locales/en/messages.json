@@ -356,6 +356,12 @@
   "refuseBaseForbiddenHost": {
     "message": "That address is a cloud metadata or link-local endpoint."
   },
+  "refuseBaseIpv6Literal": {
+    "message": "A browser permission cannot name an IPv6 address. Use a host name instead."
+  },
+  "refuseBaseHostShape": {
+    "message": "Write the host as a plain domain name: no wildcard, no underscore, no empty label."
+  },
   "refuseBaseUnsafePort": {
     "message": "Browsers refuse to connect to that port."
   },
@@ -426,7 +432,7 @@
     "message": "That file contains keys that are never legitimate."
   },
   "refuseNotADocument": {
-    "message": "That file does not contain a configuration."
+    "message": "That configuration could not be read."
   },
   "refuseSchemaMissing": {
     "message": "That configuration does not say which format it is written in."
@@ -435,16 +441,16 @@
     "message": "That configuration was written by a newer version of this extension."
   },
   "refuseShortcutsNotAList": {
-    "message": "The list of shortcuts in that file could not be read."
+    "message": "The list of shortcuts could not be read."
   },
   "refuseTooManyShortcuts": {
     "message": "That configuration holds more shortcuts than this extension keeps."
   },
   "refuseEnginesNotAList": {
-    "message": "The list of search engines in that file could not be read."
+    "message": "The list of search engines could not be read."
   },
   "refuseCustomEnginesNotAList": {
-    "message": "The list of added domains in that file could not be read."
+    "message": "The list of added domains could not be read."
   },
   "refuseTooManyCustomEngines": {
     "message": "That configuration holds more added domains than this extension keeps."
@@ -611,6 +617,9 @@
   "transferNote": {
     "message": "Imported shortcuts always arrive disarmed."
   },
+  "transferUnavailable": {
+    "message": "The saved configuration could not be read, so it can be neither exported nor replaced."
+  },
   "tryIt": {
     "message": "Try a URL"
   },
@@ -715,6 +724,12 @@
   },
   "skipQueryParamTooLong": {
     "message": "This search engine's address uses a parameter name this version cannot match."
+  },
+  "skipSeparatorNoUrlForm": {
+    "message": "This version cannot match one of the separators the key accepts."
+  },
+  "skipEmptySeparators": {
+    "message": "That key accepts no separator, so no rule can be built for it."
   },
   "kindDomainsReshaped": {
     "message": "how a search domain is intercepted"

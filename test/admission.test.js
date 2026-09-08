@@ -691,3 +691,62 @@ test("the door may narrow the aggregate's ceiling, never widen it", () => {
     );
   }
 });
+
+/**
+ * A SET-ASIDE ENTRY GOES THROUGH A READING DOOR TOO.
+ *
+ * destination-journal.js rebuilds a journalled fact field by field, on the
+ * argument that a surplus field is written back for ever and an unbounded one
+ * freezes the surface that shows it. The quarantine is the other half of that
+ * class -- attacker-shaped by hypothesis, re-persisted by toJSON at every commit,
+ * and rendered into two `<input>`s -- and it had no door: MAX_QUARANTINE bounded
+ * the NUMBER of entries while nothing bounded their size or their shape.
+ */
+test("a quarantined entry keeps its three fields, bounded, and nothing else", () => {
+  const document = {
+    schemaVersion: 1,
+    armed: false,
+    engines: [],
+    shortcuts: [{
+      id: "11111111-1111-4111-8111-111111111111",
+      key: "ABC",
+      baseUrl: "javascript:alert(1)",
+      // Not a field of a shortcut at all, so admitEntry refuses the entry on it --
+      // and it used to travel into storage and back for ever.
+      junk: "J".repeat(5000),
+    }],
+  };
+  const restored = g.JumpPolicy.restore(document);
+  assert.equal(restored.quarantine.length, 1);
+
+  const folder = new g.StoredPolicy(restored.policy, g.StoredPolicy.admitting(restored.quarantine));
+  const kept = folder.toJSON().quarantine[0];
+  assert.deepEqual(Object.keys(kept).sort(), ["baseUrl", "id", "key"], "no surplus field survives");
+  assert.equal(JSON.stringify(kept).includes("JJJ"), false, "the surplus field is not written back");
+
+  // BOUNDED, and the bound cannot mangle a repairable value: the three parsers
+  // refuse a base URL over 256, a key over 20 and an id over 64.
+  const long = g.StoredPolicy.admitting([{ id: "x", key: "K", baseUrl: "https://" + "a".repeat(4000) }]);
+  assert.equal(long[0].baseUrl.length, g.StoredPolicy.MAX_QUARANTINE_TEXT);
+  assert.ok(g.StoredPolicy.MAX_QUARANTINE_TEXT >= 256, "a legitimate base URL must survive whole");
+
+  // NEVER DROPPED, even with nothing readable in it: the count feeds
+  // PARTIAL_POLICY, so losing an entry would make the diagnosis call the policy
+  // whole. An empty row the Fix button refuses is the over-signalling direction.
+  const junk = g.StoredPolicy.admitting(["a string", 42, null, { id: 7 }]);
+  assert.equal(junk.length, 4, "an unreadable entry is still an entry");
+  assert.deepEqual(junk[0], {});
+
+  // And the entry stays repairable: what the user is asked to read is what is on
+  // file, which is the property both parsers spend their headers on.
+  const repairable = g.StoredPolicy.admitting([{ id: "22222222-2222-4222-8222-222222222222",
+    key: "ABC", baseUrl: "https://example.atlassian.net", stray: true }]);
+  const folder2 = new g.StoredPolicy(g.JumpPolicy.empty(), repairable);
+  const readmitted = folder2.readmit(
+    folder2.quarantined()[0].fingerprint,
+    g.JiraInstance.parse("https://example.atlassian.net").value,
+    crypto.randomUUID(),
+  );
+  assert.equal(readmitted.ok, true, "dropping a surplus field must not cost the repair");
+  assert.equal(readmitted.value.quarantinedCount(), 0);
+});

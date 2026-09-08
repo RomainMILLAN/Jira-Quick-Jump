@@ -113,6 +113,29 @@
     ".local", ".internal", ".intranet", ".lan", ".corp", ".home.arpa", ".home", ".priv",
   ];
 
+  /**
+   * THE BRACKETED CLAUSES ARE CHANGELOCKS, not live checks -- said here so the
+   * next reader neither deletes them as dead nor trusts them as a rampart.
+   *
+   * `JiraInstance.parse` refuses a bracketed host outright (BASE_IPV6_LITERAL: a
+   * match pattern has no syntax for one, so the permission could never be
+   * obtained and the shortcut could never fire). No instance reaching this
+   * catalogue can carry one, so `startsWith("[")` and `=== "[::1]"` answer for
+   * nothing today.
+   *
+   * They stay because the direction of failure is the safe one and the cost is
+   * two comparisons: this list can only ever produce MORE warnings, never fewer,
+   * and a warning blocks arming until it is acknowledged. The day that refusal is
+   * relaxed -- which is a permission question, not a privacy one, so it may
+   * legitimately move -- these are what keep a loopback and a bracketed address
+   * from arriving unwarned on the screen where the user decides whether to trust
+   * a destination.
+   *
+   * `!hostname.includes(".")` is NOT one of them: it is live, and it is what
+   * catches the single-label intranet name (`http://jira`). It used to catch every
+   * bracketed literal as a side effect too, which is the accident the note on
+   * INTERNAL_HOST below unpicks.
+   */
   const isLiteralIp = (hostname) =>
     /^\d{1,3}(\.\d{1,3}){3}$/.test(hostname) || hostname.startsWith("[");
 
@@ -192,7 +215,15 @@
   const shown = ({ kind, severity }) => ({ kind, severity });
 
   const ShortcutWarning = {
-    KINDS: [...DESTINATION_KINDS, ...KEY_KINDS].map((k) => k.kind),
+    // FROZEN, like INTERNAL_SUFFIXES below and for the same reason: this list is
+    // PUBLISHED on a shared `globalThis`, and it is what `parse` and `has` answer
+    // from. Measured, before the freeze: one `KINDS.push("FORGED")` made
+    // `Consent.parse({ armed: true, acknowledged: ["FORGED"] })` come back ok, so
+    // the hard refusal this file argues for -- "a misspelled acknowledgement stays
+    // a silent failure of a security control" -- was bypassable in process.
+    // Nothing downstream is authorised by an unknown kind (it matches no warning),
+    // which is exactly when the guard is free.
+    KINDS: Object.freeze([...DESTINATION_KINDS, ...KEY_KINDS].map((k) => k.kind)),
 
     /**
      * THE PUBLISHED LANGUAGE OF A CONTEXT BOUNDARY, and that is why it gets a

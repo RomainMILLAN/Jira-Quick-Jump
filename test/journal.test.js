@@ -328,19 +328,27 @@ test("a successful install reports the rules as delivered, for the preview to si
 });
 
 test("the regex check asks about the rule as it will be installed, not a laxer one", async () => {
-  // Both options default to the OPPOSITE of what every rule here does:
-  // isCaseSensitive to true where the conditions are case-insensitive,
-  // requireCapturing to false where every redirect carries a regexSubstitution.
-  // Left out, the call vouched for an expression we never install -- and it fails
-  // OPEN, so the rule reached updateDynamicRules, which rejects the WHOLE batch
-  // and takes every other shortcut with it.
+  // Both options default to the OPPOSITE of what the rules here do, and left out
+  // the call vouched for an expression we never install -- failing OPEN, so the
+  // rule reached updateDynamicRules, which rejects the WHOLE batch and takes every
+  // other shortcut with it.
+  //
+  // IT IS A MIRROR, NOT A CONSTANT, and this test used to assert the constant.
+  // It required `isCaseSensitive === false` on EVERY question, which was true only
+  // while every condition shipped the insensitive flag. The rules now DISAGREE
+  // with each other on purpose -- redirects are read as the engine reads them,
+  // guards must stay wider or a lower-case reserved prefix leaks -- so a constant
+  // here would either go red on a correct build or pin the wrong half. What the
+  // title actually claims is that the question mirrors the rule, and that is what
+  // is asserted: same shape as `requireCapturing` two lines down, which was
+  // already derived rather than spelled.
   const dnr = fakeDnr();
   await withPlatform(dnr, async () => {
     await g.RuleInstaller.install(armedCatchAll(), 0);
   });
   assert.ok(dnr.asked.length >= 2, "the catch-all and its reserved-prefix guard");
   for (const options of dnr.asked) {
-    assert.equal(options.isCaseSensitive, false, "mirrors isUrlFilterCaseSensitive");
+    assert.equal(typeof options.isCaseSensitive, "boolean", "mirrors isUrlFilterCaseSensitive");
     assert.equal("requireCapturing" in options, true);
   }
   // Derived from the rule, never restated: a guard is an `allow` with no
@@ -353,6 +361,18 @@ test("the regex check asks about the rule as it will be installed, not a laxer o
   const asked = dnr.asked.map((o) => o.requireCapturing);
   assert.equal(asked.filter((x) => x === true).length, 1, "one redirect, asked WITH capturing");
   assert.ok(asked.filter((x) => x === false).length >= 1, "every allow asked WITHOUT it");
+
+  // AND THE TWO AXES TRAVEL TOGETHER, which is the property that would actually
+  // break: the redirect is the one asked WITH capturing, and it is the one asked
+  // as CASE-SENSITIVE; every guard is asked without either. Paired rather than
+  // counted separately, so a build that got the flag right on the wrong rule goes
+  // red.
+  for (const options of dnr.asked) {
+    assert.equal(
+      options.isCaseSensitive, options.requireCapturing,
+      "a redirect is asked sensitive AND capturing; a guard, neither",
+    );
+  }
 });
 
 test("a regex refused only once capturing is required skips its unit, not the batch", async () => {
@@ -569,6 +589,100 @@ test("eviction sacrifices acts before evidence", async () => {
       "the evidence survives the noise of the attack that buries it"
     );
     assert.equal(journal.overflowed, true, "and the loss is said");
+  });
+});
+
+test("a claim stops covering once the state it attributes is installed", async () => {
+  /**
+   * THE REPLAY, and it was silent.
+   *
+   * A claim is the fingerprint of a CONTENT, kept on a four-slot ring, and
+   * nothing used to consume it. So any state the door had committed within the
+   * last four commits could be REWRITTEN by the compromised sync channel and
+   * covered by its own stale claim: no entry, no banner, a quiet badge.
+   *
+   * The measured route, and it is the cheapest one the adversary has:
+   *
+   *   the user arms a shortcut from the options page   -> claims F(armed)
+   *   the user presses Alt+Shift+J                     -> no claim, and no fact
+   *      (background disarms through PolicyRepository.apply, and PolicyDiff
+   *       emits nothing on true -> false, so F(armed) is not even pushed off)
+   *   the sync channel writes the ARMED document back
+   *   reconcile -> [PolicyArmed] under F(armed)        -> COVERED, in silence
+   *
+   * The emergency stop undone without a word, on the one fact policy-diff.js
+   * calls "THE GESTURE THE ATTACKER NEEDS LAST". forgetClaim, called by the
+   * worker after a SUCCESSFUL projection write, is what spends the claim.
+   */
+  await withJournal(async () => {
+    const armed = "fp-the-armed-policy";
+    // The door claims and commits; the worker installs and records the
+    // projection, which is the moment the claim has done its office.
+    await g.DestinationJournal.claimAhead(armed);
+    await g.DestinationJournal.recordClaimed(
+      [{ type: "ShortcutArmed", shortcutId: "a", key: "ABC", baseUrl: "https://jira.example.org" }],
+      armed, Date.now()
+    );
+    await g.DestinationJournal.forgetClaim(armed);
+    assert.deepEqual(
+      (await g.DestinationJournal.read()).claims, [],
+      "a claim whose content the projection now carries is spent"
+    );
+
+    // The kill switch: no claim of its own, and no fact -- so nothing pushes the
+    // old claim off the ring either.
+    // Then the replay of the very document the user had committed.
+    await g.DestinationJournal.recordUnclaimed(
+      [{ type: "PolicyArmed", shortcutCount: 1 }], armed, Date.now()
+    );
+    const journal = await g.DestinationJournal.read();
+    assert.equal(journal.entries.length, 2, "the replay is recorded beside the act");
+    assert.equal(journal.acknowledged, false, "and the banner rises on it");
+    assert.equal(journal.unseen.length, 1, "exactly one thing is owed to the reader");
+    assert.equal(journal.unseen[0].type, "PolicyArmed");
+  });
+});
+
+test("spending a claim does not make the ordinary edit cry", async () => {
+  // The other direction, and it is why forgetClaim is NOT called by
+  // recordUnclaimed: on an installation that keeps failing, the projection stays
+  // stale and the SAME gap is re-diffed at every wake-up. A claim consumed by the
+  // first of those reads would report the user's own edit as UNKNOWN -- the exact
+  // false alarm the waterline exists to prevent.
+  await withJournal(async () => {
+    const edited = "fp-the-users-own-edit";
+    await g.DestinationJournal.claimAhead(edited);
+    // Two reconciliations before any projection is written: the install failed,
+    // so the worker never reaches forgetClaim.
+    for (const _ of [0, 1]) {
+      await g.DestinationJournal.recordUnclaimed(
+        [{ type: "DestinationChanged", shortcutId: "a", key: "ABC", oldBaseUrl: "https://a.example.org", newBaseUrl: "https://b.example.org" }],
+        edited, Date.now()
+      );
+    }
+    const journal = await g.DestinationJournal.read();
+    assert.equal(journal.entries.length, 0, "a gap the door claimed is never written");
+    assert.equal(journal.acknowledged, true, "and the banner stays down");
+    assert.ok(journal.claims.includes(edited), "the claim survives an install that never landed");
+  });
+});
+
+test("forgetting a claim that is not on the ring writes nothing at all", async () => {
+  // The worker calls forgetClaim at every successful sync, hence on the majority
+  // path where the previous sync already spent it. Going through the mutation
+  // would still `set`: VersionedEntry stamps a fresh rev and writer on every
+  // attempt, so the bytes change even when the value does not.
+  await withJournal(async (area) => {
+    await g.DestinationJournal.recordClaimed([], "fp-kept", Date.now());
+    const before = JSON.stringify(area._raw.get("destinationJournal"));
+    const answer = await g.DestinationJournal.forgetClaim("fp-never-claimed");
+    assert.equal(answer.ok, true, "a non-discovery is not a failure");
+    assert.equal(
+      JSON.stringify(area._raw.get("destinationJournal")), before,
+      "and not one byte moves, envelope included"
+    );
+    assert.ok((await g.DestinationJournal.read()).claims.includes("fp-kept"),
+      "the claims that ARE on the ring are untouched");
   });
 });
 
@@ -1150,5 +1264,51 @@ test("the diff produces facts of the domain, never reading incidents", () => {
   assert.ok(produced.length > 0);
   for (const type of produced) {
     assert.ok(domain.has(type), `policy-diff.js emits ${type}, which is a reading incident`);
+  }
+});
+
+/**
+ * A SUBSCRIPTION THAT CAN BE TAKEN BACK, on both doorbells.
+ *
+ * `SectionHost.stop()` returns HoldWatch's listeners, the drop refusal,
+ * `visibilitychange` and `pagehide` -- and dropped these two on the floor,
+ * because neither handed anything back. So a host that had declared itself
+ * disposed went on being woken by both, calling `reload()` and `render()` on a
+ * page nobody was looking at. Harmless where a page dies with its document, and
+ * that is exactly why it stayed: it was a lifecycle nobody could complete, of the
+ * kind shortcuts.js refuses to promise about RowReorder.
+ *
+ * WALKED OVER BOTH, from a table, because the defect was that one of them existed
+ * without the other's teardown and nothing said so. The worker's own subscription
+ * ignores the return deliberately -- background.js subscribes once and must stay
+ * subscribed -- so this pins the PRODUCER, which is the half a page depends on.
+ */
+test("both storage doorbells hand back their own unsubscription", async () => {
+  const listeners = new Set();
+  const platform = g.Platform;
+  const previous = platform.api;
+  platform.api = {
+    storage: {
+      local: fakeArea(),
+      onChanged: {
+        addListener: (fn) => listeners.add(fn),
+        removeListener: (fn) => listeners.delete(fn),
+      },
+    },
+  };
+  try {
+    for (const subscribe of [
+      () => g.PolicyRepository.onPolicyChanged(() => {}),
+      () => g.InstallOutcome.onRecorded(() => {}),
+    ]) {
+      const before = listeners.size;
+      const unsubscribe = subscribe();
+      assert.equal(typeof unsubscribe, "function", "a doorbell that hands back nothing cannot be closed");
+      assert.equal(listeners.size, before + 1, "the listener was never attached");
+      unsubscribe();
+      assert.equal(listeners.size, before, "the listener survived its own unsubscription");
+    }
+  } finally {
+    platform.api = previous;
   }
 });

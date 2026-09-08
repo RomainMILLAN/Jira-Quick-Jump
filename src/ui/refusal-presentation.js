@@ -58,6 +58,30 @@
     BASE_FRAGMENT: t("refuseBaseFragment", "An address cannot carry a fragment."),
     BASE_NOT_CANONICAL: t("refuseBaseCanonical", "Write the address in its plain form, for example https://example.atlassian.net/jira."),
     BASE_FORBIDDEN_HOST: t("refuseBaseForbiddenHost", "That address is a cloud metadata or link-local endpoint."),
+    // NAMED FOR WHAT DECIDES IT, and the sentence says the remedy rather than the
+    // rule: a match pattern has no syntax for a bracketed host, so such a
+    // permission can never be obtained -- and asking for one used to make the
+    // grant fail for EVERY other origin in the same call.
+    //
+    // THE WORDING AVOIDS ONE WORD ON PURPOSE, like this file's header avoids
+    // naming the translation helper literally. "every section declares every
+    // collaborator it uses" greps for `<name>.` and `<name>(` after stripping
+    // COMMENTS but not STRINGS, so an English sentence ending in the name of a
+    // helper in ui/sections/parts.js reads as an undeclared call. Measured: the
+    // first draft of this entry ended on that word and turned the whole suite red
+    // with a message about a collaborator nobody borrows.
+    BASE_IPV6_LITERAL: t("refuseBaseIpv6Literal",
+      "A browser permission cannot name an IPv6 address. Use a host name instead."),
+    // NAMED FOR THE SHAPE, and the sentence names the three things a user can
+    // actually have typed. `https://*` and `https://*.corp.example` PARSED before
+    // this code existed, and permissionOrigin() turned them into `https://*/*`
+    // and `https://*.corp.example/*` -- a wildcard host permission, granted by
+    // the browser because the joker is one of the manifest's own optional
+    // patterns. The other half of the same refusal is the port's blast radius one
+    // notation further: a host a match pattern cannot parse makes the single
+    // permissions.request call fail for every origin in it.
+    BASE_HOST_SHAPE: t("refuseBaseHostShape",
+      "Write the host as a plain domain name: no wildcard, no underscore, no empty label."),
     BASE_UNSAFE_PORT: t("refuseBaseUnsafePort", "Browsers refuse to connect to that port."),
     BASE_PATH_DEPTH: t("refuseBasePathDepth", "An address cannot have more than four path segments."),
     BASE_TOO_LONG: t("refuseBaseTooLong", "That address is too long."),
@@ -103,16 +127,35 @@
     // already present, so the generic sentence won and the file's own words never
     // rendered. That was the right coverage priority; it was simply not the whole
     // of it.
+    // THE CODES BELOW ARE REACHED BY TWO DOORS, AND FOUR OF THESE SENTENCES ONLY
+    // KNEW ONE OF THEM.
+    //
+    // `readDocument` is shared: JumpPolicy.proposeImport walks it for a FILE, and
+    // JumpPolicy.restore walks it for the SAVED CONFIGURATION. Nine of its refusal
+    // codes therefore reach the host banner through PolicyRepository.load, where no
+    // file exists -- and four of them said "that file". Measured, on a policy the
+    // storage door cannot read, with nothing imported: the recovery banner read
+    // "That file does not contain a configuration."
+    //
+    // On the one view this project calls a recovery view, that sends the reader
+    // hunting for a bad import while what is unreadable is their own saved
+    // configuration -- which, in this trust model, is potentially the trace of a
+    // compromised sync. The bandeau pointed away from the event.
+    //
+    // The codes are neutral about provenance, so the sentences are too. `NOT_JSON`
+    // and `MALICIOUS_KEY` keep the word: they are produced by parseJson, which only
+    // the import door calls. A test forbids the word in any sentence indexed by a
+    // code readDocument can return.
     NOT_JSON: t("refuseNotJson", "That file is not valid JSON."),
     MALICIOUS_KEY: t("refuseMaliciousKey", "That file contains keys that are never legitimate."),
-    NOT_A_DOCUMENT: t("refuseNotADocument", "That file does not contain a configuration."),
+    NOT_A_DOCUMENT: t("refuseNotADocument", "That configuration could not be read."),
     SCHEMA_MISSING: t("refuseSchemaMissing", "That configuration does not say which format it is written in."),
     SCHEMA_TOO_NEW: t("refuseSchemaTooNew", "That configuration was written by a newer version of this extension."),
-    SHORTCUTS_NOT_A_LIST: t("refuseShortcutsNotAList", "The list of shortcuts in that file could not be read."),
+    SHORTCUTS_NOT_A_LIST: t("refuseShortcutsNotAList", "The list of shortcuts could not be read."),
     TOO_MANY_SHORTCUTS: t("refuseTooManyShortcuts", "That configuration holds more shortcuts than this extension keeps."),
-    ENGINES_NOT_A_LIST: t("refuseEnginesNotAList", "The list of search engines in that file could not be read."),
+    ENGINES_NOT_A_LIST: t("refuseEnginesNotAList", "The list of search engines could not be read."),
     TOO_MANY_ENGINES: t("refuseTooManyEngines", "That configuration ticks more search engines than this extension reads."),
-    CUSTOM_ENGINES_NOT_A_LIST: t("refuseCustomEnginesNotAList", "The list of added domains in that file could not be read."),
+    CUSTOM_ENGINES_NOT_A_LIST: t("refuseCustomEnginesNotAList", "The list of added domains could not be read."),
     TOO_MANY_CUSTOM_ENGINES: t("refuseTooManyCustomEngines", "That configuration holds more added domains than this extension keeps."),
     ENTRY_NOT_AN_OBJECT: t("refuseEntryNotAnObject", "That entry could not be read as a shortcut."),
     // The quarantine repair door, reached from the Fix button when the entry

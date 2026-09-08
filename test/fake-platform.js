@@ -40,6 +40,26 @@ export const dnrFaults = {
   stripPriority: false,
   // The 9bis path: reading back what is installed can fail on its own.
   rejectGet: false,
+  /**
+   * REFUSE WHAT IS TOO BIG, WHICH IS THE ONLY FAULT THAT MODELS THE MEASURED ONE.
+   *
+   * `refuseCapturing` refuses EVERY capturing rule, so it cannot express the case
+   * measured on Chrome 152.0.7977.82 (2026-09-07): a custom domain of 29 or more
+   * characters has its CATCH-ALL redirect refused with memoryLimitExceeded, while
+   * its named redirects and every guard are accepted. One engine loses one
+   * feature; the rest of the programme installs.
+   *
+   * A LENGTH THRESHOLD IS A MODEL, AND SAYING SO IS THE POINT. RE2 charges PROGRAM
+   * size, not characters -- measured, a guard of 154 characters is accepted while
+   * that catch-all's 137 is refused. So this switch cannot reproduce the real
+   * ordering, and it is not asked to: what the tests need is a fault that hits ONE
+   * rule of a unit and leaves its neighbours, which is the shape of the failure,
+   * and the shape is what the reporting has to survive. The measured NUMBERS live
+   * in interception.test.js as a changelock, where nothing pretends to execute RE2.
+   *
+   * 0 disables it.
+   */
+  refuseLongerThan: 0,
 };
 
 /** Granted by default: the tests that care flip it. */
@@ -267,6 +287,11 @@ const chrome = {
     async isRegexSupported(options) {
       asked.push(options);
       if (dnrFaults.refuseCapturing && options.requireCapturing) return { isSupported: false };
+      if (dnrFaults.refuseLongerThan > 0 && options.regex.length > dnrFaults.refuseLongerThan) {
+        // The reason Chrome actually gives, so a test can assert on it rather than
+        // on a boolean.
+        return { isSupported: false, reason: "memoryLimitExceeded" };
+      }
       return { isSupported: true };
     },
     async getDynamicRules() {
@@ -307,6 +332,7 @@ export function reset() {
   dnrFaults.refuseCapturing = false;
   dnrFaults.stripPriority = false;
   dnrFaults.rejectGet = false;
+  dnrFaults.refuseLongerThan = 0;
   permissionState.granted = true;
   permissionState.asked.length = 0;
   for (const key of Object.keys(i18nCatalogue)) delete i18nCatalogue[key];

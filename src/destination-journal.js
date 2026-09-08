@@ -281,6 +281,12 @@
      * match means producing a state a LOCAL door already claimed -- and the
      * journal never leaves storage.local, which is the rule this file states in
      * its own first paragraph and had failed to apply to the token.
+     *
+     * AND A CLAIM STOPS BEING VALID ONCE ITS STATE IS INSTALLED -- see
+     * withoutClaim below. Without that, a claim was valid for as long as it sat
+     * on the ring, which made a REPLAY silent: the adversary rewrites a document
+     * the user themselves committed four commits ago, its fingerprint is still
+     * here, and covers() answers yes about a change nobody claimed NOW.
      */
     covers(fingerprint) {
       return typeof fingerprint === "string" && this._claims.includes(fingerprint);
@@ -292,6 +298,48 @@
         this._entries,
         this._seen,
         [fingerprint, ...this._claims].slice(0, MAX_CLAIMS),
+        this._overflowed
+      );
+    }
+
+    /**
+     * THE CLAIM HAS DONE ITS OFFICE. Removing it is what closes the REPLAY.
+     *
+     * A claim exists to stop the window from crying over the door's own commit:
+     * the door claims the content it is about to write, the worker wakes, diffs
+     * the projection against that content, and stays silent. Once the PROJECTION
+     * CARRIES that content, there is no legitimate gap left for the claim to
+     * cover -- every future reconcile compares against it and finds nothing.
+     *
+     * Kept past that point, the claim covers a gap that can only be somebody
+     * else's. Measured, on this build, with the claim retained:
+     *
+     *   the user arms a shortcut from the options page   -> claims F(armed)
+     *   the user presses Alt+Shift+J                     -> no claim, no fact
+     *      (background disarms through PolicyRepository.apply, and PolicyDiff
+     *       emits nothing on false <- true, so F(armed) is not even pushed off)
+     *   the compromised sync writes the ARMED document back
+     *   reconcile -> [PolicyArmed] with fingerprint F(armed) -> COVERED
+     *   journal entries: 0   banner: hidden   badge: quiet
+     *
+     * The emergency stop undone in silence, on the one fact policy-diff.js calls
+     * "THE GESTURE THE ATTACKER NEEDS LAST".
+     *
+     * WHY IT IS NOT CONSUMED BY recordUnclaimed INSTEAD, which is the obvious
+     * place and the wrong one: on an installation that keeps failing, the
+     * projection stays stale and the SAME gap is re-diffed at every wake-up. A
+     * claim consumed by the first of those reads would make the second report the
+     * user's own edit as UNKNOWN -- exactly the false alarm the waterline exists
+     * to prevent. Tying the forgetting to a SUCCESSFUL projection write is what
+     * keeps both properties: no false alarm on a repeated gap, no silence on a
+     * replay.
+     */
+    withoutClaim(fingerprint) {
+      if (typeof fingerprint !== "string" || !this._claims.includes(fingerprint)) return this;
+      return new JournalState(
+        this._entries,
+        this._seen,
+        this._claims.filter((claim) => claim !== fingerprint),
         this._overflowed
       );
     }
@@ -430,12 +478,52 @@
      * project's own code, before this change.
      *
      * Claiming the content we are ABOUT to write closes it: the window can never
-     * observe a state whose claim is not already on tape. A claim whose commit is
-     * then refused covers a state nobody reached -- it costs one ring slot and
-     * silences nothing.
+     * observe a state whose claim is not already on tape.
+     *
+     * THE RESIDUAL, RESTATED NOW THAT A CLAIM IS SPENT RATHER THAN ETERNAL. This
+     * used to read "a claim whose commit is then refused covers a state nobody
+     * reached -- it costs one ring slot and silences nothing", and the last clause
+     * is not quite true: a refused commit never installs, so forgetClaim is never
+     * called for it, and that claim sits on the ring until four others push it
+     * off. A rewrite of THAT content would be covered.
+     *
+     * What bounds it is that the content is not the adversary's to choose: it is
+     * the user's stale snapshot plus the edit they tried and failed to save. An
+     * attacker holding the sync channel gains nothing by reinstating it, and
+     * cannot know it. So it is a window on a state nobody wanted rather than a
+     * capability -- named here because the previous sentence claimed there was no
+     * window at all, and a door marked shut is a door nobody reopens.
      */
     async claimAhead(fingerprint) {
       return this._update((state) => state.withClaim(fingerprint));
+    },
+
+    /**
+     * THE CLAIM IS SPENT, because the projection now carries its content.
+     *
+     * Called by the single writer, and ONLY after InstalledProjection.record has
+     * succeeded: at that instant no future reconcile has a legitimate gap for
+     * this fingerprint, so the only thing the claim can still do is silence a
+     * replay. See JournalState.withoutClaim for the measured scenario and for why
+     * recordUnclaimed must NOT be the one consuming it.
+     *
+     * A FINGERPRINT THAT IS NOT ON THE RING IS A NON-WRITE, and that short-circuit
+     * is not cosmetic -- it is the same one recordUnclaimed carries, for the same
+     * measured reason. Going through the mutation regardless would still `set`:
+     * VersionedEntry stamps a fresh `rev` and a fresh `writer` on every attempt,
+     * so the bytes change even when the value does not, storage.onChanged fires,
+     * and quota is spent -- at EVERY wake-up of the worker, on the majority path
+     * where the claim was already forgotten by the previous one.
+     *
+     * The guard inside the mutation stays, because it is the one that is atomic.
+     * withoutClaim is idempotent either way.
+     */
+    async forgetClaim(fingerprint) {
+      const { value } = await VersionedEntry.read(Platform.api.storage.local, ENTRY);
+      if (!JournalState.restore(value).covers(fingerprint)) {
+        return { ok: true, value: undefined, events: [] };
+      }
+      return this._update((state) => state.withoutClaim(fingerprint));
     },
 
     /**

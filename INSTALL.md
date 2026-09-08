@@ -21,7 +21,7 @@ self-hosted route, which is the right one for a team.
 
 ## Google Chrome, Edge, Brave, Opera
 
-1. Download `quick-jump-for-jira-chrome-<version>.zip` from
+1. Download `jira-quick-jump-chrome-<version>.zip` from
    [Releases](https://github.com/RomainMILLAN/Jira-Quick-Jump/releases), or build
    it with `npm run build:chrome`.
 2. Unzip it somewhere **permanent** — `~/Applications/quick-jump-for-jira`, not
@@ -55,7 +55,7 @@ Every release publishes SHA-256 sums and a build provenance attestation.
 
 ```bash
 sha256sum -c SHA256SUMS
-gh attestation verify quick-jump-for-jira-chrome-<version>.zip -R RomainMILLAN/Jira-Quick-Jump
+gh attestation verify jira-quick-jump-chrome-<version>.zip -R RomainMILLAN/Jira-Quick-Jump
 ```
 
 Then check the permissions the browser actually granted, on the extension's own

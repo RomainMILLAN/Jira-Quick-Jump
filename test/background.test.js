@@ -133,6 +133,52 @@ test("4. a policy changed OUTSIDE the door is journalled as UNKNOWN", async () =
   assert.equal(change.newBaseUrl, "https://evil.example.org", "the trust model promises the host, not a hash");
 });
 
+test("4bis. a REPLAY of a state the door once claimed is journalled as UNKNOWN", async () => {
+  /**
+   * END TO END, THROUGH THE WORKER, because the silence was end to end.
+   *
+   * A claim is the fingerprint of a CONTENT on a four-slot ring, and nothing used
+   * to spend it -- so any state the page had committed within the last four
+   * commits could be REWRITTEN by the compromised sync channel and covered by its
+   * own stale claim. The cheapest route, measured before this batch: the user
+   * arms a shortcut (the door claims F(armed)), presses Alt+Shift+J (which claims
+   * nothing and emits no fact, so F(armed) is not even pushed off the ring), and
+   * the adversary puts the armed document back. Result: zero entries, no banner,
+   * a quiet badge -- the emergency stop undone in silence.
+   *
+   * The worker now spends the claim right after a successful projection write, so
+   * this walks the whole route rather than the journal alone.
+   */
+  const armed = named("ABC", "https://honest.atlassian.net");
+  const disarmed = armed.disarm();
+
+  // The page commits the armed policy: it claims the content it is about to
+  // write, exactly as section-host.js does.
+  await g.DestinationJournal.claimAhead(armed.fingerprint());
+  await seedPolicy(armed);
+  await bg.sync();
+  assert.equal(
+    (await journal()).claims.length, 0,
+    "precondition: a successful install spends the claim it was covering"
+  );
+
+  // The kill switch. Disarming produces no fact and claims nothing.
+  await seedPolicy(disarmed, 2);
+  await bg.sync();
+  assert.equal((await journal()).unseen.length, 0, "precondition: the stop raises no alarm");
+
+  // And the replay: the very bytes the user had committed, written by somebody
+  // else.
+  await seedPolicy(armed, 3);
+  await bg.sync();
+
+  const log = await journal();
+  const replay = log.unseen.find((e) => e.type === "PolicyArmed" || e.type === "ShortcutArmed");
+  assert.ok(replay, "the re-arming is reported, not covered by its own stale claim");
+  assert.equal(replay.source, "UNKNOWN", "unattributed, which is the alarming reading");
+  assert.equal(log.acknowledged, false, "and the banner rises");
+});
+
 test("5. the projection is NOT written after a failed install", async () => {
   // A stale comparison base would re-diff the same gap at every wake-up and fill
   // a twenty-entry journal with duplicates -- evicting the very UNKNOWN a
@@ -166,6 +212,49 @@ test("6. after a fail-closed, the receipt says installed: false", async () => {
   await bg.sync();
 
   assert.deepEqual(store.entry("installOutcome").value, { installed: false, coverageSatisfied: false });
+});
+
+/**
+ * A POLICY THAT IS `null` IS A FACT, NOT A JET -- and the journal is the assertion.
+ *
+ * `PolicyRepository._restore` read `value.policy` straight through, so the one
+ * shape a hostile writer reaches with a single byte -- `{"rev": 1, "value": null}`
+ * -- threw a TypeError out of `load()`, on the path whose every other failure is a
+ * VALUE. The fail-closed held: purge, receipt `installed: false`, badge `off`. What
+ * did NOT hold is the JOURNAL: the `!loaded.ok` branch is what calls
+ * recordUnclaimable, and a throw lands in the outer catch thirty lines past that
+ * door. Measured, before the fix: `journal: []` where every other unreadable
+ * spelling wrote `PolicyUnreadable`.
+ *
+ * background.js carries fifteen lines saying that this exact path used to be mute
+ * -- "on the channel SECURITY.md makes the pivot of detection, along the route a
+ * compromised sync reaches most easily". One spelling of it still was.
+ *
+ * THE TABLE IS WALKED rather than one case asserted, because the defect was an
+ * ASYMMETRY between spellings of the same fact: a test on `null` alone would have
+ * gone green the day another shape started throwing.
+ */
+test("6bis. every unreadable spelling of the policy is journalled, `null` included", async () => {
+  for (const value of [null, 5, "not a policy", [], { policy: null }, { schemaVersion: 99 }]) {
+    reset();
+    store.put("policy", { rev: 1, value });
+
+    // NOT bg.sync() directly: through the listener the browser actually calls, so
+    // a jet has the same nowhere to land as it does in production.
+    await fire.startup();
+
+    const journal = await g.DestinationJournal.read();
+    const shown = JSON.stringify(value);
+    assert.deepEqual(
+      journal.entries.map((entry) => entry.type),
+      ["PolicyUnreadable"],
+      `a policy of ${shown} left no line in the journal`,
+    );
+    assert.equal(journal.entries[0].source, "UNKNOWN", `${shown} was journalled as an act`);
+    assert.equal(store.rules().length, 0, `${shown} left rules installed`);
+    assert.equal(store.entry("installOutcome").value.installed, false,
+      `${shown} did not leave a receipt saying so`);
+  }
 });
 
 test("7. permissions.onAdded refreshes the badge, and every listener shares one protocol", async () => {
@@ -901,4 +990,114 @@ test("a locally saved policy keeps its acknowledgements, and the next write file
   // And the reload after the migration still finds them, from their new home.
   const again = await g.PolicyRepository.load();
   assert.equal(again.stored.policy().shortcuts()[0].unacknowledgedWarnings().length, 0);
+});
+
+/**
+ * F-10 : UN DOMAINE CUSTOM TROP LONG PERD SON CATCH-ALL, ET CELA SE VOIT.
+ *
+ * Measured on Chrome 152.0.7977.82, 2026-09-07, by asking isRegexSupported from a
+ * loaded extension's own service worker: the catch-all's REDIRECT is accepted up
+ * to a custom host of 28 characters and refused from 29, while a named key's
+ * redirect survives to 34 and the reserved-prefix GUARDS are accepted even at the
+ * 40-character bound. (Both redirect numbers were two lower before the case
+ * repair: going case-sensitive stopped RE2 folding the literals and gave two
+ * characters of host back. Re-measured at a step of 1.) The guards -- what the per-engine budget was invented for --
+ * are the cheap rules; what blows is the catch-all's redirect, which carries the
+ * unrolled `{1,5}` and two capture groups and has no budget of any kind.
+ *
+ * `CustomEngine.MAX_HOST_LENGTH` is 40, deliberately (see the paragraph there: the
+ * excess is over-budget for ONE FEATURE, not for the domain). SECURITY.md then
+ * claims the loss is "fail-closed, reported, one engine, not silent" -- and that
+ * claim had no test. This is it, and it asserts the three things that make it true
+ * rather than the one that is easy:
+ *
+ *   NOTHING LEAKS      the guards fall WITH the catch-all, per-unit atomicity, so
+ *                      `ISO-9001` cannot leave for the Jira instance;
+ *   NOTHING ELSE FALLS  the other engines keep their catch-all, and the named
+ *                      shortcut keeps its rule on the long domain;
+ *   IT IS SAID         coverage comes out false, the diagnosis says so, and the
+ *                      causes name themselves instead of a counter.
+ *
+ * THE FAULT IS A MODEL, and fake-platform.js says why in its own words: a length
+ * threshold cannot reproduce RE2's ordering (program size, not characters). What
+ * it reproduces is the SHAPE -- one rule of a unit refused, its neighbours
+ * accepted -- and the shape is what the reporting has to survive. The measured
+ * numbers are a changelock in interception.test.js, where nothing executes RE2.
+ */
+test("a custom domain too long for its catch-all loses that, says so, and leaks nothing", async () => {
+  const LONG = "intranet-recherche-interne.example.org";   // 38 caracteres, sous la borne de 40
+  assert.equal(LONG.length, 38);
+  assert.ok(LONG.length <= g.CustomEngine.MAX_HOST_LENGTH, "le domaine doit passer la porte");
+
+  const custom = g.CustomEngine.parse({ host: LONG, shape: "search-q" });
+  assert.equal(custom.ok, true);
+
+  let policy = g.JumpPolicy.empty().withCustomEngine(custom.value).value;
+  policy = policy.withEngines(["google.com", custom.value.id()]).value;
+  const inst = g.JiraInstance.parse("https://intra.example.org/jira").value;
+  policy = policy.register("11111111-1111-4111-8111-111111111111",
+    g.ProjectKey.parse("ABC").value, inst).value;
+  policy = policy.registerCatchAll("22222222-2222-4222-8222-222222222222", inst).value;
+  for (const s of policy.shortcuts()) {
+    for (const w of s.unacknowledgedWarnings()) policy = policy.acknowledge(s.id(), w.kind).value;
+    policy = policy.armShortcut(s.id()).value;
+  }
+  await seedPolicy(policy);
+
+  // Le seuil : la longueur mesuree du catch-all a la frontiere. Le catch-all du
+  // domaine long passe au-dessus, celui de google.com et toutes les gardes restent
+  // en dessous -- ce qui est exactement l'ordre mesure sur Chrome.
+  const catalog = g.SearchEngineCatalog.forPolicy(policy);
+  const fragment = g.ReferencePattern.patternFor(g.CatchAllKey.only());
+  const longCatchAll = catalog.find(custom.value.id()).searchUrlPattern(fragment).length;
+  const googleCatchAll = catalog.find("google.com").searchUrlPattern(fragment).length;
+  assert.ok(googleCatchAll < longCatchAll, "le domaine long doit bien produire la regle la plus longue");
+  dnrFaults.refuseLongerThan = longCatchAll - 1;
+
+  await fire.startup();
+
+  const installed = store.rules();
+  const onLong = installed.filter((r) => r.condition.regexFilter.includes(LONG.replace(/\./g, "\\.")));
+  const onGoogle = installed.filter((r) => r.condition.regexFilter.includes("google\\.com"));
+
+  // NOTHING LEAKS : ni catch-all ni garde sur le moteur refuse. Une garde
+  // survivante sans son catch-all serait inoffensive ; un catch-all survivant
+  // sans ses gardes serait la fuite, et l'unite interdit les deux.
+  assert.equal(
+    onLong.some((r) => r.action.type === "redirect" && r.priority === g.RuleRanking.CATCH_ALL),
+    false,
+    "le catch-all refuse ne doit pas etre installe",
+  );
+  assert.equal(
+    onLong.some((r) => r.action.type === "allow"),
+    false,
+    "les gardes tombent avec le catch-all de leur unite",
+  );
+
+  // NOTHING ELSE FALLS : le raccourci nomme garde sa regle sur le domaine long,
+  // et google.com garde son catch-all ET ses gardes.
+  assert.ok(
+    onLong.some((r) => r.action.type === "redirect" && r.priority === g.RuleRanking.NAMED),
+    "le raccourci nomme doit continuer a fonctionner sur ce domaine",
+  );
+  assert.ok(
+    onGoogle.some((r) => r.action.type === "redirect" && r.priority === g.RuleRanking.CATCH_ALL),
+    "l'autre moteur garde son catch-all",
+  );
+  assert.ok(onGoogle.some((r) => r.action.type === "allow"), "et ses gardes");
+
+  // IT IS SAID : la couverture, le diagnostic, et des causes qui se nomment.
+  const receipt = store.entry("installOutcome").value;
+  assert.equal(receipt.installed, true, "le reste du programme est bien installe");
+  assert.equal(receipt.coverageSatisfied, false, "un moteur voulait un catch-all et ne l'a pas eu");
+
+  const codes = new Set((receipt.skipped ?? []).map((s) => s.code));
+  assert.ok(codes.has("REGEX_UNSUPPORTED"), `la cause doit se nommer, vu: ${[...codes].join(", ")}`);
+  assert.ok(codes.has("UNIT_INCOMPLETE"), "et dire que le reste de l'unite est tombe avec elle");
+
+  const report = await g.RuleInstaller.report({
+    policy, quarantinedCount: 0, reality: await g.InstallOutcome.read(), source: "PAGE",
+  });
+  assert.equal(report.diagnosis, "CATCH_ALL_NOT_INSTALLED",
+    "la ligne d'etat doit dire que le catch-all n'est pas installe");
 });

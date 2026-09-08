@@ -20,6 +20,41 @@ fonts, icons, styles — is bundled.
 no mechanism by which it could see the pages you visit. Host access is requested
 per host, by name, and never for all sites.
 
+**What the manifest declares, as opposed to what it asks.** A self-hosted Jira can
+be at any address, and a match pattern cannot be written after the fact — so
+`optional_host_permissions` declares `http://*/*` and `https://*/*`. That is a
+*ceiling*, not a request: the extension only ever calls `permissions.request` with
+the origins derived from your own configuration — your Jira hosts and the search
+domains you ticked — and a test pins that it never asks for a wildcard.
+
+**That sentence used to be false, and the test it invokes is the part that was
+wrong.** `new URL()` accepts `*` as a host character, so a destination written
+`https://*` parsed like any other: no forbidden host, no port, no bracket, a
+canonical form, pure ASCII. The origin derived from it was then the *ceiling
+itself* — the very string this manifest declares — and a browser does not refuse
+that, it grants it. `https://*.corp.example` did the same for one company's whole
+subdomain tree, and it carried no warning at all: it has a dot, it is not an IP,
+it is not punycode. A shared configuration file could therefore put a wildcard in
+front of you as an ordinary-looking destination, and the next time you pressed
+*Grant access* — the button this extension asks you to press — you would hand it
+access to every site. Nothing had to fire for that to cost you something: a
+granted permission is not revoked when a later version asks for less.
+The three tests that claimed to prevent it all fed the check a configuration
+*they had built themselves*, out of clean host names. They asserted that clean
+input produces clean output, which is true and is not the question. A host is now
+required to be a plain sequence of domain labels — no wildcard, no underscore, no
+empty label — refused in the field you type it in, and the test walks every
+hostile address this project has ever been shown, through the import door, to the
+one function that produces what is asked for.
+
+The consequence of the ceiling itself, said plainly rather than left to be
+discovered: because the joker is declared, both browsers offer you a switch to
+grant access to every site by hand — Firefox in *about:addons → Permissions*,
+Chrome in *chrome://extensions → Site access → On all sites*. Turning it on
+activates nothing extra — a redirect rule exists only for a host you configured,
+so there is no rule for any other site to fire — but the switch is there, and this
+page would be wrong not to mention it.
+
 **Redirection is declarative.** Rules are handed to the browser, which applies
 them. The extension never observes a request; it cannot, and the rules it
 installed are inspectable.
@@ -37,14 +72,16 @@ event. If anything at all had to be dropped, the banner says so and keeps saying
 it: the missing evidence does not come back.
 
 **A catch-all sends more than you might expect.** With a catch-all armed, *any*
-text shaped like an issue key — `PAYROLL-3`, `BAN-123`, a project you never
+text shaped like a **short** issue key — `BAN-123`, `GAIN-42`, a project you never
 declared — leaves for that Jira instance and lands in its access logs as
-`/browse/PAYROLL-3`. That is a real outbound flow, and it is the extension that
-creates it, so it is stated here rather than left for you to discover. Two things
-bound it: a catch-all accepts the hyphen only, so `SALARY 2024` and `WINDOWS 11`
-never leave; and a closed list of reserved prefixes (`ISO`, `CVE`, `COVID`, `WD`
-and forty-five more, 49 in all) is left alone. The list is a mitigation, never a
-completeness claim — `MP3-320` and `X1-9` are key-shaped and will be caught.
+`/browse/BAN-123`. That is a real outbound flow, and it is the extension that
+creates it, so it is stated here rather than left for you to discover. Three
+things bound it: a catch-all claims keys of **2 to 6 characters** only, so
+`PAYROLL-3` goes through untouched and a longer key has to be declared by name; it
+accepts the hyphen only, so `SALARY 2024` and `WINDOWS 11` never leave; and a
+closed list of reserved prefixes (`ISO`, `CVE`, `COVID`, `WD` and forty-five more,
+49 in all) is left alone. The list is a mitigation, never a completeness claim —
+`MP3-320` and `X1-9` are key-shaped, short, and will be caught.
 
 Two records live in **local storage only**, never synced and never exported, for
 the same reason the journal does — *a control that travels by the channel it is

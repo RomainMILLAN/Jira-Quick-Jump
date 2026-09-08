@@ -81,21 +81,31 @@
    * differ from the bytes that are stored, which is the gap the two parsers spend
    * their headers refusing. U+FFFD says "something was here".
    *
-   * WHERE IT IS NEEDED, and it is TWO places, not one. The docstring used to say
-   * "exactly one place: the quarantine rows", on the argument that "a host on any
-   * other screen has survived JiraInstance.parse, hence /^[\x21-\x7e]+$/, so no
-   * override can be in it". That sentence is false for the CHANGE BANNER: the
-   * facts it prints come back from `storage.local` through
-   * DestinationJournal.entryOf, which bounds their LENGTH and nothing else -- they
-   * are not re-parsed at render time. So the two surfaces are:
+   * WHERE IT IS NEEDED, and it is THREE places, not one and not two.
+   *
+   * The docstring first said "exactly one place: the quarantine rows", on the
+   * argument that "a host on any other screen has survived JiraInstance.parse,
+   * hence /^[\x21-\x7e]+$/, so no override can be in it". It then said two, once
+   * the CHANGE BANNER was found to falsify that sentence. Both counts were wrong
+   * the same way, and the count is not the point -- THE CRITERION is, so it is
+   * written here rather than left to be recounted:
+   *
+   *   A SURFACE NEEDS THIS DOOR WHEN IT PRINTS A STRING THAT IS NOT RE-PARSED AT
+   *   RENDER TIME. Not "a value the parser refused"; not "a host". A value read
+   *   back from storage through a door that bounds its LENGTH and validates
+   *   nothing else is exactly such a string, whatever it is called.
+   *
+   * The three, and what each one is for:
    *
    *   the quarantine rows   a value the parser REFUSED, shown to be repaired
-   *   the change banner     a value read back from the journal, shown to be checked
+   *   the change banner     a fact read back from the journal, shown to be checked
+   *   the cause lists       a reason read back from the receipt, shown to explain
+   *                         why a control fell (status line AND preview panel)
    *
-   * Both display a string to be VERIFIED by eye, which is the only property that
-   * matters here. `.ltr-isolate` STAYS on the quarantine fields -- isolating the
-   * value from the labels around it is still worth having, it was simply never
-   * the control the comment claimed.
+   * All three display a string to be VERIFIED by eye, which is the only property
+   * that matters here. `.ltr-isolate` STAYS on the quarantine fields -- isolating
+   * the value from the labels around it is still worth having, it was simply
+   * never the control the comment claimed.
    *
    * THE SET IS NOT SPELLED HERE, and it is not compiled here either.
    *

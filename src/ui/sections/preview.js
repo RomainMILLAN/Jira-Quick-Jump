@@ -161,9 +161,15 @@
             // CONSTRUCTION_REFUSED, never as a code -- so listing them among the
             // codes left three dead entries while the user read a raw enum inside
             // a translated sentence.
+            //
+            // AND WHAT IS NOT ONE OF THEM GOES THROUGH Dom.visibleText: this is
+            // the same surface as the status line's cause list -- a value read
+            // back from `storage.local` through a door that bounds its length and
+            // validates nothing else. See sections/status.js for the whole
+            // argument and for its limit.
             text: [
-              SKIPPED_SENTENCE()[cause.code] || cause.code,
-              SKIPPED_SENTENCE()[cause.subject] || cause.subject,
+              SKIPPED_SENTENCE()[cause.code] || Dom.visibleText(cause.code),
+              SKIPPED_SENTENCE()[cause.subject] || Dom.visibleText(cause.subject),
             ].filter(Boolean).join(" "),
           }));
         }

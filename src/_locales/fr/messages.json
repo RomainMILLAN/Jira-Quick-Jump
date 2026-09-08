@@ -356,6 +356,12 @@
   "refuseBaseForbiddenHost": {
     "message": "Cette adresse est un point de métadonnées cloud ou lien-local."
   },
+  "refuseBaseIpv6Literal": {
+    "message": "Une permission de navigateur ne peut pas désigner une adresse IPv6. Utilisez plutôt un nom d'hôte."
+  },
+  "refuseBaseHostShape": {
+    "message": "Écrivez l'hôte comme un simple nom de domaine : pas de joker, pas de tiret bas, pas d'étiquette vide."
+  },
   "refuseBaseUnsafePort": {
     "message": "Les navigateurs refusent de se connecter à ce port."
   },
@@ -426,7 +432,7 @@
     "message": "Ce fichier contient des clés qui ne sont jamais légitimes."
   },
   "refuseNotADocument": {
-    "message": "Ce fichier ne contient pas de configuration."
+    "message": "Cette configuration n'a pas pu être lue."
   },
   "refuseSchemaMissing": {
     "message": "Cette configuration n'indique pas dans quel format elle est écrite."
@@ -435,16 +441,16 @@
     "message": "Cette configuration a été écrite par une version plus récente de cette extension."
   },
   "refuseShortcutsNotAList": {
-    "message": "La liste des raccourcis de ce fichier n'a pas pu être lue."
+    "message": "La liste des raccourcis n'a pas pu être lue."
   },
   "refuseTooManyShortcuts": {
     "message": "Cette configuration contient plus de raccourcis que cette extension n'en conserve."
   },
   "refuseEnginesNotAList": {
-    "message": "La liste des moteurs de recherche de ce fichier n'a pas pu être lue."
+    "message": "La liste des moteurs de recherche n'a pas pu être lue."
   },
   "refuseCustomEnginesNotAList": {
-    "message": "La liste des domaines ajoutés de ce fichier n'a pas pu être lue."
+    "message": "La liste des domaines ajoutés n'a pas pu être lue."
   },
   "refuseTooManyCustomEngines": {
     "message": "Cette configuration contient plus de domaines ajoutés que cette extension n'en conserve."
@@ -611,6 +617,9 @@
   "transferNote": {
     "message": "Les raccourcis importés arrivent toujours désarmés."
   },
+  "transferUnavailable": {
+    "message": "La configuration enregistrée n'a pas pu être lue : elle ne peut être ni exportée ni remplacée."
+  },
   "tryIt": {
     "message": "Essayer une URL"
   },
@@ -715,6 +724,12 @@
   },
   "skipQueryParamTooLong": {
     "message": "L'adresse de ce moteur de recherche utilise un nom de paramètre que cette version ne sait pas apparier."
+  },
+  "skipSeparatorNoUrlForm": {
+    "message": "Cette version ne sait pas apparier l'un des séparateurs que la clé accepte."
+  },
+  "skipEmptySeparators": {
+    "message": "Cette clé n'accepte aucun séparateur, donc aucune règle ne peut être construite pour elle."
   },
   "kindDomainsReshaped": {
     "message": "la façon dont un domaine de recherche est intercepté"

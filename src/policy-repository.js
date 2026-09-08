@@ -66,7 +66,42 @@
       areaName = "sync"
     ) {
       if (value === undefined) return { ok: true, stored: StoredPolicy.empty(), refused: [], unreadable: [] };
-      const restored = JumpPolicy.restore(value.policy === undefined ? value : value.policy, {
+      /**
+       * `null` IS NOT `undefined`, AND THE WHOLE DIFFERENCE IS ON THIS LINE.
+       *
+       * ABSENT means a fresh profile, a wiped storage.local, a new device -- and
+       * it yields an empty policy, which is the line above. `null` is a value
+       * somebody WROTE, so it is a document we cannot read, and readDocument
+       * already knows how to refuse one by name (`raw === null` -> NOT_A_DOCUMENT).
+       *
+       * Read straight through, `value.policy` threw a TypeError -- on the ONE path
+       * of this house whose every failure is a VALUE. Measured, from
+       * `{"policy": {"rev": 1, "value": null}}` written into either area:
+       *
+       *   value: 5 | "x" | [] | {policy:null} | {schemaVersion:99}
+       *     -> ok:false, and background.js journals `PolicyUnreadable`
+       *   value: null
+       *     -> TypeError out of load(), journal EMPTY, badge `off`, receipt false
+       *
+       * The fail-closed held (purge, receipt, badge) but the JET SKIPPED THE
+       * JOURNAL: sync()'s `!loaded.ok` branch is what calls
+       * recordUnclaimable([PolicyUnreadable]), and a throw lands in the outer
+       * catch instead, thirty lines past that door. background.js spends fifteen
+       * lines explaining that this exact path used to be mute -- "purge, return,
+       * badge to `off`, and not one line in the journal, on the channel
+       * SECURITY.md makes the pivot of detection, along the route a compromised
+       * sync reaches most easily" -- and one spelling of it, the one that costs
+       * the adversary a single byte, still was.
+       *
+       * So: reduce every non-envelope shape to the document readDocument refuses.
+       * A value that is an object AND carries a `policy` field is the current
+       * shape; anything else -- `null` included -- travels as itself and is
+       * refused with a code, a sentence and a journal entry.
+       */
+      const document = value !== null && typeof value === "object" && value.policy !== undefined
+        ? value.policy
+        : value;
+      const restored = JumpPolicy.restore(document, {
         /**
          * WHAT THIS BUILD CAN ACTUALLY USE, passed by the layer that knows both
          * sides. `core/` holds opaque engine identities and must not ask the
@@ -95,8 +130,14 @@
       //
       // The entries we just refused come FIRST: they are this read's news, and
       // the ones already on file have had their chance to be repaired.
-      const stored = Array.isArray(value.quarantine) ? value.quarantine : [];
-      const quarantine = [...restored.quarantine, ...stored].slice(0, ShortcutAdmission.MAX_QUARANTINE);
+      // THROUGH THE READING DOOR, both sources at once -- what this read refused
+      // and what was already on file. See StoredPolicy.admitting: a set-aside
+      // entry is attacker-shaped by hypothesis, it reaches an `<input>`, and it
+      // used to be written back verbatim, surplus fields and unbounded lengths
+      // included. The cap below counts entries; the door bounds each one.
+      const quarantine = StoredPolicy.admitting(
+        [...restored.quarantine, ...(Array.isArray(value.quarantine) ? value.quarantine : [])]
+      ).slice(0, ShortcutAdmission.MAX_QUARANTINE);
       const folder = new StoredPolicy(merged, quarantine);
       // THE INVARIANT IS REPAIRED HERE, where both halves are in hand: an entry
       // in the policy AND in quarantine is an entry that was readmitted on
@@ -300,13 +341,31 @@
      * the facade has answered. storage.local.get on one key is not a cost worth
      * caching against a stale answer: the area can change under us, and the
      * facade is the single owner of that question.
+     *
+     * AND IT RETURNS ITS OWN UNSUBSCRIPTION, which is what makes a caller's
+     * teardown honest rather than announced.
+     *
+     * `SectionHost.stop()` takes back its HoldWatch listeners, its drop refusal,
+     * `visibilitychange` and `pagehide` -- and left this one and the
+     * InstallOutcome doorbell attached, so a host that had declared itself
+     * disposed went on being woken by both, calling reload() and render() on a
+     * page nobody was looking at. Harmless in production, where a page dies with
+     * its document, and that is exactly the problem: it was a lifecycle nobody
+     * could complete, of the kind shortcuts.js refuses to promise about
+     * RowReorder ("storing a handle would promise a lifecycle nobody
+     * implements").
+     *
+     * The WORKER ignores the return, deliberately: background.js subscribes once
+     * and must stay subscribed for as long as it lives.
      */
     onPolicyChanged(listener) {
-      Platform.api.storage.onChanged.addListener(async (changes, areaName) => {
+      const handler = async (changes, areaName) => {
         if (!changes[ENTRY]) return;
         if (areaName !== (await Platform.storageAreaName())) return;
         listener(areaName);
-      });
+      };
+      Platform.api.storage.onChanged.addListener(handler);
+      return () => Platform.api.storage.onChanged.removeListener(handler);
     },
   };
 

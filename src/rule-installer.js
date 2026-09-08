@@ -251,9 +251,13 @@
           // options were left out -- each defaulting to the OPPOSITE of what every
           // rule here does (verified against the API reference):
           //
-          //   isCaseSensitive  defaults to TRUE, while every condition sets
-          //                    isUrlFilterCaseSensitive: false, so that abc-1 lands
-          //                    on /browse/ABC-1;
+          //   isCaseSensitive  defaults to TRUE, and the rules DISAGREE with each
+          //                    other about it -- redirects ship `true` (the key
+          //                    carries its own two cases, so the path and the
+          //                    parameter name are read exactly), guards ship
+          //                    `false` (a guard must match wider, never narrower).
+          //                    Read off the rule, so the question follows whichever
+          //                    it is;
           //   requireCapturing defaults to FALSE, while every redirect rule carries
           //                    a regexSubstitution with backreferences -- two of
           //                    them for a catch-all.

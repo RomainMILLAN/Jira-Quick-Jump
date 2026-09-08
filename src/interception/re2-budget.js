@@ -23,6 +23,52 @@
  * At 60: four runs of 13/13/13/10, max cost 59. Same number of rules, real
  * margin. The margin is free.
  *
+ * RE-MEASURED 2026-09-07, Chrome 152.0.7977.82 and Firefox 154.0, by asking
+ * isRegexSupported from a loaded extension's own service worker -- and the
+ * campaign said three things, of which two were not what it went looking for.
+ *
+ *   THE ALTERNATION CEILING, on this file's own scalar, in google.com's guard
+ *   envelope, with five-character words:
+ *       cost 108 (18 words)  ACCEPTED
+ *       cost 114 (19 words)  memoryLimitExceeded
+ *   So the budget of 50 keeps rather more than two-fold margin.
+ *
+ *   FIREFOX IS NOT THE CONSTRAINT. Gecko 154 accepted every question asked --
+ *   including cost 294, and including the whole shipped set. Chrome is the engine
+ *   this file is calibrated against, and it should stay the one it is measured on.
+ *
+ *   AND THE SCALAR IS A PROXY, NOT THE QUANTITY RE2 CHARGES. That is the finding
+ *   that matters here, and it is written because the numbers above would otherwise
+ *   read as a promise. Two facts falsify any reading of "cost" as memory:
+ *     - the 2026-09-01 note above records cost 107 REFUSED; a cost of 108 was
+ *       accepted six days later. Either Chrome moved, or two alternations of the
+ *       same cost are not the same program -- the word lengths differ.
+ *     - LENGTH is not it either: a guard of 154 characters is accepted while the
+ *       catch-all's redirect of 137 is refused. What RE2 charges is PROGRAM size,
+ *       and the catch-all's is dominated by the unrolled `{1,5}` over a
+ *       63-character class, times its capture groups -- not by the envelope.
+ *   The margin is what protects, not the arithmetic. Do not tighten it on the
+ *   strength of a number in this comment.
+ *
+ *   THE CASE REPAIR IS DONE, AND IT GAVE BUDGET BACK INSTEAD OF SPENDING IT.
+ *   `(?-i:...)` -- the remedy SECURITY.md used to name -- is unusable here:
+ *   `interception/jump-preview.js` compiles the DELIVERED regexFilter with
+ *   `new RegExp`, and JavaScript has no inline flag groups (measured,
+ *   `SyntaxError: Invalid group`). Every rule would have broken the one organ
+ *   where a user can check this extension against itself.
+ *   What shipped instead needs no engine feature: the named key spells its own two
+ *   cases (`[Aa][Bb][Cc]`, ReferencePattern.spell) and the REDIRECT conditions go
+ *   case-SENSITIVE, so the path and the parameter name stop being folded. The
+ *   guards keep the insensitive flag -- they must, or a lower-case reserved prefix
+ *   leaks. Measured 2026-09-07, same campaign: ZERO rules that install today stop
+ *   installing, and BOTH custom-host boundaries moved OUTWARD -- the catch-all's
+ *   from 26 to 28, a 20-character named key's from 32 to 34. Under an insensitive
+ *   flag RE2 folds the path, the parameter name and the host itself; the folding
+ *   costs more program than the explicit class that replaces it. A repair that
+ *   closes a fidelity gap and widens what installs is not the trade this file
+ *   spent a year refusing to make from a desk -- it is the one the measurement
+ *   found once somebody looked.
+ *
  * AND IT IS A FRAGMENT BUDGET. The measurements are on the complete rule; the
  * post-condition is on the fragment, because this file does not know the engines.
  * The quantity constrained is therefore never the one that was measured, and the
@@ -109,6 +155,16 @@
     // buildRules, rule-installer cannot name it, and the whole programme is purged
     // under the cause UNKNOWN.
     QUERY_PARAM_TOO_LONG: "QUERY_PARAM_TOO_LONG",
+    // A separator the URL table cannot spell. It used to be no refusal at all:
+    // `IN_URL[s]` answered undefined, `join` wrote it as an empty string, and the
+    // alternation carried an EMPTY BRANCH -- so the separator became optional and
+    // `ABC1234` matched a rule written for `ABC-1234`. A matcher wider than the
+    // validator, obtained by a lookup miss, which is the one failure direction
+    // this project refuses everywhere else.
+    SEPARATOR_HAS_NO_URL_FORM: "SEPARATOR_HAS_NO_URL_FORM",
+    // A key that hands over no separator at all. Same widening, one step further:
+    // the emitted pattern would be `keyFragment(\d+)`.
+    EMPTY_SEPARATORS: "EMPTY_SEPARATORS",
     UNKNOWN: "UNKNOWN",
   });
 

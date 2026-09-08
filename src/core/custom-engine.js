@@ -62,7 +62,14 @@
     // ticked is not the one that fires. Normalising here rather than at the
     // catalogue means the identity `custom:<host>` is normalised too, so the same
     // domain typed twice cannot enter twice.
-    const host = raw.host.trim().toLowerCase().replace(/^www\./, "");
+    // REPEATEDLY, and the single pass defeated the very deduplication this strip
+    // exists for. `www.www.google.com` came out as `www.google.com`, whose
+    // emitted host pattern is `(?:www\.)?www\.google\.com` -- a DIFFERENT
+    // signature from the built-in `(?:www\.)?google\.com` that matches the same
+    // `www.google.com`, so the catalogue kept both and two rules shipped for one
+    // engine. Measured. That is exactly the "two rules for one engine burn budget
+    // and rule ids" the paragraph above refuses.
+    const host = raw.host.trim().toLowerCase().replace(/^(?:www\.)+/, "");
     /**
      * FORTY, AND THE BOUND IS AN RE2 BUDGET RATHER THAN A TIDINESS RULE.
      *
@@ -94,6 +101,46 @@
      * Forty is not a guess about RE2, it is a fact about search engines: the
      * longest this build ships is `duckduckgo.com`, fourteen characters. Forty
      * leaves room for a long intranet domain and still removes the worst case.
+     *
+     * AND THE SENTENCE ABOVE IT WAS FALSIFIED BY MEASUREMENT, so it is corrected
+     * here rather than left to be believed. It read: "at 40 the costliest parseable
+     * host produces an envelope that exhausts the budget, so the two bounds meet
+     * almost exactly". They do not meet, and the bound they were compared on is not
+     * the one that binds.
+     *
+     * Measured 2026-09-07, Chrome 152.0.7977.82, via isRegexSupported on the rules
+     * this build actually emits:
+     *
+     *   the catch-all's REDIRECT, per custom host length:  28 accepted, 29 refused
+     *   a 20-character named key's redirect:               34 accepted, 35 refused
+     *   the reserved-prefix GUARDS, even at host 40:       all accepted
+     *
+     * Both redirect numbers were TWO LOWER (26/27 and 32/33) before the case
+     * repair landed: going case-SENSITIVE on the redirects, with the named key
+     * spelling its own two cases, stopped RE2 folding the path, the parameter name
+     * and the host, and the folding cost more program than the explicit class that
+     * replaced it. Re-measured at a step of 1, on the rules RuleFactory emits.
+     *
+     * The guards -- the thing the per-engine budget was invented for -- are the
+     * CHEAP rules. What blows is the catch-all's redirect, which carries the
+     * unrolled `{1,5}` repetition and two capture groups and has no budget of any
+     * kind. Firefox 154 accepts all of it.
+     *
+     * WHAT THAT MEANS FOR A USER TODAY, stated rather than discovered: a custom
+     * domain of 29 to 40 characters keeps its named shortcuts and LOSES ITS
+     * CATCH-ALL on Chrome. Per-unit atomicity means the guards fall with it, so
+     * nothing leaks; the loss is reported -- `coverageSatisfied` comes out false,
+     * the status line says the catch-all could not be installed, and `skipped`
+     * carries REGEX_UNSUPPORTED and UNIT_INCOMPLETE. Fail-closed and visible, on
+     * one engine, not silent.
+     *
+     * THE BOUND IS DELIBERATELY LEFT AT 40, and this is the argument rather than
+     * an omission. Lowering it to 28 would refuse the domain AT THE DOOR -- this
+     * project's usual preference -- but it would also take away the named
+     * shortcuts, which work perfectly on those hosts. The excess is over-budget
+     * for ONE FEATURE, not for the domain, and a per-feature refusal is what
+     * already happens. A test pins both measured boundaries against this constant,
+     * so the gap is a number somebody chose and not a number nobody knows.
      *
      * A stored engine longer than this is REFUSED at the admission door and
      * reported in `refused`, like any other unreadable entry -- it is not silently

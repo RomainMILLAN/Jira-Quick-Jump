@@ -1006,6 +1006,69 @@ test("the storage door reads an old engine spelling without leaving the core", (
   assert.deepEqual(restored.policy.engineIds(), ["google.com", "bing.com"]);
 });
 
+test("an engine identity is bounded in SIZE too, and the bound is derived", () => {
+  /**
+   * THE ONE STRING THIS PROJECT ADMITTED WITH NO BOUND AT ALL.
+   *
+   * SHAPE is narrow and was mute about length. Measured before this:
+   *
+   *   EngineId.parse("a".repeat(20000) + ".com")      -> ok
+   *   restore({ engines: [<that>, "google.com"] })    -> both kept
+   *   octets re-persisted at every commit             -> 20 098
+   *
+   * Its neighbours all bound their text -- 256 in the quarantine door, 256 in the
+   * journal, 200 in the receipt, 40 for a custom host -- and the rule those files
+   * state ("a field with NO BOUND") had this exception left.
+   *
+   * THE BOUND IS DERIVED, and that is what this test pins: the longest identity
+   * this build can legitimately mint is `custom:` plus the longest host
+   * CustomEngine.parse admits. Restating the number here would make the
+   * assertion vacuous the day either side moves.
+   */
+  /**
+   * THE CHANGELOCK, and it is the whole reason the bound may be a literal.
+   *
+   * `core/custom-engine.js` loads AFTER `core/engine-id.js` in all five lists, so
+   * the ceiling cannot be read at load time -- and reading it lazily would cost
+   * either a duplicated fallback for an unreachable branch or a TypeError
+   * escaping a door whose every other failure is a VALUE. Same arrangement as
+   * Re2Budget.CALIBRATION_ENVELOPE_COST: spelled where it is used, compared here
+   * to what actually produces it. Lower MAX_HOST_LENGTH and this goes red.
+   */
+  const ceiling = g.EngineId.CUSTOM_PREFIX.length + g.CustomEngine.MAX_HOST_LENGTH;
+  assert.equal(g.EngineId.MAX_WRITTEN, ceiling,
+    "the spelled bound must be the prefix plus the longest host the parser admits");
+  const hostOfLength = (n) => "a".repeat(n - 4) + ".com";
+
+  // The longest legitimate custom identity passes, exactly.
+  const longest = "custom:" + hostOfLength(g.CustomEngine.MAX_HOST_LENGTH);
+  assert.equal(longest.length, ceiling, "the fixture must sit ON the bound, not near it");
+  assert.equal(g.EngineId.parse(longest).ok, true, "a legitimate identity must survive whole");
+
+  // One character more cannot resolve to any engine, in any catalogue.
+  assert.equal(g.EngineId.parse(longest + "x").ok, false, "one past the ceiling is refused");
+  assert.equal(g.EngineId.parse("a".repeat(20000) + ".com").code, "ENGINE_ID_SHAPE");
+
+  // AND IT DEGRADES VISIBLY RATHER THAN BEING FATAL, which is this door's own
+  // rule: a refused id is dropped, the rest of the configuration lives, and the
+  // user is told through a code that already has a translated sentence.
+  const restored = g.JumpPolicy.restore({
+    schemaVersion: 1,
+    engines: ["a".repeat(20000) + ".com", "google.com"],
+    shortcuts: [],
+  });
+  assert.equal(restored.ok, true, "one oversized id must not cost the configuration");
+  assert.deepEqual(restored.policy.engineIds(), ["google.com"]);
+  assert.ok(
+    restored.unreadable.some((fact) => fact.code === "ENGINE_ID_SHAPE"),
+    "and the drop is said, not silent",
+  );
+  assert.ok(
+    JSON.stringify(restored.policy.toJSON()).length < 1024,
+    "nothing oversized is re-persisted",
+  );
+});
+
 test("a bound that protects the import lives with the other bounds, not on the surface", () => {
   // It was `file.size > 64 * 1024`, written inside the options page: a security
   // bound living on the surface it protects, with no relation to the limits beside

@@ -178,8 +178,24 @@
       for (const cause of report.skipped) {
         this.causes.appendChild(el("li", {
           class: "row-msg pending",
-          text: [SKIPPED_SENTENCE()[cause.code] || cause.code,
-                 SKIPPED_SENTENCE()[cause.subject] || cause.subject].join(" "),
+          // THROUGH Dom.visibleText, and this is THE THIRD SURFACE of that
+          // control -- the docstring named two and a test's comment said "the
+          // ONLY surface", which was the part that was wrong.
+          //
+          // These causes come back from `storage.local` through
+          // InstallOutcome.read, a door that checks `typeof === "string"` and
+          // truncates at 200. Nothing else. They are NOT re-parsed at render
+          // time, exactly like a journalled fact -- and `subject` is derived from
+          // the policy (a key, an engine id), so it is precisely the field an
+          // RTL override would hide a host name in, on the panel that explains
+          // why a control fell.
+          //
+          // Only a LOCAL writer can put one there: the subjects this build
+          // produces come from an already-admitted policy, and the sync channel
+          // does not reach storage.local. So this half is defence in depth, on
+          // the same ground and with the same limit as the change banner's.
+          text: [SKIPPED_SENTENCE()[cause.code] || Dom.visibleText(cause.code),
+                 SKIPPED_SENTENCE()[cause.subject] || Dom.visibleText(cause.subject)].join(" "),
         }));
       }
       this.causes.hidden = report.skipped.length === 0;

@@ -370,7 +370,11 @@
        * ALL: dead for good, never waking when the user repaired it from the popup.
        */
       const onChanged = () => reload();
-      PolicyRepository.onPolicyChanged(onChanged);
+      // THE UNSUBSCRIPTIONS ARE HELD, because stop() promises a teardown. They
+      // were dropped on the floor: a host that had declared itself disposed went
+      // on being woken by both, calling reload() and render() on a page nobody
+      // was looking at. See PolicyRepository.onPolicyChanged.
+      const stopWatching = [PolicyRepository.onPolicyChanged(onChanged)];
       /**
        * The doorbell. Without it, reload() is only triggered by onPolicyChanged and
        * by commit() -- that is, by a gesture of the user ON THIS PAGE, never by a
@@ -384,7 +388,7 @@
        * only rampart is the rendering/again coalescing, which is what makes that
        * try/finally LOAD-BEARING rather than cosmetic.
        */
-      InstallOutcome.onRecorded(() => reload());
+      stopWatching.push(InstallOutcome.onRecorded(() => reload()));
 
       /**
        * Three states that cannot overlap: FREE, HELD BY THE POINTER (a few
@@ -490,6 +494,12 @@
           holds.stop();
           await flushed;
           stopRefusingFileDrops();
+          // The two storage subscriptions come back too. Guarded, because a
+          // platform that hands back nothing is a platform where this teardown is
+          // simply not available -- and stop() may not fail over a listener.
+          for (const unwatch of stopWatching) {
+            if (typeof unwatch === "function") unwatch();
+          }
           document.removeEventListener("visibilitychange", onHide);
           window.removeEventListener("pagehide", flush);
         },

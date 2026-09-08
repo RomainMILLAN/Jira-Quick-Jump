@@ -37,13 +37,31 @@
   // single word drops out entirely (see the cut below) rather than growing this.
   const RESERVED_RULE_ID_BASE = 1001;
 
-  const condition = (regexFilter) => ({
+  /**
+   * `caseSensitive` HAS NO DEFAULT, and that is the same argument rule-installer
+   * makes about `source`: both values are meaningful, and each is the WRONG one
+   * for the other kind of rule. An omission would pick a side in silence.
+   *
+   *   REDIRECT rules  -> SENSITIVE. The key is spelled case-explicitly by
+   *                      ReferencePattern (one class per letter), so `abc-1` still
+   *                      matches -- while the PATH and the PARAMETER NAME stop
+   *                      being folded. `/SEARCH?Q=ABC-1` no longer fires a
+   *                      redirect on a URL Google does not read as a search.
+   *   ALLOW guards    -> INSENSITIVE, and this one is load-bearing. A guard exists
+   *                      to STOP a redirect, so matching WIDER only ever stops
+   *                      more; matching NARROWER is the one direction that leaks.
+   *                      Measured against real RE2: a case-sensitive guard stops
+   *                      matching `q=cve-1` -- the lower-case form a person
+   *                      actually types -- so `CVE-1` would leave for the Jira
+   *                      instance. The reserved-prefix list is shipped in upper
+   *                      case; the typing is not.
+   *
+   * The flag is per-rule, which is what makes the pair expressible at all: the
+   * guards are their own rules, in their own band, and they keep what they need.
+   */
+  const condition = (regexFilter, { caseSensitive }) => ({
     regexFilter,
-    // Case-insensitive so that abc-123 matches. For a named key the substitution
-    // writes the key in upper case, so the destination stays correct. For the
-    // catch-all the key is a backreference, so the typed case is forwarded and
-    // Jira canonicalises it -- pinned by a test rather than left silent.
-    isUrlFilterCaseSensitive: false,
+    isUrlFilterCaseSensitive: caseSensitive,
     // A SECURITY CONTROL, not a detail. If rules applied to sub-resources, any
     // web page could do:
     //   <img src="https://www.google.com/search?q=ABC-1" onload=... onerror=...>
@@ -73,18 +91,33 @@
       let catchAll = undefined;
 
       /**
-       * ONE RULE PER (SHORTCUT, ENGINE ENTRY) -- not per ticked id.
+       * ONE RULE PER (SHORTCUT, INTERCEPTION) -- not per ticked id, and no longer
+       * per catalogue ENTRY either.
        *
        * A user who ticks `google.fr` AND adds it as a custom domain holds two ids
-       * for one engine. The catalogue now resolves both to the SAME entry (an alias
-       * rather than a silent drop, so the ticked id stops reading as UNKNOWN_ENGINE)
-       * -- which means the second binding would emit a rule with the same
-       * regexFilter, the same priority and the same action as the first, and reach
-       * DNR's unspecified tie-break through a perfectly legitimate configuration.
+       * for one interception. Both resolve to entries of their own now (see
+       * SearchEngineCatalog.forPolicy for why the catalogue stopped aliasing them
+       * into one), so without this the second binding would emit a rule with the
+       * same regexFilter, the same priority and the same action as the first, and
+       * reach DNR's unspecified tie-break through a perfectly legitimate
+       * configuration.
        *
-       * Deduplicating HERE rather than in the catalogue keeps both properties: the
-       * ticked id resolves, and exactly one rule ships.
+       * THE KEY IS THE INTERCEPTION, NEVER THE IDENTITY, and that is the whole
+       * difference from what it used to be. `engine.id` answered "is this the same
+       * ticked entry", which is not the question: two DIFFERENT ids intercepting
+       * the same URLs is exactly the case, and it is the only case, that produces
+       * indistinguishable rules.
+       *
+       * THE THREE FIELDS ARE THE THREE INPUTS OF THE EMITTED PATTERN -- host, path,
+       * query parameter -- read straight off the entry rather than the `shape` NAME
+       * that stands for the last two. A name is one indirection away from what
+       * ships: two shape names resolving to one form (which SHAPES could hold
+       * tomorrow) would be two signatures for one regex, and the tie-break would be
+       * back. `searchUrlPattern` composes these three and nothing else, so the key
+       * cannot drift from the rule it protects.
        */
+      const interceptionOf = (engine) =>
+        `${engine.hostPattern}|${engine.pathPattern}|${engine.queryParam}`;
       const emitted = new Set();
 
       for (const binding of policy.activeBindings()) {
@@ -96,9 +129,9 @@
           continue;
         }
         const shortcut = binding.shortcut();
-        // Two ids for one engine is a duplicate, not a refusal: nothing is lost and
-        // nothing is worth telling the user, so it does not join `skipped`.
-        const pair = `${shortcut.id()}|${engine.id}`;
+        // Two ids for one interception is a duplicate, not a refusal: nothing is
+        // lost and nothing is worth telling the user, so it does not join `skipped`.
+        const pair = `${shortcut.id()}|${interceptionOf(engine)}`;
         if (emitted.has(pair)) continue;
         emitted.add(pair);
         const key = shortcut.key();
@@ -110,7 +143,9 @@
             type: "redirect",
             redirect: { regexSubstitution: shape.substitutionFor(shortcut.instance()) },
           },
-          condition: condition(engine.searchUrlPattern(shape.pattern)),
+          // SENSITIVE: the key carries its own two cases, so the path and the
+          // parameter name are read as the engine reads them.
+          condition: condition(engine.searchUrlPattern(shape.pattern), { caseSensitive: true }),
           // Labels, for RuleSet's invariant and for the journal. Stripped before the
           // rules reach the platform.
           //
@@ -197,7 +232,10 @@
           // WIDE ON PURPOSE: a guard stops a redirect, so matching more can only
           // stop more. The strict prefix belongs to the redirect rules, and paying
           // for it here is what made Chrome refuse these very guards.
-          condition: condition(engine.searchUrlPattern(guard.pattern, { exactParameter: false })),
+          // INSENSITIVE, and it must stay so: a case-sensitive guard stops
+          // holding `cve-1`, which is the leak. See `condition` above.
+          condition: condition(engine.searchUrlPattern(guard.pattern, { exactParameter: false }),
+            { caseSensitive: false }),
           engineId,
           isCatchAll: false,
           // WHY THIS LABEL ESCAPES THE OBJECTION MADE TO CARRYING A KEY HERE: it

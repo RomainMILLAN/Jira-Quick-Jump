@@ -82,6 +82,42 @@
   // value reaches a Map key, a rule label and a permission origin.
   const SHAPE = /^(custom:)?[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/;
 
+  /**
+   * AND A LENGTH, because SHAPE was narrow and MUTE ABOUT SIZE -- the one string
+   * this project admitted with no bound at all.
+   *
+   * Measured, before this: `EngineId.parse("a".repeat(20000) + ".com")` came back
+   * ok, `JumpPolicy.restore` kept it, and 20 kB of a single ticked id was
+   * re-persisted at every commit. Its neighbours all bound their text --
+   * stored-policy at 256, the journal at 256, the receipt at 200, a custom host
+   * at 40 -- and the rule those files state ("a field with NO BOUND") had one
+   * exception left.
+   *
+   * IT IS DERIVED, NEVER CHOSEN. The honest ceiling is the longest identity this
+   * build can legitimately mint: `custom:` plus the longest host
+   * CustomEngine.parse admits. An id above it can resolve to NO engine, in any
+   * catalogue -- a built-in is a domain this build ships (fourteen characters at
+   * most today), a custom one is that same 40-character bound -- so refusing it
+   * costs no selection a user could have made.
+   *
+   * A LITERAL HERE, A CHANGELOCK IN THE TESTS -- and not a runtime read of the
+   * collaborator, which is the shape this first looked like it wanted.
+   *
+   * `core/custom-engine.js` is loaded AFTER this file in all five lists, so the
+   * number cannot be read at load time; reading it lazily inside parse() works
+   * (nothing invokes parse while the modules load) but costs either a duplicated
+   * fallback for an unreachable branch -- the drift this file's LEGACY note
+   * spends a paragraph refusing -- or a TypeError escaping a door whose every
+   * other failure is a VALUE, which is the exact fault admission.js was rewritten
+   * to remove.
+   *
+   * So it is spelled, like Re2Budget.CALIBRATION_ENVELOPE_COST, and a test
+   * compares it to what CustomEngine actually admits. Seven characters of prefix
+   * plus a forty-character host: the two cannot drift, because the pin goes red
+   * rather than the bound going quiet.
+   */
+  const MAX_WRITTEN = 47;
+
   class EngineId {
     constructor(written) {
       this._written = written;
@@ -118,6 +154,19 @@
       return { ok: false, code: "ENGINE_ID_NOT_A_STRING", message: "A search engine id must be text." };
     }
     const written = LEGACY.get(raw) ?? raw;
+    // THE SIZE BEFORE THE SENSE, which is the validation order this repository
+    // states at its other doors (origin -> size -> lexical -> syntax): SHAPE is
+    // anchored and linear, but a door that judges an unbounded string on shape
+    // first is the order project-shortcut.js spent a paragraph correcting.
+    //
+    // ENGINE_ID_SHAPE, and deliberately NOT a new code. Its sentence -- "A saved
+    // search engine was not an engine at all, so it is no longer selected" --
+    // says exactly what is wrong here, it is already translated in both locales,
+    // and a refused id is DROPPED rather than fatal (see admission.js). A fresh
+    // ENGINE_ID_TOO_LONG would cost two locale entries to say the same thing.
+    if (written.length > MAX_WRITTEN) {
+      return { ok: false, code: "ENGINE_ID_SHAPE", message: "That is not a search engine identifier." };
+    }
     if (!SHAPE.test(written)) {
       return { ok: false, code: "ENGINE_ID_SHAPE", message: "That is not a search engine identifier." };
     }
@@ -131,5 +180,9 @@
   };
 
   EngineId.CUSTOM_PREFIX = CUSTOM;
+  // Published for the changelock alone: the test compares it to
+  // CUSTOM_PREFIX.length + CustomEngine.MAX_HOST_LENGTH, so neither side can
+  // move without the other going red.
+  EngineId.MAX_WRITTEN = MAX_WRITTEN;
   global.EngineId = EngineId;
 })(globalThis);

@@ -15,7 +15,18 @@
 
   // How humans write the gap between key and number. Domain knowledge, named
   // once, tested directly -- not buried in a regexFilter alternation.
-  const SEPARATORS = ["-", " ", "%20"];
+  //
+  // FROZEN, on the ground project-shortcut.js freezes its own constants on:
+  // every file of this project shares `globalThis`, and this array is PUBLISHED.
+  // A `SEPARATORS.push(".")` from any file loaded afterwards used to reach the
+  // emitted rule -- `IN_URL["."]` answers undefined, `join` writes it as an empty
+  // branch, and the separator becomes OPTIONAL, so `ABC1234` matches a rule
+  // written for `ABC-1234`. A matcher wider than the validator, which is the one
+  // failure direction this project refuses. The airlock now refuses a separator
+  // it cannot spell as well (interception/reference-pattern.js, formOf): the two
+  // are not redundant -- this one stops the mutation, that one stops the
+  // widening whatever its source.
+  const SEPARATORS = Object.freeze(["-", " ", "%20"]);
 
   // Any run of digits after the separator is an issue number. So ABC-2024 is an
   // issue, not a year. Undecidable, decided, and written as a domain decision

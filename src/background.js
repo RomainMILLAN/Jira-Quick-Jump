@@ -181,6 +181,50 @@
             [{ type: "ProjectionStale", code: written.code }],
             Date.now()
           );
+        } else {
+          /**
+           * AND THE CLAIM IS SPENT HERE, which is what closes the REPLAY.
+           *
+           * A claim exists to stop the window from crying over the door's own
+           * commit. From the line above onward, the PROJECTION carries this
+           * content, so every future reconcile compares against it and finds no
+           * gap -- there is nothing legitimate left for the claim to cover. What
+           * it could still do is silence a rewrite of this very content by
+           * somebody else, and it did: with the claim retained, an adversary who
+           * puts back a document the user committed four commits ago produced no
+           * entry, no banner and a quiet badge. Measured; see
+           * JournalState.withoutClaim.
+           *
+           * IT IS DELIBERATELY NOT INSPECTED, and this is the same claim
+           * InstalledProjection.record's own comment makes about a stale
+           * baseline, in the opposite direction. A forgetting that fails leaves
+           * the claim on the ring, i.e. the PREVIOUS behaviour -- a window in
+           * which a replay of THIS content stays silent -- and the next sync()
+           * re-reads and re-forgets from scratch. Failing to remove a claim
+           * cannot invent a false alarm, so there is no fact here worth a journal
+           * entry of its own: pushing one would put a line on the tape for a
+           * degradation that heals itself, on the surface whose twenty slots are
+           * reserved for evidence.
+           *
+           * The order matters: AFTER the projection, never before. Forgetting
+           * first and then failing to record would leave the baseline stale AND
+           * the claim gone, which is the one combination that turns the user's
+           * own edit into an UNKNOWN.
+           *
+           * ITS OWN try, AND THAT IS THE LOAD-BEARING PART OF THIS BLOCK. This
+           * call sits on the SUCCESS path, which is the majority path, and a jet
+           * from it -- storage.local refusing a read -- would reach sync()'s outer
+           * catch and PURGE EVERY RULE. That is the shape of fault this whole
+           * function was rewritten to remove: a housekeeping write taking down
+           * the installation it was meant to protect the record of. The rules are
+           * already installed and correct at this point; nothing about this
+           * forgetting may reopen that decision.
+           */
+          try {
+            await DestinationJournal.forgetClaim(policy.fingerprint());
+          } catch {
+            /* the claim stays on the ring until the next sync(): see above */
+          }
         }
       }
     } catch {

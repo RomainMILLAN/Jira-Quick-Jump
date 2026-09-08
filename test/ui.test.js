@@ -950,6 +950,61 @@ test("the engines section paints, with and without a custom domain", async () =>
 });
 
 /**
+ * A DOMAIN DUPLICATING A BUILT-IN IS SHOWN AS ITSELF, AND CAN BE TAKEN BACK OUT.
+ *
+ * The catalogue used to ALIAS such a domain onto the built-in entry -- the same
+ * object registered under both ids -- so `all()` handed this section the same `id`
+ * twice. Measured, before the fix, on a configuration a user creates by hand:
+ *
+ *   ticked              [ 'google.fr', 'custom:google.fr' ]
+ *   the user unticks Google.fr
+ *   ticked              [ 'custom:google.fr' ]        <- still intercepting
+ *   chips on screen     every one of them UNPRESSED   <- the section says otherwise
+ *   remove button       rendered for NEITHER chip     <- and it cannot be undone
+ *
+ * `selected.has(engine.id)` answered for `google.fr` on both chips, and
+ * `custom.has(engine.id)` for neither. So the section that says where searches are
+ * intercepted reported an intercepted engine as switched off, and the only way back
+ * out was to export the configuration, edit the file and import it.
+ *
+ * Two assertions, because the defect had two halves and one of them is a security
+ * property: the ticked id must be VISIBLE as pressed, and the domain must be
+ * REMOVABLE. The "exactly one rule ships" half is pinned next door, in
+ * interception.test.js, where the rules are.
+ */
+test("a custom domain duplicating a built-in is pressed on its own id, and removable", async () => {
+  await withDocument(async (doc) => {
+    const sections = await loadSections();
+    const section = sections.find((s) => s === g.SectionEngines);
+
+    const engine = g.CustomEngine.parse({ host: "google.fr", shape: "search-q" });
+    assert.equal(engine.ok, true, "precondition: a built-in's own host parses as a domain");
+    assert.equal(engine.value.id(), "custom:google.fr");
+
+    // The state the user lands in after unticking the built-in: the custom id is
+    // the ONLY thing keeping google.fr intercepted.
+    let policy = g.JumpPolicy.empty().withCustomEngine(engine.value).value;
+    policy = policy.withEngines([engine.value.id()]).value;
+    const stored = new g.StoredPolicy(policy, []);
+
+    const root = doc.createElement("div");
+    const ctx = contextFor(stored, []);
+    section.mount(root, ctx);
+    section.render(stored, ctx);
+
+    const pressed = root.querySelectorAll(".chip").filter(
+      (chip) => chip.getAttribute("aria-pressed") === "true");
+    assert.equal(pressed.length, 1,
+      "the ticked id is painted as ticked: unpressed everywhere, the section hides a live rule");
+
+    // The bin belongs to the custom entry, and to it alone. `.btn` is what
+    // engines.js gives the remove button; the chips carry `.chip`.
+    assert.equal(root.querySelectorAll(".btn").length, 1,
+      "the domain carries a remove button: without one it can only be undone by a file");
+  });
+});
+
+/**
  * OPENING THE FORM DOES NOT THROW EITHER, and it flips the announcement.
  *
  * The disclosure's own branch: `this.adding` toggles and the section re-renders
@@ -1312,6 +1367,79 @@ test("the import review names the engines and domains the file selects", async (
       "a domain the file adds must appear before the user confirms",
     );
     assert.ok(shown.includes("where searches are intercepted"), "and it must say what that list is");
+  });
+});
+
+/**
+ * THE RECOVERY VIEW, AND IT IS A VIEW THAT CAN BE CLICKED.
+ *
+ * When `PolicyRepository.load` fails, `section-host` shows a banner and calls
+ * `condemn()`, which blanks the eight sections. `read.stored` stays `null` for the
+ * life of the page. SECURITY.md calls what remains a recovery view.
+ *
+ * Seven sections create their controls in `render()`, which never runs on that
+ * path. TRANSFER CREATES ITS TWO IN `mount()` -- before the first read,
+ * deliberately -- so they were the only clickable controls left, and both walked
+ * into `ctx.stored().policy()`. Measured, with SectionHost mounted on a policy the
+ * storage door cannot read:
+ *
+ *   clickable buttons on the condemned page: [ "Export…", "Import…" ]
+ *   Export… -> TypeError: Cannot read properties of null (reading 'policy')
+ *
+ * Inside a handler, so: nothing on screen, nothing in the banner, a button that
+ * appears to do nothing. Import was worse -- it opened the picker, took the file,
+ * and threw from the render that paints the review screen, which is the whole
+ * control.
+ *
+ * WALKED OVER EVERY SECTION, not written against Transfer. The defect is a CLASS
+ * -- a handler registered in mount() outrunning the first read -- and a test
+ * naming one section would go green the day another one creates a control early.
+ * Buttons only, and that is stated rather than blurred: an `<input>`'s handler is
+ * covered by its own try (see Preview.preview), and dispatching one here would
+ * assert someone else's guard.
+ */
+test("no section left clickable on a condemned page throws when clicked", async () => {
+  await withDocument(async (doc) => {
+    const all = await loadSections();
+    // The context section-host actually holds after condemn(): no folder, and a
+    // `condemned()` that says so.
+    const ctx = { ...contextFor(new g.StoredPolicy(g.JumpPolicy.empty(), []), []) };
+    ctx.stored = () => null;
+    ctx.condemned = () => true;
+
+    const buttonsIn = (node) => {
+      const found = [];
+      const walk = (n) => {
+        if (n.tagName === "BUTTON") found.push(n);
+        for (const child of n.childNodes) if (typeof child !== "string") walk(child);
+      };
+      walk(node);
+      return found;
+    };
+
+    let clicked = 0;
+    for (const section of all) {
+      const root = doc.createElement("div");
+      section.mount(root, ctx);
+      // The host calls blank() on every section, through the wrapper -- which is a
+      // no-op for a section that does not declare one. That no-op is what left
+      // these buttons live with nothing behind them.
+      new g.Section(section).blank();
+
+      for (const button of buttonsIn(root)) {
+        clicked += 1;
+        button.dispatch("click");
+        // AND IT SAYS SO. A guard that returns in silence is the same "button that
+        // does nothing" from the other side; blank() is what puts a sentence on
+        // the surface, so the section must have painted one.
+        assert.ok(
+          root.textContent.length > 0,
+          `a section left ${button.textContent} clickable on a condemned page and said nothing`,
+        );
+      }
+    }
+    // The witness only witnesses if something was clicked.
+    assert.ok(clicked > 0, "no section created a control in mount(), so this test proves nothing");
   });
 });
 

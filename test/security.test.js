@@ -7,6 +7,11 @@ import { readFileSync } from "node:fs";
 
 const g = await loadCore();
 
+// READ FROM THE MANIFEST, never restated: the ceiling this project declares is
+// exactly the string a wildcard destination used to make it ASK for, so the two
+// must come from one place or the assertion below asserts nothing.
+const manifest = JSON.parse(readFileSync(new URL("../src/manifest.json", import.meta.url), "utf8"));
+
 test("hostile project keys are refused by ProjectKey.parse itself", () => {
   // Not by isRegexSupported: `A|` and `.*` are perfectly valid regexes, and `A|`
   // would lift the alternation to the top level, turning the extension into a
@@ -583,9 +588,21 @@ test("a private host is warned about, whatever its flavour of private", () => {
     assert.ok(kinds.includes("LITERAL_IP"), `${host} is not reported as a literal IP`);
   }
 
-  // A bare name, and the loopback in brackets.
+  // A bare name.
   assert.ok(kindsFor("https://jira").includes("INTERNAL_HOST"));
-  assert.ok(kindsFor("https://[::1]").includes("INTERNAL_HOST"));
+
+  // THE LOOPBACK IN BRACKETS IS NO LONGER WARNED ABOUT -- IT IS REFUSED, and one
+  // door up. `https://[::1]` used to reach INTERNAL_HOST here; JiraInstance.parse
+  // now returns BASE_IPV6_LITERAL, because a match pattern has no syntax for a
+  // bracketed host, so the permission for such a destination could never be
+  // obtained and the shortcut could never fire -- while ASKING for it made the
+  // grant fail for every OTHER origin in the same call.
+  //
+  // So the assertion moves rather than disappearing: a stronger verdict, at an
+  // earlier door. The bracketed clauses inside isLiteralIp and isInternal survive
+  // as changelocks, and shortcut-warning.js says so in those words.
+  assert.equal(g.JiraInstance.parse("https://[::1]").code, "BASE_IPV6_LITERAL",
+    "a bracketed host is refused before it can be warned about");
 
   // And a public host stays unwarned, or the control would cry on every profile.
   assert.deepEqual(kindsFor("https://example.atlassian.net"), []);
@@ -674,6 +691,57 @@ test("the refusal catalogue covers every code the import and repair doors can pr
 });
 
 /**
+ * A DOCUMENT-LEVEL REFUSAL MAY NOT NAME A FILE, because `readDocument` HAS TWO
+ * DOORS and only one of them involves one.
+ *
+ * That function is shared: `proposeImport` walks it for a FILE, `restore` walks it
+ * for the SAVED CONFIGURATION. So its nine refusal codes reach the host banner
+ * through `PolicyRepository.load`, where no file exists -- and four of the
+ * sentences said "that file". Measured, on a policy the storage door cannot read,
+ * with nothing imported: the recovery banner read "That file does not contain a
+ * configuration."
+ *
+ * On the one view this project calls a recovery view, that points the reader at an
+ * import that never happened, while what is unreadable is their own saved
+ * configuration -- in this trust model, potentially the trace of a compromised
+ * sync. The banner pointed away from the event.
+ *
+ * SCANNED FROM readDocument ITSELF rather than from a list of four: a list drifts
+ * the day a tenth code is added to that function, which is exactly how these four
+ * were missed. `parseJson`'s own codes -- NOT_JSON, MALICIOUS_KEY -- are NOT in
+ * scope and keep the word: only the import door calls it.
+ *
+ * THE ENGLISH FALLBACK IS WHAT IS READ, and it is read on purpose: the fake
+ * platform answers "" from i18n, so `sentence()` returns the fallback written in
+ * refusal-presentation.js -- which is the string a translator is handed. Checking
+ * the fallback checks what both locales were derived from.
+ */
+test("no sentence for a document-level refusal blames a file", () => {
+  const source = readFileSync(new URL("../src/core/admission.js", import.meta.url), "utf8");
+  // The body of readDocument, which is where the shared codes are minted -- not
+  // the whole file, or admitEntry's per-entry codes (UNKNOWN_FIELD among them,
+  // whose document-level twin genuinely is the import door's alone) would join in.
+  const body = source.slice(
+    source.indexOf("const readDocument = "),
+    source.indexOf("const admitAll = "),
+  );
+  assert.ok(body.length > 500, "readDocument was not found, so this scan is broken");
+
+  const codes = [...body.matchAll(/refuse\(\s*"([A-Z_0-9]+)"/g)].map((m) => m[1]);
+  assert.ok(codes.length >= 9, `the scan found only ${codes.length} codes, so it is broken`);
+
+  for (const code of new Set(codes)) {
+    const sentence = g.RefusalPresentation.sentence({ ok: false, code });
+    assert.notEqual(sentence, code, `${code} has no sentence at all`);
+    assert.doesNotMatch(
+      sentence,
+      /\bfiles?\b/i,
+      `${code} is reachable from the storage door, so its sentence may not name a file: ${sentence}`,
+    );
+  }
+});
+
+/**
  * THE PERMISSION A DESTINATION NEEDS CARRIES NO PORT.
  *
  * `permissionOrigin()` read `URL.host`, which INCLUDES the port, so a self-hosted
@@ -689,6 +757,24 @@ test("the refusal catalogue covers every code the import and repair doors can pr
  * The two directions are asserted, because only one of them used to be:
  *   SHAPE    -- what leaves here must be a pattern a browser can parse.
  *   IDENTITY -- and it must still name the right host.
+ *
+ * AND THE OTHER SPELLING OF THAT SAME FAULT IS NOW CLOSED AT THE PARSER.
+ *
+ * The port was dropped; the IPv6 literal was left in, on the argument -- written
+ * into SECURITY.md -- that "the failure is visible and fail-closed [...] and no
+ * rule fires", so refusing a legitimate destination would cost more. Both halves
+ * of that were false. A match pattern has no syntax for a bracketed host either,
+ * and origins are requested in ONE call: so `http://[::1]:8080` sitting in the
+ * list made permissions.request throw and NOTHING at all was granted -- not the
+ * search engines, not the other shortcuts. Identical blast radius to the port,
+ * one notation further. And the destination was not legitimate in any working
+ * sense: it could never obtain its permission, hence never fire.
+ *
+ * So the bracket is refused at the door (BASE_IPV6_LITERAL) and this test asserts
+ * the consequence: everything that PARSES has a pattern with no colon in its
+ * host. The shape regex below no longer admits a bracketed alternative, which is
+ * the part that used to vouch for exactly the form SECURITY.md conceded was
+ * doubtful.
  */
 test("a destination's permission is a pattern a browser can parse, port or not", () => {
   for (const [base, expected] of [
@@ -696,20 +782,30 @@ test("a destination's permission is a pattern a browser can parse, port or not",
     ["https://jira.example.org:8443/tickets", "https://jira.example.org/*"],
     ["https://example.atlassian.net", "https://example.atlassian.net/*"],
     ["https://intra.example.org/jira", "https://intra.example.org/*"],
-    ["http://[::1]:8080", "http://[::1]/*"],
   ]) {
     const parsed = g.JiraInstance.parse(base);
     assert.equal(parsed.ok, true, `${base} must still be a legitimate destination`);
     const asked = parsed.value.permissionOrigin();
     assert.equal(asked, expected, `${base} asks for the wrong origin`);
-    // NO PORT, EVER. The regex is the shape of a match pattern, not a URL: scheme,
-    // a host with no colon in it and no wildcard, then `/*`.
+    // NO PORT AND NO BRACKET, EVER. The regex is the shape of a match pattern,
+    // not a URL: scheme, a host with no colon in it and no wildcard, then `/*`.
     assert.match(
       asked,
-      /^https?:\/\/(?:\[[0-9a-f:.]+\]|[^:/*]+)\/\*$/,
+      /^https?:\/\/[^:/*[\]]+\/\*$/,
       `${asked} is not a match pattern a browser will accept`,
     );
   }
+
+  // And the form that cannot be expressed never gets as far as producing one.
+  for (const bracketed of ["http://[::1]:8080", "https://[2001:db8::1]", "http://[::1]"]) {
+    assert.equal(g.JiraInstance.parse(bracketed).code, "BASE_IPV6_LITERAL",
+      `${bracketed} must be refused rather than asked for`);
+  }
+  // The metadata and link-local spellings keep their OWN, more specific sentence:
+  // the forbidden-host list is consulted BEFORE the bracket, on the ADDRESS the
+  // hostname denotes. That ordering is the message's, not the control's.
+  assert.equal(g.JiraInstance.parse("http://[::ffff:a9fe:a9fe]").code, "BASE_FORBIDDEN_HOST");
+  assert.equal(g.JiraInstance.parse("http://[::]").code, "BASE_FORBIDDEN_HOST");
 });
 
 test("every origin the airlock collects is a pattern a browser can parse", () => {
@@ -739,6 +835,89 @@ test("every origin the airlock collects is a pattern a browser can parse", () =>
     "http://jira:8080/browse/ABC-\\1",
     "the redirect target must keep the port the user typed",
   );
+});
+
+/**
+ * NO ORIGIN THIS PROJECT CAN EVER ASK FOR CARRIES A WILDCARD HOST -- and the
+ * subject of the assertion is what was wrong, not the assertion.
+ *
+ * Three tests already claimed this (`interception.test.js`, `structure.test.js`,
+ * the one above), and PRIVACY.md said "a test pins that it never asks for a
+ * wildcard". All three fed `requiredOrigins` a policy the TEST had built, out of
+ * hosts the TEST had chosen -- `example.atlassian.net`, `jira:8080`,
+ * `intra.example.org/jira` -- and the minimality half only ever walked
+ * `SearchEngineCatalog.all()`, i.e. the four engines that ship. So they asserted
+ * that clean input produces clean output, which is true and is not the question.
+ *
+ * `new URL()` admits `*` as a host code point. `https://*` therefore had no
+ * forbidden host, no bracket, no port, a canonical form and pure ASCII: it
+ * PARSED, and `permissionOrigin()` turned it into the all-https-hosts pattern --
+ * word for word one of the two `optional_host_permissions` this manifest
+ * declares, so the browser grants it. `https://*.corp.example` did the same for
+ * one company's whole subdomain tree, and carried NO warning at all.
+ *
+ * So this walks the DOOR instead: every base URL of the hostile corpus and every
+ * base URL of the legitimate one, through `proposeImport` -- the shape a shared
+ * configuration file actually takes -- and then through `requiredOrigins`, which
+ * is the sole producer of what `permissions.request` is ever handed. What comes
+ * out must be a plain host pattern, whatever went in.
+ *
+ * THE IMPORT DOOR AND NOT A HAND-BUILT POLICY, because that is the reachable
+ * path: an imported shortcut arrives DISARMED, and being disarmed protects
+ * nothing here -- `requiredOrigins` deliberately collects the origins of every
+ * shortcut, armed or not, so that granting access is one prompt and not one per
+ * arming.
+ */
+test("no origin the airlock can produce carries a wildcard host, whatever the document said", () => {
+  const shortcutsFrom = (bases) =>
+    bases.map((base, at) => ({ id: `id-${at}`, key: "ABC", baseUrl: base }));
+
+  // Every base URL this project has ever been shown, hostile and legitimate, in
+  // ONE document -- which is also the shape that used to make the whole grant
+  // fail, since origins are requested in a single call.
+  const document = {
+    schemaVersion: 1,
+    engines: ["google.com", "duckduckgo.com"],
+    customEngines: [],
+    shortcuts: [
+      ...shortcutsFrom(HOSTILE_BASE_URLS.map(([base]) => base)),
+      ...shortcutsFrom(VALID_BASE_URLS.map(([base]) => base)).map((entry, at) => ({
+        ...entry,
+        // A distinct key per surviving row, or the registry refuses the duplicates
+        // and the legitimate half never reaches requiredOrigins.
+        id: `ok-${at}`,
+        key: `OK${at}`,
+      })),
+    ],
+  };
+  const proposed = g.JumpPolicy.proposeImport(document);
+  assert.equal(proposed.ok, true, "the document itself must be readable");
+  assert.ok(proposed.policy.shortcuts().length > 0, "the legitimate half must survive");
+
+  const origins = g.OriginRequirements.requiredOrigins(
+    proposed.policy, g.SearchEngineCatalog.forPolicy(proposed.policy));
+  assert.ok(origins.length > 0);
+
+  for (const origin of origins) {
+    // Scheme, a host of LDH labels, and the PATH wildcard -- the only `*` a match
+    // pattern of this project may ever carry.
+    const match = /^(https?):\/\/([^/]+)\/\*$/.exec(origin);
+    assert.ok(match, `${origin} is not a plain <scheme>://<host>/* pattern`);
+    const host = match[2];
+    assert.equal(host.includes("*"), false, `${origin} asks for a wildcard host`);
+    assert.equal(host.includes("_"), false, `${origin} asks for a host a pattern cannot name`);
+    assert.equal(/:/.test(host), false, `${origin} carries a port or a bracketed address`);
+    assert.match(host, /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/,
+      `${origin} is not a sequence of LDH labels`);
+  }
+
+  // AND THE JOKER ITSELF, by name: it is the exact string the manifest declares,
+  // so a browser would GRANT it rather than refuse it. This is the one assertion
+  // that would have gone red before HOST_LDH existed.
+  for (const declared of manifest.optional_host_permissions) {
+    assert.equal(origins.includes(declared), false,
+      `the airlock asks for ${declared}, which is the manifest's own ceiling`);
+  }
 });
 
 /**

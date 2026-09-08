@@ -278,7 +278,12 @@
   const SearchEngineCatalog = {
     ...view(builtIn),
 
-    SHAPES: [...SHAPES.keys()],
+    // The shape NAMES, never the table -- and FROZEN, like its two neighbours in
+    // core/. The options page reads `SHAPES[0]` as its default and builds one chip
+    // per entry, so a name pushed from another file would offer a shape this
+    // catalogue cannot resolve. Harmless today (the Map filters it and the engine
+    // resolves to nothing), which is when the guard costs nothing.
+    SHAPES: Object.freeze([...SHAPES.keys()]),
     /** Through the Map, like build() above: this label reaches a chip in the
      *  options page, and `constructor` used to render "undefined?undefined=". */
     shapeLabel(shape) {
@@ -286,15 +291,54 @@
       return form ? `${form.pathPattern}?${form.queryParam}=` : shape;
     },
 
-    /** Built-ins plus this policy's own domains — the lookup every caller needs. */
+    /**
+     * Built-ins plus this policy's own domains — the lookup every caller needs.
+     *
+     * EVERY TICKED ID KEEPS ITS OWN ENTRY, AND THE DEDUPLICATION HAS MOVED TO THE
+     * FORGE. What stood here was a two-step dance and both steps were wrong in the
+     * same place.
+     *
+     * The history, because the second fix undid half of the first. A custom domain
+     * duplicating a built-in one (`custom:google.fr` beside `google.fr`) was first
+     * DROPPED, to avoid emitting two rules with the same regexFilter, priority and
+     * action -- DNR's unspecified tie-break. But the id stayed ticked in the
+     * policy, so `find()` answered nothing and every binding on it read
+     * UNKNOWN_ENGINE, the catch-all's included. The repair ALIASED it instead: the
+     * built-in's entry was registered under BOTH ids.
+     *
+     * WHICH MADE `all()` HAND BACK THE SAME OBJECT TWICE, UNDER ONE id. Measured,
+     * on this build, from a configuration a user can create by hand:
+     *
+     *   ticked                [ 'google.fr', 'custom:google.fr' ]
+     *   catalog.all() ids     [ …, 'google.fr', …, 'google.fr' ]   <- the alias
+     *   the user unticks Google.fr
+     *   ticked                [ 'custom:google.fr' ]
+     *   chips on screen       every one of them unpressed
+     *   rule actually live    ^https://(?:www\.)?google\.fr/search\?…q=ABC…
+     *
+     * Two consequences, and the first is the serious one. `engines.js` reads
+     * `selected.has(engine.id)` to paint a chip, so BOTH chips answered for
+     * `google.fr` and NEITHER for `custom:google.fr`: the section that says where
+     * searches are intercepted showed an intercepted engine as switched off. And
+     * `custom.has(engine.id)` was false for both, so the remove button was never
+     * rendered -- the domain could not be taken back out except by exporting the
+     * configuration, editing the file and importing it.
+     *
+     * That is the one thing this project's options page may not do. SECURITY.md
+     * spends a chapter on what the page can and cannot tell you, and transfer.js
+     * calls the interception surface a form of consent one step ahead of the
+     * permission. A surface that under-reports itself is the direction neither of
+     * them allows.
+     *
+     * SO THE CATALOGUE STOPS ARBITRATING. An identity is what the user ticked and
+     * what the interface can show and remove; "these two intercept the same URLs"
+     * is a property of the emitted rules, and it is now decided where the rules are
+     * emitted (see rule-factory.js, `interceptionOf`). One question, one owner --
+     * and the caller that needed identities stops paying for a decision it never
+     * asked for.
+     */
     forPolicy(policy) {
       const entries = new Map(builtIn);
-      // Deduplicated by (hostPattern, shape), not by id. A custom domain
-      // duplicating a built-in one (custom:google.com next to google.com) would
-      // otherwise emit two rules with the SAME priority, the SAME action and the
-      // SAME regexFilter -- reaching DNR's unspecified tie-break through a
-      // perfectly legitimate configuration.
-      const seen = new Set([...builtIn.values()].map((e) => e.hostPattern + "|" + e.shape));
       for (const custom of policy.customEngines()) {
         const entry = build({
           id: custom.id(), label: custom.label(), domain: custom.host(), shape: custom.shape(),
@@ -302,31 +346,6 @@
         // An unknown shape is filtered here, exactly as an unknown engine id is:
         // translate AND filter is the airlock's job.
         if (entry === undefined) continue;
-        const signature = entry.hostPattern + "|" + entry.shape;
-        if (seen.has(signature)) {
-          /**
-           * A DUPLICATE IS ALIASED, NEVER DROPPED -- and this was a real fault, not
-           * a tidiness question.
-           *
-           * `google.fr` ships as a built-in. A user who ALSO adds it as a custom
-           * domain gets an entry with the same hostPattern and shape, so it was
-           * skipped here to avoid emitting two identical rules at the same priority
-           * (which reaches DNR's unspecified tie-break). But the id `custom:google.fr`
-           * stayed ticked in the policy, and `catalog.find()` then answered nothing:
-           * every binding on that engine became UNKNOWN_ENGINE -- INCLUDING THE
-           * CATCH-ALL'S, which is why the page said "the catch-all could not be
-           * installed" while listing google.fr as a chosen engine.
-           *
-           * Deduplication is still what ships: the same entry is registered under
-           * BOTH ids, so exactly one rule is emitted and the ticked id resolves.
-           */
-          const twin = [...entries.values()].find(
-            (e) => e.hostPattern + "|" + e.shape === signature
-          );
-          if (twin) entries.set(entry.id, twin);
-          continue;
-        }
-        seen.add(signature);
         entries.set(entry.id, entry);
       }
       return view(entries);

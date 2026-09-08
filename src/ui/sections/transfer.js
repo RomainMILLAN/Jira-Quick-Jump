@@ -26,25 +26,83 @@
       this.file.accept = "application/json";
       this.file.addEventListener("change", () => this.read(ctx));
       this.review = el("div");
-      root.appendChild(el("div", { class: "btn-row" }, [
+      /**
+       * THE TWO BUTTONS ARE HELD, because this section is the only one whose
+       * CONTROLS ARE BORN IN mount() -- that is, before the first read.
+       *
+       * Every other section creates its controls in render(), which never runs on
+       * a condemned page. These two exist from the moment the page is mounted, and
+       * `ctx.stored()` is `null` until the first successful load. Measured, with
+       * SectionHost mounted on a policy the storage door cannot read: the ONLY
+       * clickable controls left on the recovery view were "Export…" and "Import…",
+       * and Export answered `TypeError: Cannot read properties of null (reading
+       * 'policy')` -- inside a handler, so nothing at all on screen.
+       *
+       * On the view SECURITY.md calls a recovery view, and importing a backup is a
+       * plausible way out of an unreadable configuration.
+       */
+      this.buttons = [
         el("button", { class: "btn", text: t("export", "Export…"), onClick: () => this.export(ctx) }),
-        el("button", { class: "btn", text: t("import", "Import…"), onClick: () => this.file.click() }),
-      ]));
+        el("button", { class: "btn", text: t("import", "Import…"), onClick: () => this.open(ctx) }),
+      ];
+      root.appendChild(el("div", { class: "btn-row" }, this.buttons));
       root.appendChild(this.file);
       root.appendChild(this.review);
     },
 
+    /**
+     * THE PAGE IS CONDEMNED, AND THIS SECTION SAYS SO ITSELF.
+     *
+     * A total member of the protocol protects against the absence of the MEMBER,
+     * not of the POLICY: `Section.blank()` is a no-op for a section that does not
+     * declare one, so `condemn()` left these two buttons live with nothing behind
+     * them. Status.blank already carries the same argument for its own node.
+     *
+     * `aria-disabled` and never `disabled`, on the house rule the reorder arrows
+     * state: a disabled control is not focusable, so a keyboard user reaching this
+     * row would be dropped out of it. The guards in export() and open() are what
+     * actually refuse; this is what says so.
+     */
+    blank() {
+      this.proposal = undefined;
+      for (const button of this.buttons ?? []) button.setAttribute("aria-disabled", "true");
+      if (!this.review) return;
+      Dom.clear(this.review);
+      this.review.appendChild(el("p", {
+        class: "row-msg refused",
+        text: t("transferUnavailable",
+          "The saved configuration could not be read, so it can be neither exported nor replaced."),
+      }));
+    },
+
     render(stored, ctx) {
       Dom.clear(this.review);
+      // A SUCCESSFUL RENDER TAKES THE REFUSAL BACK. blank() paints a sentence and
+      // marks the buttons; nothing else would ever unmark them, and section-host
+      // promises in its own words that "a repaired wake-up renders for good".
+      for (const button of this.buttons ?? []) button.setAttribute("aria-disabled", "false");
       if (!this.proposal) return;
       this.review.appendChild(this.diff(stored, ctx));
     },
 
     export(ctx) {
+      // GUARDED, and the guard is not defensive dressing: see the note in mount().
+      // The button exists before the first read and survives condemn(), so `null`
+      // here is a REACHABLE state and not a hypothesis.
+      const stored = ctx.stored();
+      if (!stored) return;
       // toTransfer() is defined by what it REMOVES: no acknowledgements, no
       // quarantine. A file cannot carry a decision the reader has not made.
-      const json = JSON.stringify(ctx.stored().policy().toTransfer(), null, 2);
+      const json = JSON.stringify(stored.policy().toTransfer(), null, 2);
       Dom.downloadFile("quick-jump-for-jira.json", json);
+    },
+
+    /** The picker, behind the same guard as the export: a file chosen against a
+     *  policy nobody could read has nothing to be compared with, and the review
+     *  screen -- which is the whole control -- could not be painted. */
+    open(ctx) {
+      if (!ctx.stored()) return;
+      this.file.click();
     },
 
     async read(ctx) {
@@ -87,7 +145,17 @@
         return;
       }
       this.proposal = proposed;
-      this.render(ctx.stored(), ctx);
+      // INSIDE THE GUARD, and it was outside. `read()` is called from a `change`
+      // listener that does not await it, and its own try covered the PARSE alone --
+      // so a throw from the render went nowhere. On a condemned page `diff()` reads
+      // `stored.policy()` on `null`, which is exactly that throw: the Import button
+      // opened a picker, took the file, and did nothing, in silence.
+      const stored = ctx.stored();
+      if (!stored) {
+        this.blank();
+        return;
+      }
+      this.render(stored, ctx);
     },
 
     fail(message) {

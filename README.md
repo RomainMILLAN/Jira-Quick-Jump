@@ -47,8 +47,8 @@ signed build for a team.
    accepted, so `intra.example.org/jira` is fine, and so is `http://jira:8080`.
    The list is **evaluated from top to bottom and the first match wins**, and the
    arrows on each row reorder it.
-3. **Or add a catch-all.** One entry, keyed `*`, that claims every issue key you
-   have not declared. Put your exceptions above it:
+3. **Or add a catch-all.** One entry, keyed `*`, that claims every **short** issue
+   key you have not declared — 2 to 6 characters. Put your exceptions above it:
 
    ```
    ECR  →  bnee-web.atlassian.net
@@ -57,8 +57,10 @@ signed build for a team.
    ```
 
    Anything placed *below* it is **shadowed** — the catch-all claims it first, so
-   it never fires, and the row says so. A catch-all accepts the hyphen only, and
-   leaves a closed list of reserved prefixes (`ISO`, `CVE`, `COVID`…) alone. It
+   it never fires, and the row says so. A catch-all claims keys of 2 to 6
+   characters, accepts the hyphen only, and leaves a closed list of reserved
+   prefixes (`ISO`, `CVE`, `COVID`…) alone. A longer key — `PAYROLL` — is out of
+   its reach and stays perfectly usable: declare it by name. It
    also asks for one extra acknowledgement before it will arm, because its blast
    radius is every search you type.
 4. **Grant access.** One browser prompt, naming the host. Nothing redirects
@@ -143,13 +145,14 @@ prompt ever asks for **all sites**, refuse it and open an issue.
   go through untouched, and the UI warns you if you map something people
   genuinely search for.
 
-  With a catch-all the bound is no longer your choice, it is two mechanical
-  limits: it accepts **the hyphen only** (so `SALARY 2024`, `WINDOWS 11` and
-  every other "two tokens ending in a number" go through), and it leaves a
-  **closed list of reserved prefixes** alone (`ISO`, `CVE`, `RFC`, `COVID`, `WD`,
-  `MP`, `PS`, `GTA` and forty-one more, 49 in all). That list is a **mitigation, never a
-  guarantee of completeness**: `MP3-320`, `X1-9` and `T2-500` are key-shaped and
-  will be caught. If that is not a trade you want, declare your keys instead —
+  With a catch-all the bound is no longer your choice, it is three mechanical
+  limits: it claims **2 to 6 characters** only (so `PAYROLL-3` goes through, and a
+  longer key is declared by name instead), it accepts **the hyphen only** (so
+  `SALARY 2024`, `WINDOWS 11` and every other "two tokens ending in a number" go
+  through), and it leaves a **closed list of reserved prefixes** alone (`ISO`,
+  `CVE`, `RFC`, `COVID`, `WD`, `MP`, `PS`, `GTA` and forty-one more, 49 in all).
+  That list is a **mitigation, never a guarantee of completeness**: `MP3-320`,
+  `X1-9` and `T2-500` are key-shaped, short, and will be caught. If that is not a trade you want, declare your keys instead —
   they keep working exactly as before.
 - **A catch-all forwards the case you typed.** `ban-123` becomes
   `/browse/ban-123`, because `declarativeNetRequest` cannot upper-case a captured

@@ -58,6 +58,38 @@
   })();
 
   /**
+   * AND THE OTHER DIRECTION, which was missing -- the one that decides what is
+   * intercepted rather than who wins.
+   *
+   * The assertion above walks IN_URL and checks it against the key character
+   * set. It never asked whether the DOMAIN's separators are all IN this table,
+   * and that is the direction with teeth: `IN_URL[s]` answers `undefined` for a
+   * separator the table does not know, `Array.prototype.join` writes that as an
+   * EMPTY STRING, and the alternation then carries an empty branch -- so the
+   * separator becomes OPTIONAL and `ABC1234` matches a rule written for
+   * `ABC-1234`. A matcher wider than the validator, which is the bug class
+   * project-shortcut.js exists to prevent, produced by a lookup miss.
+   *
+   * Measured, before formOf below existed:
+   *
+   *   IssueReference.SEPARATORS.push(".")
+   *   patternFor(ABC)  ->  ABC(?:-|\+|%20|)(\d+)      <- the empty branch
+   *
+   * It reads the DOMAIN's published list, which is already a load-order
+   * dependency of this file (IssueReference is destructured above), so it adds
+   * none. What a KEY hands over is checked at emission by formOf, where a future
+   * key type is reachable and a refusal already has a channel; the test suite
+   * walks both key types against this table.
+   */
+  (function assertEverySeparatorHasAUrlForm() {
+    for (const separator of IssueReference.SEPARATORS) {
+      if (typeof IN_URL[separator] !== "string") {
+        throw new Error("a separator has no URL form: " + JSON.stringify(separator));
+      }
+    }
+  })();
+
+  /**
    * Backslashes are escaped at emission even though JiraInstance.parse already
    * refuses them: validation protects the user, escaping protects against the day
    * another source (a migration, a future importer) bypasses validation.
@@ -89,8 +121,35 @@
     }
   };
 
+  /**
+   * THE URL FORM OF ONE SEPARATOR, OR A NAMED REFUSAL.
+   *
+   * `IN_URL[s]` used to be read inline, so a separator this table cannot spell
+   * became an EMPTY alternative -- an optional separator, hence a matcher wider
+   * than the validator. See assertEverySeparatorHasAUrlForm above for the
+   * measurement.
+   *
+   * A Re2Budget.Refusal and not a bare Error: rule-factory absorbs a NAMED
+   * refusal per engine and reports it in `skipped`, where an anonymous throw is
+   * purged as INSTALL_FAILED with the cause UNKNOWN. The direction of failure is
+   * now the house's -- the rule is not built rather than built too wide.
+   */
+  const formOf = (separator) => {
+    const form = IN_URL[separator];
+    if (typeof form !== "string") {
+      throw global.Re2Budget.refusal("SEPARATOR_HAS_NO_URL_FORM", { word: String(separator) });
+    }
+    return form;
+  };
+
   const emit = (keyFragment, separators, arity) => {
-    const forms = separators.map((s) => IN_URL[s]);
+    // A key that claims nothing to separate on would emit `keyFragment(\d+)`:
+    // `ABC1234` intercepted by a rule written for `ABC-1234`, which is the same
+    // widening the empty branch produced.
+    if (!Array.isArray(separators) || separators.length === 0) {
+      throw global.Re2Budget.refusal("EMPTY_SEPARATORS");
+    }
+    const forms = separators.map(formOf);
     // A single separator needs no alternation group. One construct fewer for
     // RE2, and the emitted rule reads as what it is.
     const gap = forms.length === 1 ? forms[0] : "(?:" + forms.join("|") + ")";
@@ -129,11 +188,54 @@
         reference: IssueReference.render({ toString: () => "\\1" }, "\\2"),
       };
     }
-    // A literal key opens no group of its own; the reference number is the rule's
-    // single one. Written in UPPER CASE, which is why abc-1 lands on /browse/ABC-1
-    // even though the condition is case-insensitive.
+    /**
+     * A LITERAL KEY IS SPELLED CASE-EXPLICITLY, one class per letter.
+     *
+     * It used to be the bare literal, matched by a condition carrying
+     * `isUrlFilterCaseSensitive: false` so that `abc-1` would land. That flag is
+     * GLOBAL to the pattern, so it also reached the PATH and the PARAMETER NAME --
+     * which Google reads case-sensitively -- and `/SEARCH?Q=ABC-1` therefore fired
+     * a redirect on a URL that is not a search. Same class as the `%71` hole: the
+     * rule firing on something the engine does not read.
+     *
+     * `(?-i:...)` was the obvious repair and is unavailable: `jump-preview.js`
+     * compiles the DELIVERED regexFilter with `new RegExp`, and JavaScript has no
+     * inline flag groups (measured: `SyntaxError: Invalid group`). Spelling the
+     * case HERE needs no engine feature at all -- a two-element character class is
+     * the same construct in RE2 and in JS -- so the condition can go
+     * case-SENSITIVE and the path and the parameter stop being folded.
+     *
+     * NOTHING ELSE HAD TO MOVE, which is what made this the affordable repair: the
+     * catch-all's fragment is `[A-Za-z][A-Za-z0-9_]{1,5}`, already explicit; the
+     * separators, `\d+` and the host are case-free (a URL's host is lower-cased by
+     * canonicalisation); and the guards keep the insensitive flag, which they must
+     * -- see rule-factory's `condition`.
+     *
+     * AND IT IS CHEAPER, NOT DEARER, which is the opposite of what was assumed for
+     * a year. Measured 2026-09-07 on Chrome 152.0.7977.82 and Firefox 154.0, over
+     * every shipped engine at key lengths 2, 3, 8, 14 and 20 and over custom hosts
+     * of 14 to 40 characters: ZERO regressions -- every rule that installs today
+     * still installs -- and one case IMPROVES, a 20-character key on a 34-character
+     * host going from refused to accepted. Under a case-insensitive flag RE2 must
+     * fold each literal character itself; an explicit two-element class is smaller
+     * than what the folding builds. The pattern is twelve characters longer per
+     * three letters and a smaller PROGRAM, which is the quantity RE2 charges.
+     *
+     * DIGITS AND UNDERSCORES ARE LEFT ALONE: they have no other case, and a class
+     * around them would be program size spent on nothing.
+     *
+     * `reference` KEEPS THE UPPER-CASE LITERAL, and that is the whole reason the
+     * destination stays canonical: the substitution writes `ABC`, so `abc-1` still
+     * lands on `/browse/ABC-1`. Only the MATCHER learns both cases.
+     */
+    const caseExplicit = [...claim.literal]
+      .map((character) => {
+        const lower = character.toLowerCase();
+        return lower === character ? character : "[" + character + lower + "]";
+      })
+      .join("");
     return {
-      fragment: claim.literal,
+      fragment: caseExplicit,
       arity: 1,
       reference: IssueReference.render({ toString: () => claim.literal }, "\\1"),
     };

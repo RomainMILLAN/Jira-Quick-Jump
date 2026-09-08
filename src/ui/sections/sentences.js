@@ -360,6 +360,8 @@
     ENVELOPE_OVER_BUDGET: t("skipEnvelopeOverBudget", "This search engine's address leaves no room for a rule."),
     KEY_LENGTH_OVER_BUDGET: t("skipKeyLengthOverBudget", "The catch-all claims longer keys than the browser can match."),
     QUERY_PARAM_TOO_LONG: t("skipQueryParamTooLong", "This search engine's address uses a parameter name this version cannot match."),
+    SEPARATOR_HAS_NO_URL_FORM: t("skipSeparatorNoUrlForm", "This version cannot match one of the separators the key accepts."),
+    EMPTY_SEPARATORS: t("skipEmptySeparators", "That key accepts no separator, so no rule can be built for it."),
   });
 
   /** Lazy and translated, like DIAGNOSIS: these four never went through t(). */

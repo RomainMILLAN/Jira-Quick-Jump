@@ -435,13 +435,29 @@
   const LINK_LOCAL = /^(169\.254\.|\[fe80:|\[fd00:ec2)/i;
 
   /**
+   * WHAT A WEBEXTENSIONS MATCH PATTERN CAN NAME AS A HOST: a sequence of LDH
+   * labels, and nothing else. See the paragraph at its call site in parse() for
+   * the measured wildcard grant this closes.
+   *
+   * DELIBERATELY NOT the same expression as CustomEngine.HOST, which requires a
+   * dot and an alphabetic last label -- a search engine is never reached at
+   * `jira`, while a self-hosted Jira very often is. Two questions, two
+   * expressions, and the difference is the single-label name.
+   *
+   * Anchored, linear, no `g` flag, and applied to a value `new URL()` has already
+   * lower-cased and punycoded.
+   */
+  const HOST_LDH = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/;
+
+  /**
    * THE ADDRESS, NOT ITS SPELLING -- and the claim above ("removes the whole
    * class") was false without this.
    *
    * `new URL()` canonises the decimal, octal and hexadecimal forms of an IPv4
    * literal back to the dotted one, so `http://2852039166` and `http://0xA9FEA9FE`
    * both arrived as `169.254.169.254` and were refused. What it does NOT do is
-   * unwrap an IPv4-MAPPED IPv6 address: `[::ffff:169.254.169.254]` comes out as
+   * unwrap an IPv4 address EMBEDDED IN AN IPv6 LITERAL -- mapped or compatible,
+   * see IPV4_IN_V6 below for why both count: `[::ffff:169.254.169.254]` comes out as
    * `[::ffff:a9fe:a9fe]`, in hexadecimal, matching neither the list nor
    * LINK_LOCAL. Measured, before this function existed:
    *
@@ -458,10 +474,60 @@
    * IT RETURNS THE DOTTED FORM, so ONE list and ONE regex keep deciding. Adding
    * hexadecimal twins to FORBIDDEN_HOSTS would have meant maintaining every
    * entry twice, in two notations, and getting the second one wrong.
+   *
+   * BOTH EMBEDDINGS, AND THE SECOND ONE WAS MISSING -- the pattern required
+   * `ffff:`, so it unwrapped the IPv4-MAPPED form and not the IPv4-COMPATIBLE one
+   * (RFC 4291 section 2.5.5.1, deprecated), which denotes the SAME address.
+   * Measured, with the first fix in place and the second one not:
+   *
+   *   http://[::ffff:a9fe:a9fe]  -> BASE_FORBIDDEN_HOST
+   *   http://[::169.254.169.254] -> BASE_NOT_CANONICAL   (the readable form again)
+   *   http://[::a9fe:a9fe]       -> ACCEPTED
+   *
+   * The same shape of hole, one notation further, and the unreadable spelling is
+   * again the whole point. Whether a browser would actually route it is doubtful
+   * -- the form is deprecated and modern stacks do not translate it -- so what
+   * closing it buys for CERTAIN is the sentence: this block, and SECURITY.md,
+   * claim the list judges an ADDRESS and not a spelling, and one spelling sat
+   * outside it. A claim wider than its code is what stops the next reader from
+   * looking.
+   *
+   * Nothing legitimate is taken away: every address in ::/96 is one of these two
+   * embeddings or is non-routable. `[::1]` and `[::]` carry no second group, so
+   * they are untouched -- the loopback is warned about by name, and `[::]` is
+   * refused by the list.
+   *
+   * AND A THIRD SPELLING, WHICH IS NOT IN ::/96 AT ALL -- so the paragraph above
+   * stayed true while the pattern stayed short. `::ffff:0:0/96` is the IPv4-
+   * TRANSLATED block (RFC 2765, deprecated with SIIT), and it denotes the same
+   * endpoint a third time. Measured on this build's own URL parser, which is what
+   * decides what reaches the list:
+   *
+   *   [::ffff:169.254.169.254]    -> [::ffff:a9fe:a9fe]      mapped, unwrapped
+   *   [::169.254.169.254]         -> [::a9fe:a9fe]           compatible, unwrapped
+   *   [::0:169.254.169.254]       -> [::a9fe:a9fe]           collapses onto the above
+   *   [::ffff:0:169.254.169.254]  -> [::ffff:0:a9fe:a9fe]    SURVIVES as its own spelling
+   *
+   * The fourth line is the whole reason for the `(?:0:)?`: it is the only one the
+   * canonicalisation does not fold onto a form already covered, so it was the only
+   * one that reached the list unrecognised.
+   *
+   * WHAT THIS CLOSES IS A SENTENCE, NOT A ROUTE, and saying so is what stops the
+   * next reader from believing more of it than there is. No browser translates
+   * ::ffff:0:0/96 -- a connection there goes to the IPv6 literal, not to
+   * 169.254.169.254 -- so nothing was reachable through the gap. What was wrong is
+   * that this block claims the list judges an ADDRESS and not a spelling, and a
+   * spelling sat outside it. A claim wider than its code is what stops the next
+   * reader from looking.
+   *
+   * `0:` is admitted ONLY behind `ffff:`, deliberately. Written `(?:ffff:)?(?:0:)?`
+   * the pattern would also swallow `[::0:X:Y]`, a form `new URL()` never produces --
+   * an alternative with no input, which is how a matcher starts covering shapes
+   * nobody can check.
    */
-  const IPV4_MAPPED = /^\[::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})\]$/i;
+  const IPV4_IN_V6 = /^\[::(?:ffff:(?:0:)?)?([0-9a-f]{1,4}):([0-9a-f]{1,4})\]$/i;
   const asAddress = (hostname) => {
-    const mapped = IPV4_MAPPED.exec(hostname);
+    const mapped = IPV4_IN_V6.exec(hostname);
     if (!mapped) return hostname;
     const high = parseInt(mapped[1], 16);
     const low = parseInt(mapped[2], 16);
@@ -492,6 +558,17 @@
      * so the row was warned about being an IP and never about being on a private
      * network -- the less specific of the two sentences, on the one screen where
      * the user decides whether to trust a destination.
+     *
+     * SINCE BASE_IPV6_LITERAL, THE UNWRAPPING IS A CHANGELOCK ON THIS PATH, and
+     * that is worth writing down rather than leaving to be rediscovered as dead
+     * code. No JiraInstance can exist with a bracketed hostname any more, so
+     * asAddress() called from here always answers its argument unchanged. It stays
+     * for two reasons: parse() calls it BEFORE the bracket refusal, where it is
+     * fully live and is what keeps the metadata endpoint's own sentence winning
+     * over the generic one; and the day the bracket refusal is relaxed, this is
+     * what stops a mapped RFC 1918 address from being warned about as merely "an
+     * IP" instead of "a private network". Do not delete it as unreachable, and do
+     * not trust it as a live check from this door.
      */
     address() { return asAddress(this._url.hostname); }
     /**
@@ -544,8 +621,60 @@
      * ever reach another port of that host. The extra grant buys an attacker who
      * already controls the configuration nothing, because changing the
      * destination is what the host permission gates in the first place.
+     *
+     * AND IT DROPS THE PATH TOO, which is a SECOND derogation and was declared
+     * nowhere -- SECURITY.md called the port "the ONE place" this project's
+     * permission is knowingly wider than its rule. A base URL may hold up to four
+     * path segments, and a match pattern CAN express a path
+     * (`https://intra.example.org/jira/*` is legal), so asking for the whole host
+     * is wider by a margin that is expressible, unlike the port's.
+     *
+     * It is DECLARED rather than narrowed, and HALF of that decision is now
+     * measured -- which changes the reason without changing the answer.
+     *
+     * MEASURED (Chrome 152.0.7977.82, 2026-09-07, from a loaded extension whose
+     * manifest declares the same `http://*` and `https://*` ceiling this one does):
+     * a path-bearing request IS accepted by the manifest check.
+     * `permissions.request({origins: ["https://intra.example.org/jira/*"]})` fails
+     * with "This function must be called during a user gesture" -- the SAME error
+     * as the whole-host form, and nothing about the manifest. Compare a malformed
+     * pattern, which fails differently and by name: "Invalid host wildcard". So
+     * narrowing is EXPRESSIBLE and ACCEPTED; the fear that it would throw and take
+     * the whole single-call grant down with it is answered, and it was wrong.
+     *
+     * WHAT IS STILL UNKNOWN IS WHETHER IT BUYS ANYTHING: does Chrome RETAIN the
+     * path once granted, or normalise the grant to the host? That decides between
+     * a real narrowing and theatre, and it cannot be measured from a desk. It
+     * needs a permission actually granted, which needs the bubble accepted by
+     * hand: verified, with a real CDP-dispatched click, that the gesture reaches
+     * the handler (the page's own marker is set) and that `request` then NEVER
+     * SETTLES -- the bubble is views-based browser UI, not a CDP target. Seeding
+     * `granted_permissions` in the profile does not stand in: loading the
+     * extension reinstalls it and clears them.
+     *
+     * So the width stays, and what bounds it is what bounds the port: the
+     * substitution is the literal base URL, path included, so no rule of this
+     * build reaches another path of that host, and a test asserts that on EVERY
+     * emitted rule rather than on an example. The next step is a human clicking
+     * Allow once and reading `permissions.getAll()`, not an edit here.
      */
     permissionOrigin() {
+      /**
+       * AND `hostname` CAN NO LONGER CARRY A BRACKET, which is the other half of
+       * the same lesson. A match pattern has no syntax for an IPv6 host either,
+       * so `http://[::1]:8080` produced `http://[::1]/*` and the browser refused
+       * to even ask -- with the same blast radius as the port, since origins are
+       * requested in ONE call: one such row and NOTHING was granted, search
+       * engines included. parse() now refuses the bracket outright
+       * (BASE_IPV6_LITERAL), which is why this concatenation can be trusted to
+       * produce a parseable pattern for every instance that exists.
+       *
+       * The port is dropped here and the bracket is refused there, and the
+       * asymmetry has a reason: a port is a legitimate part of a WORKING
+       * destination that the pattern merely cannot express, so it is widened
+       * away; a bracketed host makes the whole permission inexpressible, so the
+       * destination could never work at all.
+       */
       return this._url.protocol + "//" + this._url.hostname + "/*";
     }
     equals(other) {
@@ -621,6 +750,109 @@
     const address = asAddress(url.hostname);
     if (FORBIDDEN_HOSTS.has(address) || LINK_LOCAL.test(address)) {
       return refuse("BASE_FORBIDDEN_HOST", "This address is a cloud metadata or link-local endpoint.");
+    }
+    /**
+     * AN IPv6 LITERAL IS REFUSED, AND IT IS THE PERMISSION THAT DECIDES -- not
+     * a judgement about the address.
+     *
+     * A WebExtensions match pattern has NO SYNTAX for a bracketed host. So
+     * `http://[::1]:8080` parsed, `permissionOrigin()` produced `http://[::1]/*`,
+     * and the browser refused to even ask. That refusal was believed to be
+     * contained -- SECURITY.md said "the failure is visible and fail-closed [...]
+     * and no rule fires" -- and it was not: `permissions.request` is called ONCE
+     * with EVERY origin, so a single such destination made the grant fail for the
+     * search engines and for every other shortcut too. Not one jump possible,
+     * anywhere, from one row.
+     *
+     * That is exactly the blast radius permissionOrigin() dropped the port to
+     * close, one spelling further, and the arithmetic it was left open on --
+     * "refusing a legitimate destination costs more than a visible, explained
+     * failure" -- was wrong about both halves: the failure is neither visible nor
+     * contained, and the destination is not legitimate in any working sense.
+     * NOTHING is taken away that ever functioned: a shortcut written this way
+     * could never obtain its permission, so it could never fire. What changes is
+     * WHERE the user learns it -- at the field they are typing in, with a
+     * sentence they can act on, instead of a permanently inert extension whose
+     * Access button appears to do nothing.
+     *
+     * AFTER the forbidden-host check, deliberately: `[::]`, `[fe80::1]` and every
+     * IPv4-mapped spelling of the metadata endpoint keep their own, more specific
+     * and more alarming sentence. The order is the message's, not the control's --
+     * both refuse.
+     *
+     * IT TESTS THE BRACKET, which is the whole of the syntax question. `new URL()`
+     * is the one that decides: it brackets an IPv6 host and never brackets
+     * anything else, so this needs no address parsing of its own -- and an address
+     * that is not routable as written cannot slip past by another spelling,
+     * because there is no unbracketed spelling of an IPv6 host in a URL.
+     */
+    if (url.hostname.startsWith("[")) {
+      return refuse(
+        "BASE_IPV6_LITERAL",
+        "A browser permission cannot name an IPv6 address. Use a host name instead."
+      );
+    }
+    /**
+     * THE HOST OF A MATCH PATTERN IS NOT THE HOST OF A URL, and `*` is the
+     * PATTERN LANGUAGE'S WILDCARD.
+     *
+     * `new URL()` admits `*` as a host code point, so `https://*` PARSED -- no
+     * forbidden host, no bracket, canonical, pure ASCII -- and permissionOrigin()
+     * produced the ALL-HTTPS-HOSTS pattern -- the very string, word for word, that
+     * this manifest declares in `optional_host_permissions`, so the browser does
+     * not refuse it: IT GRANTS IT. (The pattern is not spelled out in this comment
+     * because its last two characters would close it; it is the second entry of
+     * that manifest field, and the corpus in test/fixtures/hostile-base-urls.js
+     * carries the inputs verbatim.) Measured end to end, from a configuration file
+     * shaped exactly as `toTransfer()` writes one:
+     *
+     *   shortcuts: [{ key: "OPS", baseUrl: "https://*.corp.example" },
+     *               { key: "ALL", baseUrl: "https://*" }]
+     *   -> import accepted, 0 refused, 0 warnings on the first row, both disarmed
+     *   -> origins handed to permissions.request: the two Google ones, PLUS the
+     *      all-subdomains pattern for corp.example AND the all-https-hosts one
+     *
+     * Being DISARMED protects nothing here: OriginRequirements deliberately
+     * collects the origins of every shortcut, armed or not, so one click on the
+     * button this extension asks the user to press hands it every subdomain of a
+     * domain the attacker picked -- or every https site. And a granted permission
+     * is NOT revoked by a later, narrower version: SECURITY.md makes that exact
+     * point about the `https://*.google.com/*` wildcard of 1.0.0.
+     *
+     * THE SAME RULE CLOSES THE OTHER HALF, which is the port's and the bracket's
+     * blast radius one notation further. `https://a.*`, `https://ex*ample.com`,
+     * `https://a_b.example`, `https://a(b.example` produce patterns whose host a
+     * browser cannot parse -- `*` is legal only as the whole host or as a leading
+     * `*.` -- and origins are requested in ONE call, so a single such row makes
+     * the grant fail for the search engines and for every other shortcut.
+     *
+     * ONE PREDICATE, BOTH FAILURES, because they are the same fact: a host that is
+     * not a plain sequence of LDH labels either WIDENS the pattern or BREAKS it.
+     * Refused at the door the user is standing at, with a sentence they can act
+     * on -- the argument BASE_IPV6_LITERAL is written on.
+     *
+     * AFTER the bracket refusal, deliberately: a bracketed IPv6 literal fails this
+     * too, and it keeps its own, more specific sentence. Before the port, because
+     * a host that cannot be named makes the port question moot.
+     *
+     * WHAT IT TAKES AWAY, stated rather than discovered: a trailing dot
+     * (`a.com.`), a label ending in `-` (`a-.com`), an empty label (`a..com`) and
+     * an underscore (`a_b.example`) stop being accepted. None of the first three
+     * is a host a Jira is served from; the underscore is the one judgement call --
+     * RFC 1123 forbids it in a host name, browsers tolerate it, and no measurement
+     * in this repository says whether a match pattern carrying one is accepted. It
+     * is refused rather than assumed, which is the direction this file takes
+     * everywhere: refuse rather than clean.
+     *
+     * A single-label intranet name (`http://jira`) still passes, and so does a
+     * punycode host -- `new URL()` has already applied it, so the value here is
+     * ASCII and lower-cased.
+     */
+    if (!HOST_LDH.test(url.hostname)) {
+      return refuse(
+        "BASE_HOST_SHAPE",
+        "Write the host as a plain domain name: no wildcard, no underscore, no empty label."
+      );
     }
     if (url.port !== "") {
       const port = Number(url.port);

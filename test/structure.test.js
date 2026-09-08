@@ -1075,11 +1075,17 @@ test("a refused string is shown with its bidi controls REMOVED, not merely isola
   assert.equal(g.Dom.visibleText("https://jira.corp.example/jira"), "https://jira.corp.example/jira");
   assert.equal(g.Dom.visibleText(undefined), "", "a missing field shows as empty, never as \"undefined\"");
 
-  // THE TWO QUARANTINE FIELDS GO THROUGH IT. They are THE ONLY surface in the
-  // project that displays a string the parser REFUSED: everywhere else the value
-  // on screen has passed JiraInstance.parse and its ASCII-printable
-  // post-condition, so no override can be in it. Here the entry is in quarantine
-  // precisely BECAUSE the override was refused.
+  // THE TWO QUARANTINE FIELDS GO THROUGH IT. The entry is in quarantine
+  // precisely BECAUSE the override was refused, so this is the surface that
+  // cannot be argued away.
+  //
+  // THIS COMMENT USED TO CLAIM THEY WERE "THE ONLY surface in the project that
+  // displays a string the parser REFUSED: everywhere else the value on screen has
+  // passed JiraInstance.parse and its ASCII-printable post-condition". That was
+  // false twice over -- the change banner first, then the cause lists -- and the
+  // sentence is what stopped the next reader from looking, which is the defect
+  // rather than the missing call. So the pin below walks EVERY surface, by the
+  // criterion Dom.visibleText now states: a string not re-parsed at render time.
   const quarantine = read("src/ui/sections/quarantine.js");
   const sanitised = quarantine.match(/value: Dom\.visibleText\(/g) || [];
   assert.equal(sanitised.length, 2, "both quarantine fields must be sanitised, not one");
@@ -1088,6 +1094,41 @@ test("a refused string is shown with its bidi controls REMOVED, not merely isola
     false,
     "a raw String() into a quarantine field is the bug this test exists for",
   );
+
+  /**
+   * AND EVERY OTHER SURFACE THAT PRINTS AN UNPARSED STRING, BY NAME.
+   *
+   * Each entry is a field read back from storage through a door that bounds its
+   * LENGTH and validates nothing else, then painted for a human to check:
+   *
+   *   sentences.js    the journal's facts    (DestinationJournal.entryOf, 256)
+   *   status.js       the receipt's causes   (InstallOutcome.read, 200)
+   *   preview.js      the same causes again
+   *
+   * The pin is on the FIELD, not on a count of calls: a count goes green the day
+   * somebody adds a call somewhere else and drops one here.
+   */
+  for (const [file, fields] of [
+    ["src/ui/sections/sentences.js", ["text"]],
+    ["src/ui/sections/status.js", ["cause.code", "cause.subject"]],
+    ["src/ui/sections/preview.js", ["cause.code", "cause.subject"]],
+  ]) {
+    const source = read(file);
+    assert.match(
+      source, /Dom\.visibleText\(/,
+      `${file} paints a value read back from storage and must ask the door for it`,
+    );
+    for (const field of fields) {
+      // The field must never reach a `text:` or a node WITHOUT the door. Written
+      // as "the raw field is not printed bare", which is the shape a regression
+      // takes: someone drops the wrapper while keeping the read.
+      const bare = new RegExp(`(?:text:\\s*|\\|\\|\\s*)${field.replace(".", "\\.")}\\b`);
+      assert.equal(
+        bare.test(codeOf(source)), false,
+        `${file} prints ${field} without Dom.visibleText`,
+      );
+    }
+  }
 
   // AND THE CONTROL HAS ONE OWNER -- ONE, not two.
   //
@@ -1262,6 +1303,63 @@ test("every document that counts the reserved prefixes counts the same list", ()
   const reach = g.CatchAllKey.only().claimsKeysUpTo();
   const unreachable = words.filter((w) => w.length > reach);
   assert.deepEqual(unreachable, [], `these are listed but never guarded: ${unreachable.join(", ")}`);
+});
+
+test("every document that states the catch-all's bound states the one that ships", () => {
+  // THE SAME DEFECT AS THE 49-WORD COUNT NEXT DOOR, on the number that decides
+  // what leaves for a Jira instance. The bound was narrowed to six characters and
+  // two documents kept describing the catch-all from before: PRIVACY.md used
+  // `PAYROLL-3` -- SEVEN characters, hence OUT_OF_REACH, measured -- as its
+  // example of what leaves, and README.md promised "every issue key you have not
+  // declared" and then counted "two mechanical limits" where there are three, the
+  // length being the load-bearing one.
+  //
+  // The two directions were opposite and both wrong: the privacy statement
+  // OVER-announced the outbound flow (safe for the reader, read by a store
+  // reviewer), the README UNDER-informed (a user arms a catch-all for a key it
+  // cannot claim, and gets silence with no sentence to explain it).
+  //
+  // catchAllNote() is deliberately NOT pinned here: it already derives the bound
+  // from CatchAllKey.CLAIMS_KEYS_UP_TO through {min}/{max} placeholders, which is
+  // the shape every one of these sentences should eventually take. These four
+  // spell it by hand, so these four need the changelock.
+  const max = g.CatchAllKey.CLAIMS_KEYS_UP_TO;
+  const shortest = 2;   // ProjectKey's own floor: /^[A-Z][A-Z0-9_]{1,19}$/
+
+  for (const doc of ["SECURITY.md", "README.md", "PRIVACY.md"]) {
+    assert.ok(
+      read(doc).includes(`${shortest} to ${max} character`),
+      `${doc} must state that a catch-all claims ${shortest} to ${max} characters`,
+    );
+  }
+  for (const locale of ["en", "fr"]) {
+    const messages = JSON.parse(read(`src/_locales/${locale}/messages.json`));
+    assert.match(
+      messages.warnCatchAll.message,
+      new RegExp(`${shortest}[^0-9]{1,6}${max}`),
+      `the ${locale} catch-all warning must name the bound that ships`,
+    );
+  }
+
+  // AND NO DOCUMENT MAY USE AS ITS EXAMPLE A KEY THE CATCH-ALL CANNOT CLAIM. That
+  // is the defect itself, not a proxy for it: a bound stated correctly beside an
+  // example that contradicts it teaches the reader to believe the example.
+  for (const doc of ["README.md", "PRIVACY.md"]) {
+    for (const [, word] of read(doc).matchAll(/`([A-Z][A-Z0-9_]*)-\d+`/g)) {
+      const key = g.ProjectKey.parse(word);
+      if (!key.ok) continue;
+      const claimed = g.CatchAllKey.only().verdictFor(key.value) === g.CatchAllKey.VERDICTS.CLAIMED;
+      // A key OUT OF REACH may still be named -- `PAYROLL-3` now illustrates
+      // exactly that -- but only in a sentence that says it goes through.
+      if (claimed) continue;
+      const context = read(doc).split("\n").filter((line) => line.includes(`\`${word}-`)).join(" ");
+      assert.match(
+        context,
+        /goes through|out of its reach|declare/,
+        `${doc} names ${word}-N, which the catch-all does not claim, without saying so`,
+      );
+    }
+  }
 });
 
 test("the core never calls the airlock", () => {
@@ -2020,10 +2118,20 @@ test("no Map is reachable from any global this project publishes", async () => {
   assert.ok(published.size > 20, `only ${published.size} globals found: the scan is broken`);
 
   const offenders = [];
+  // A PUBLISHED ARRAY IS THE SAME HOLE ONE NOTATION OVER, and it was open on
+  // three of them. `Object.freeze` does nothing to a Map, which is why a Map must
+  // stay module-private; an Array CAN be frozen, so the rule there is that it
+  // must be. Measured, before the freeze: `IssueReference.SEPARATORS.push(".")`
+  // put an EMPTY branch in the emitted alternation -- the separator became
+  // optional, so `ABC1234` matched a rule written for `ABC-1234`, a matcher wider
+  // than the validator; and `ShortcutWarning.KINDS.push("FORGED")` made
+  // Consent.parse admit an acknowledgement kind nothing knows.
+  const thawed = [];
   for (const owner of published) {
     const held = core[owner];
     if (held === undefined || held === null) continue;
     if (held instanceof Map) offenders.push(owner);
+    if (Array.isArray(held) && !Object.isFrozen(held)) thawed.push(owner);
     if (typeof held !== "object" && typeof held !== "function") continue;
     for (const name of Object.getOwnPropertyNames(held)) {
       // A getter may exist -- JumpPolicy.DIAGNOSES is one -- and reading it must
@@ -2031,12 +2139,18 @@ test("no Map is reachable from any global this project publishes", async () => {
       let value;
       try { value = held[name]; } catch { continue; }
       if (value instanceof Map) offenders.push(`${owner}.${name}`);
+      if (Array.isArray(value) && !Object.isFrozen(value)) thawed.push(`${owner}.${name}`);
     }
   }
   assert.deepEqual(
     offenders,
     [],
     "a published Map cannot be frozen, so it is mutable from every file: keep it module-private",
+  );
+  assert.deepEqual(
+    thawed,
+    [],
+    "a published array is writable from every file: freeze it, or keep it module-private",
   );
 
   // AND THE ONE TABLE WHOSE KEYS ARE LEGITIMATELY PUBLISHED stays a list of
@@ -2045,4 +2159,62 @@ test("no Map is reachable from any global this project publishes", async () => {
   // being vacuous on all three of its rows instead of two.
   assert.ok(Array.isArray(core.SearchEngineCatalog.SHAPES));
   assert.equal(core.SearchEngineCatalog.SHAPES.some((s) => typeof s !== "string"), false);
+});
+
+/**
+ * THE REPOSITORY AND ITS ARTEFACTS ARE SPELLED ONE WAY, and the authority is the
+ * thing that produces them.
+ *
+ * `STORE_LISTING.md` carries the instruction "keep this in step with
+ * src/manifest.json" and did not: it wrote `Jira-Quick-Jump` where the manifest
+ * wrote `jira-quick-jump`, and `SECURITY.md` used the second spelling in the
+ * advisory link and in the verification command it invites the reader to run.
+ * GitHub redirects, so nothing broke -- which is why it drifted.
+ *
+ * WORSE, AND ON THE SAME PAGE FAMILY: `INSTALL.md` told the reader to download
+ * and verify `quick-jump-for-jira-chrome-<version>.zip`. No release has ever
+ * carried that name -- package.json builds `jira-quick-jump-chrome-{version}.zip`
+ * -- so `gh attestation verify` answered "no such file" on the one command
+ * SECURITY.md offers as the end-to-end integrity check of the distribution
+ * chain. A verification step that cannot run is worse than none: it is a control
+ * the reader believes they exercised.
+ *
+ * DERIVED FROM package.json, never restated: the build scripts are the only
+ * producers of an archive name, so they are the only place it can be right.
+ */
+test("every document spells the repository and its artefacts the way the build does", () => {
+  const pkg = JSON.parse(read("package.json"));
+  const docs = ["README.md", "INSTALL.md", "SECURITY.md", "PRIVACY.md", "STORE_LISTING.md"];
+
+  // The archive names, taken from the scripts that emit them.
+  const built = Object.values(pkg.scripts)
+    .flatMap((script) => [...script.matchAll(/--filename=([A-Za-z0-9.{}-]+)\.zip/g)])
+    .map((m) => m[1].replace("-{version}", ""));
+  assert.equal(built.length, 2, `expected two build scripts, found ${built.length}`);
+
+  for (const doc of docs) {
+    const text = read(doc);
+    // Any `<name>-chrome-` / `<name>-firefox-` token in a document must be one the
+    // build actually produces.
+    for (const m of text.matchAll(/`([A-Za-z0-9-]+-(?:chrome|firefox))-<version>\.zip`?/g)) {
+      assert.ok(
+        built.includes(m[1]),
+        `${doc} names ${m[1]}-<version>.zip, which no build script produces (${built.join(", ")})`,
+      );
+    }
+    // And one spelling of THIS repository, taken from the manifest.
+    //
+    // CASE-INSENSITIVE MATCHING, THEN AN EXACT COMPARISON: the author's other
+    // repositories are legitimately named otherwise -- `Romain-MILLAN-Tag`, the
+    // vendored stylesheet's upstream, is cited in README.md -- so a test that
+    // demanded every `RomainMILLAN/<name>` be this project would fail on a
+    // correct line. What is checked is the drift that actually happened: the same
+    // name in another case.
+    const homepage = manifest.homepage_url;
+    const slug = homepage.slice(homepage.lastIndexOf("/") + 1);
+    for (const m of text.matchAll(/RomainMILLAN\/([A-Za-z-]+)/g)) {
+      if (m[1].toLowerCase() !== slug.toLowerCase()) continue;
+      assert.equal(m[1], slug, `${doc} spells the repository ${m[1]} where the manifest says ${slug}`);
+    }
+  }
 });

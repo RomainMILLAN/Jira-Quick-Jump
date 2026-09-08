@@ -67,7 +67,11 @@ test("the anchor seam is locked against a literal expectation", () => {
   // ReferencePattern returns an UNANCHORED fragment; the engine wraps it and
   // places both anchors. Without this test the anchor ends up doubled or absent.
   const key = g.ProjectKey.parse("ABC").value;
-  assert.equal(g.ReferencePattern.patternFor(key), "ABC(?:-|\\+|%20)(\\d+)");
+  // ONE CLASS PER LETTER, and the substitution still writes the canonical `ABC`
+  // (see spell()): the MATCHER learns both cases, the DESTINATION does not. That
+  // is what lets the condition go case-SENSITIVE and stop folding the path and the
+  // parameter name.
+  assert.equal(g.ReferencePattern.patternFor(key), "[Aa][Bb][Cc](?:-|\\+|%20)(\\d+)");
   // One domain per entry, so the whole composed pattern is compared literally —
   // which is what actually locks the seam.
   assert.equal(
@@ -81,8 +85,12 @@ test("the anchor seam is locked against a literal expectation", () => {
   const rules = delivered(policy);
   assert.equal(
     rules[0].condition.regexFilter,
-    "^https://(?:www\\.)?google\\.com/search\\?(?:(?:[^=&%q][^=&]*|q[^=&]+)?=[^&]*&)*q=ABC(?:-|\\+|%20)(\\d+)(?:&|$)"
+    "^https://(?:www\\.)?google\\.com/search\\?(?:(?:[^=&%q][^=&]*|q[^=&]+)?=[^&]*&)*q=[Aa][Bb][Cc](?:-|\\+|%20)(\\d+)(?:&|$)"
   );
+  // AND THE FLAG THAT GOES WITH IT, on the same rule: a redirect is read as the
+  // engine reads it. The pair is the control -- an explicit key under an
+  // insensitive flag would be the old over-match with extra characters.
+  assert.equal(rules[0].condition.isUrlFilterCaseSensitive, true);
 });
 
 test("the pattern has exactly one capture group and the substitution one backreference", () => {
@@ -146,6 +154,23 @@ test("required origins cover engines and every shortcut, disarmed ones included"
   assert.ok(origins.includes("https://example.atlassian.net/*"), "a disarmed shortcut still needs its origin");
   // Never a wildcard scheme: Chrome refuses what the manifest does not declare.
   assert.ok(origins.every((o) => o.startsWith("https://") || o.startsWith("http://")));
+  /**
+   * AND NEVER A WILDCARD HOST -- the sentence PRIVACY.md makes, held by a test
+   * rather than by the shape of the code.
+   *
+   * The manifest declares `http://*` and `https://*` as OPTIONAL host permissions,
+   * because a self-hosted Jira can be at any address and a match pattern cannot be
+   * written after the fact. That ceiling is what makes this assertion worth its
+   * lines: what bounds the prompt is not the manifest, it is that this is the only
+   * producer of what `permissions.request` is ever handed. The `*` in an origin is
+   * the PATH -- `https://host/*` -- and nowhere else.
+   */
+  for (const origin of origins) {
+    const host = origin.slice(origin.indexOf("://") + 3, origin.lastIndexOf("/"));
+    assert.equal(host.includes("*"), false, `${origin} asks for a wildcard host`);
+    assert.ok(host.length > 0, `${origin} names no host at all`);
+    assert.ok(origin.endsWith("/*"), `${origin} is not a match pattern`);
+  }
 });
 
 test("a self-hosted destination with a path keeps its path", () => {
@@ -359,16 +384,24 @@ test("the whole rule set is locked against a literal expectation", () => {
       id: 1, priority: 3,
       action: { type: "redirect", redirect: { regexSubstitution: "https://example.atlassian.net/browse/ABC-\\1" } },
       condition: {
-        regexFilter: "^https://(?:www\\.)?google\\.com/search\\?(?:(?:[^=&%q][^=&]*|q[^=&]+)?=[^&]*&)*q=ABC(?:-|\\+|%20)(\\d+)(?:&|$)",
-        isUrlFilterCaseSensitive: false, resourceTypes: ["main_frame"],
+        regexFilter: "^https://(?:www\\.)?google\\.com/search\\?(?:(?:[^=&%q][^=&]*|q[^=&]+)?=[^&]*&)*q=[Aa][Bb][Cc](?:-|\\+|%20)(\\d+)(?:&|$)",
+        // SENSITIVE, and the key carries its own two cases. The pair is the
+        // control: an explicit key under an insensitive flag would be the old
+        // over-match with extra characters, and an insensitive path would still
+        // fire on /SEARCH?Q=.
+        isUrlFilterCaseSensitive: true, resourceTypes: ["main_frame"],
       },
     },
     {
       id: 2, priority: 3,
       action: { type: "redirect", redirect: { regexSubstitution: "https://ops.example.com/jira/browse/OPS-\\1" } },
       condition: {
-        regexFilter: "^https://(?:www\\.)?google\\.com/search\\?(?:(?:[^=&%q][^=&]*|q[^=&]+)?=[^&]*&)*q=OPS(?:-|\\+|%20)(\\d+)(?:&|$)",
-        isUrlFilterCaseSensitive: false, resourceTypes: ["main_frame"],
+        regexFilter: "^https://(?:www\\.)?google\\.com/search\\?(?:(?:[^=&%q][^=&]*|q[^=&]+)?=[^&]*&)*q=[Oo][Pp][Ss](?:-|\\+|%20)(\\d+)(?:&|$)",
+        // SENSITIVE, and the key carries its own two cases. The pair is the
+        // control: an explicit key under an insensitive flag would be the old
+        // over-match with extra characters, and an insensitive path would still
+        // fire on /SEARCH?Q=.
+        isUrlFilterCaseSensitive: true, resourceTypes: ["main_frame"],
       },
     },
     {
@@ -379,7 +412,10 @@ test("the whole rule set is locked against a literal expectation", () => {
         // Built from its owner so the shape cannot be pasted wrong here.
         regexFilter: "^https://(?:www\\.)?google\\.com/search\\?(?:(?:[^=&%q][^=&]*|q[^=&]+)?=[^&]*&)*q=(" +
           g.ProjectKey.caseInsensitiveShape(g.CatchAllKey.only().claimsKeysUpTo()) + ")-(\\d+)(?:&|$)",
-        isUrlFilterCaseSensitive: false, resourceTypes: ["main_frame"],
+        // THE FRAGMENT IS UNCHANGED and the flag still moves: the catch-all's shape
+        // is `[A-Za-z]...`, already explicit, which is why going case-SENSITIVE cost
+        // it nothing. It is the named keys that had to learn to spell themselves.
+        isUrlFilterCaseSensitive: true, resourceTypes: ["main_frame"],
       },
     },
     // THE GUARD IS NOW SEVERAL RUNS, because Chrome refuses 49 alternatives in one
@@ -398,6 +434,10 @@ test("the whole rule set is locked against a literal expectation", () => {
           // every engine and every run, is what made Chrome refuse these outright.
           regexFilter: "^https://(?:www\\.)?google\\.com/search\\?(?:.*&)?q=(?:" +
             run.join("|") + ")-\\d+(?:&|$)",
+          // INSENSITIVE, WHERE THE REDIRECTS ARE NOT, and this is the asymmetry to
+          // read twice. The list ships in upper case; the typing does not. Measured
+          // against real RE2: a case-sensitive guard stops matching `q=cve-1`, so
+          // `CVE-1` would leave for the Jira instance. Wider is what a guard is for.
           isUrlFilterCaseSensitive: false, resourceTypes: ["main_frame"],
         },
       })),
@@ -879,6 +919,105 @@ test("the rule fires on the parameter the engine reads, never a later one", () =
 });
 
 /**
+ * A REDIRECT FIRES ON WHAT THE ENGINE READS, AND ON NOTHING ELSE -- under the flag
+ * the rule actually ships with.
+ *
+ * THIS TEST USED TO ASSERT THE OPPOSITE, and that is the point of reading it. It
+ * was a changelock over a KNOWN over-match: every condition shipped
+ * `isUrlFilterCaseSensitive: false`, the flag is global to the pattern, so it
+ * reached the PATH and the PARAMETER NAME -- which Google reads case-sensitively.
+ * `/SEARCH?Q=ABC-1` fired a redirect on a URL that is not a search. Same class as
+ * the `%71` hole: the rule firing on something the engine does not read. It
+ * granted nothing (a page that wants the redirect writes `?q=ABC-1`), so it was a
+ * fidelity gap, pinned in both directions while the repair was unaffordable.
+ *
+ * IT IS AFFORDABLE, AND IT WAS CHEAPER THAN THE THING IT REPLACED. The obvious
+ * repair -- `(?-i:...)` -- is unavailable here: jump-preview.js compiles the
+ * DELIVERED regexFilter with `new RegExp`, and JavaScript has no inline flag
+ * groups (`SyntaxError: Invalid group`). Spelling the case in the KEY needs no
+ * engine feature: a two-element class is the same construct in RE2 and in JS. So
+ * the key carries `[Aa][Bb][Cc]`, the condition goes case-SENSITIVE, and the path
+ * and the parameter stop being folded.
+ *
+ * Measured 2026-09-07, Chrome 152.0.7977.82 and Firefox 154.0, via
+ * isRegexSupported over every shipped engine at key lengths 2, 3, 8, 14 and 20 and
+ * over custom hosts of 14 to 40 characters: ZERO regressions, and one case
+ * IMPROVES (a 20-character key on a 34-character host, refused before, accepted
+ * now). Under an insensitive flag RE2 folds each literal itself; an explicit class
+ * is smaller than what the folding builds.
+ *
+ * THE FLAG IS DERIVED FROM THE RULE, exactly as jump-preview.js derives it.
+ * Hand-writing it here would let the rule and the check drift -- the fault
+ * rule-installer.js names about isRegexSupported ("the call vouches for an
+ * expression we never install").
+ */
+test("a redirect fires on what the engine reads, under the flag it ships with", () => {
+  const rule = delivered(policy).find((r) => r.condition.regexFilter.includes("google"));
+  assert.equal(rule.condition.isUrlFilterCaseSensitive, true,
+    "a redirect is read as the engine reads it; the key carries its own two cases");
+  const re = new RegExp(rule.condition.regexFilter,
+    rule.condition.isUrlFilterCaseSensitive ? "" : "i");
+
+  // WHAT MUST STILL FIRE. This is the whole reason the flag was ever insensitive,
+  // and the class is what preserves it: the typed case reaches the matcher while
+  // the substitution keeps writing the canonical key.
+  assert.equal(re.test("https://www.google.com/search?q=ABC-1"), true);
+  assert.equal(re.test("https://www.google.com/search?q=abc-1"), true,
+    "the lower-case form a person actually types must still land");
+  assert.equal(re.test("https://www.google.com/search?q=aBc-1"), true, "and any mixture of the two");
+
+  // WHAT MUST NOT. The three the over-match used to admit, plus the order.
+  for (const [url, why] of [
+    ["https://www.google.com/SEARCH?q=ABC-1", "the PATH is not what Google searches on"],
+    ["https://www.google.com/search?Q=ABC-1", "the parameter NAME is read case-sensitively"],
+    ["https://www.google.com/Search?Q=ABC-1", "neither of them"],
+    ["https://www.google.com/search?q=hello&Q=ABC-1", "Google reads the first q, which is hello"],
+    ["https://www.google.com/search?%71=hello&q=ABC-1", "%71 IS q once decoded"],
+  ]) {
+    assert.equal(re.test(url), false, `${url} -> ${why}`);
+  }
+
+  // AND ONE THAT FLIPPED TO CORRECT, which is worth its line: under a sensitive
+  // flag `Q` genuinely IS another parameter, so the FIRST `q` is the one this
+  // matches -- and that is the one Google reads. The insensitive flag used to
+  // refuse this URL, over-cautiously.
+  assert.equal(re.test("https://www.google.com/search?Q=hello&q=ABC-1"), true,
+    "Q= is a different parameter, so q=ABC-1 is the first the engine reads");
+});
+
+/**
+ * AND A GUARD STAYS INSENSITIVE, which is the half that carries the leak.
+ *
+ * The redirects went case-sensitive; the guards may not follow. The reserved
+ * prefixes ship in UPPER CASE and the typing does not, so a case-sensitive guard
+ * stops matching `q=cve-1` -- measured against real RE2 -- and `CVE-1` leaves for
+ * the Jira instance. A guard exists to STOP a redirect: matching wider only ever
+ * stops more, matching narrower is the one direction that leaks.
+ *
+ * The flag is per-rule, which is what makes the pair expressible at all.
+ */
+test("a guard stays case-insensitive, so a lower-case reserved prefix is still held back", () => {
+  const rules = delivered(withCatchAll());
+  const guards = rules.filter((r) => r.action.type === "allow");
+  assert.ok(guards.length > 0, "precondition: an armed catch-all ships its guards");
+
+  for (const guard of guards) {
+    assert.equal(guard.condition.isUrlFilterCaseSensitive, false,
+      "a case-sensitive guard stops holding the lower-case form a person types");
+  }
+
+  // AND IT HOLDS, on the form that actually leaks. Walked from the real list, in
+  // both cases, against the guard that carries each word -- never a sample.
+  const held = (word) => guards.some((g0) =>
+    new RegExp(g0.condition.regexFilter, g0.condition.isUrlFilterCaseSensitive ? "" : "i")
+      .test(`https://www.google.com/search?q=${word}-1`));
+  for (const word of g.ReservedPrefix.ALL) {
+    assert.ok(held(word), `${word}-1 is not held back`);
+    assert.ok(held(word.toLowerCase()), `${word.toLowerCase()}-1 is not held back -- this is the leak`);
+  }
+});
+
+/**
  * WHY claimantFor STAYS, MEASURED RATHER THAN ASSUMED.
  *
  * An audit point called it a second matching engine and asked for it to be reduced
@@ -945,7 +1084,12 @@ test("a shortcut lifted above the catch-all reappears in the installed rules", (
 
   const shadowed = delivered(policy);
   assert.equal(policy.isShadowed(NAMED), true, "precondition: the named key is below");
-  const literalOf = (rules) => rules.filter((r) => r.condition.regexFilter.includes("ABC"));
+  // ASKED OF THE EMITTER, never a substring. It was `.includes("ABC")`, which
+  // stopped finding anything the day a named key learned to spell its own case --
+  // the rule now carries `[Aa][Bb][Cc]`. A test that recognises a rule by a
+  // literal it does not own goes quietly green on the wrong set.
+  const fragment = g.ReferencePattern.patternFor(g.ProjectKey.parse("ABC").value);
+  const literalOf = (rules) => rules.filter((r) => r.condition.regexFilter.includes(fragment));
   assert.deepEqual(literalOf(shadowed), [],
     "a shadowed shortcut ships no rule of its own -- that is what shadowing means");
 
@@ -1034,7 +1178,13 @@ test("a built-in ticked twice resolves once, and the catch-all survives it", () 
   assert.ok(catalog.find(custom.value.id()),
     "the ticked id must resolve: unresolved, every binding on it reads UNKNOWN_ENGINE");
   assert.equal(catalog.find(custom.value.id()).hostPattern,
-    catalog.find("google.com").hostPattern, "and it resolves to the very same entry");
+    catalog.find("google.com").hostPattern, "and it intercepts the very same URLs");
+  // ITS OWN ENTRY, NOT THE BUILT-IN'S. The catalogue used to register the built-in
+  // object under both ids, which made `all()` hand the options page the same `id`
+  // twice -- so the chip answered for the wrong id and the remove button was never
+  // rendered. Identity is the catalogue's; "same interception" belongs to the forge.
+  assert.equal(catalog.find(custom.value.id()).id, custom.value.id(),
+    "an entry keeps the identity it was ticked under");
 
   const set = g.RuleFactory.buildRules(p, catalog, flatBudget);
   assert.deepEqual(set.skipped(), [],
@@ -1046,6 +1196,57 @@ test("a built-in ticked twice resolves once, and the catch-all survives it", () 
     (r) => r.condition.regexFilter + "|" + r.priority + "|" + r.action.type);
   assert.equal(new Set(signatures).size, signatures.length,
     "exactly one rule per pair: two identical rules reach DNR's unspecified tie-break");
+});
+
+/**
+ * THE DEDUPLICATION IS ON THE INTERCEPTION, AND IT IS THE FORGE'S.
+ *
+ * Two DISTINCT ticked ids that intercept the same URLs is the only case that
+ * produces indistinguishable rules, and it is now the only thing suppressed --
+ * the catalogue no longer arbitrates identity to get there. The property has to
+ * hold whichever id survives, because that is what a user does: they untick the
+ * built-in and the custom domain is what keeps google.fr live.
+ *
+ * `shape` is deliberately NOT what the key is built from. Two shape NAMES
+ * resolving to one form -- which SHAPES could hold tomorrow -- would be two keys
+ * for one regex, and the tie-break would be back. The key is the three fields
+ * `searchUrlPattern` actually composes.
+ */
+test("two ids for one interception ship one rule, whichever of them is ticked", () => {
+  const custom = g.CustomEngine.parse({ host: "google.com", shape: "search-q" });
+  const base = withCatchAll().withCustomEngine(custom.value).value;
+
+  for (const ticked of [
+    ["google.com", custom.value.id()],
+    [custom.value.id(), "google.com"],
+    [custom.value.id()],          // the state left by unticking the built-in
+    ["google.com"],
+  ]) {
+    const p = base.withEngines(ticked).value;
+    const rules = delivered(p, g.SearchEngineCatalog.forPolicy(p));
+    const signatures = rules.map(
+      (r) => r.condition.regexFilter + "|" + r.priority + "|" + r.action.type);
+    assert.equal(new Set(signatures).size, signatures.length,
+      `indistinguishable rules for ${ticked.join(" + ")}`);
+    assert.ok(rules.some((r) => /google\\\.com/.test(r.condition.regexFilter)),
+      `${ticked.join(" + ")} intercepts google.com, so a rule must exist for it`);
+  }
+
+  // AND A DIFFERENT SHAPE IS A DIFFERENT INTERCEPTION, never a duplicate: the same
+  // host on `/` instead of `/search` is a second path, and dropping it would be the
+  // silent loss the aliasing already cost once.
+  const reshaped = g.CustomEngine.parse({ host: "google.com", shape: "root-q" });
+  const two = withCatchAll().withCustomEngine(reshaped.value).value
+    .withEngines(["google.com", reshaped.value.id()]).value;
+  const redirects = delivered(two, g.SearchEngineCatalog.forPolicy(two))
+    .filter((r) => r.action.type === "redirect")
+    .map((r) => r.condition.regexFilter);
+  assert.ok(redirects.some((f) => f.includes("google\\.com/search\\?")),
+    "the built-in's path still ships");
+  assert.ok(redirects.some((f) => f.includes("google\\.com/\\?")),
+    "and so does the second path: dropping it is the silent loss the aliasing cost");
+  assert.equal(new Set(redirects).size, redirects.length,
+    "still no two indistinguishable rules");
 });
 
 /**
@@ -1401,4 +1602,192 @@ test("changelock: an engine parameter this build cannot match refuses BY NAME", 
   const refusal = g.Re2Budget.refusal("QUERY_PARAM_TOO_LONG", { word: "query" });
   assert.ok(refusal instanceof g.Re2Budget.Refusal);
   assert.equal(refusal.reason, "QUERY_PARAM_TOO_LONG");
+});
+
+/**
+ * A SEPARATOR THE TABLE CANNOT SPELL IS REFUSED, NEVER EMITTED AS NOTHING.
+ *
+ * `emit()` read `IN_URL[s]` inline, and `Array.prototype.join` writes `undefined`
+ * as an EMPTY STRING -- so a separator this airlock does not know produced an
+ * empty branch in the alternation, which makes the separator OPTIONAL. Measured,
+ * before the fix, with `.` added to the domain's list:
+ *
+ *   patternFor(ABC)  ->  ABC(?:-|\+|%20|)(\d+)
+ *   /^ABC(?:-|\+|%20|)(\d+)$/.test("ABC1234")  ->  true
+ *
+ * A matcher wider than the validator, obtained by a lookup MISS: the one failure
+ * direction this project refuses everywhere else, in the file that owns the
+ * notation of what is intercepted.
+ *
+ * THE POST-CONDITION AND THE REFUSAL ARE NOT REDUNDANT. The load-time assertion
+ * covers the domain's published list, which is frozen; this covers what a KEY
+ * hands over, which is polymorphic and where a future key type lives. Both key
+ * types this build ships are walked below against the same table.
+ */
+test("a separator with no URL form is refused by name, never emitted as an empty branch", () => {
+  const named = { claim: () => ({ literal: "ABC" }), nature: () => "named",
+                  isCatchAll: () => false, toString: () => "ABC" };
+
+  const unknown = { ...named, separators: () => ["."] };
+  assert.throws(
+    () => g.ReferencePattern.forKey(unknown),
+    (error) => error instanceof g.Re2Budget.Refusal
+      && error.reason === g.Re2Budget.REASONS.SEPARATOR_HAS_NO_URL_FORM,
+    "an unknown separator must be a NAMED refusal: a bare throw is purged as UNKNOWN",
+  );
+
+  const none = { ...named, separators: () => [] };
+  assert.throws(
+    () => g.ReferencePattern.forKey(none),
+    (error) => error instanceof g.Re2Budget.Refusal
+      && error.reason === g.Re2Budget.REASONS.EMPTY_SEPARATORS,
+    "a key that separates on nothing would emit ABC(\\d+), which claims ABC1234",
+  );
+
+  // AND THE EMITTED PATTERN NEVER CARRIES AN EMPTY ALTERNATIVE, on either key
+  // type this build ships. `(?:a||b)` and a trailing `|)` are the two spellings.
+  for (const key of [g.ProjectKey.parse("ABC").value, g.CatchAllKey.only()]) {
+    const pattern = g.ReferencePattern.patternFor(key);
+    assert.equal(/\|\s*\||\|\s*\)|\(\?:\s*\|/.test(pattern), false,
+      `${pattern} carries an empty alternative, so its separator is optional`);
+    // The separator is REQUIRED: the reference without it must not match.
+    const anchored = new RegExp("^" + pattern + "$", "i");
+    assert.equal(anchored.test("ABC1234"), false, `${pattern} matches a reference with no separator`);
+  }
+
+  // Every separator either key hands over has a form in the table -- which is
+  // what makes the two throws above unreachable in production rather than merely
+  // guarded. Read from the keys, never restated.
+  for (const key of [g.ProjectKey.parse("ABC").value, g.CatchAllKey.only()]) {
+    for (const separator of key.separators()) {
+      assert.ok(g.IssueReference.SEPARATORS.includes(separator),
+        `${JSON.stringify(separator)} is not one of the domain's separators`);
+      // The pattern is emitted, hence the form exists: asking the table directly
+      // would mean publishing it, which reference-pattern.js refuses to do.
+      assert.doesNotThrow(() => g.ReferencePattern.patternFor(key));
+    }
+  }
+});
+
+/**
+ * `www.` IS STRIPPED REPEATEDLY, or the strip defeats its own purpose.
+ *
+ * The single pass turned `www.www.google.com` into `www.google.com`, whose host
+ * pattern is `(?:www\.)?www\.google\.com` -- a DIFFERENT signature from the
+ * built-in `(?:www\.)?google\.com`, matching the same `www.google.com`. So the
+ * catalogue kept both and two rules shipped for one engine, which is the cost the
+ * strip exists to avoid.
+ */
+test("a repeated www prefix collapses onto the entry it duplicates", () => {
+  const engine = g.CustomEngine.parse({ host: "WWW.www.google.com", shape: "search-q" });
+  assert.equal(engine.ok, true);
+  assert.equal(engine.value.host(), "google.com", "the prefix must be stripped as many times as it appears");
+
+  let policy = g.JumpPolicy.empty().withCustomEngine(engine.value).value;
+  policy = policy.withEngines(["google.com", engine.value.id()]).value;
+  const catalog = g.SearchEngineCatalog.forPolicy(policy);
+
+  // Aliased onto the built-in, never a second entry with its own host pattern.
+  assert.equal(catalog.find(engine.value.id()).hostPattern, "(?:www\\.)?google\\.com");
+  assert.deepEqual(
+    g.OriginRequirements.requiredOrigins(policy, catalog),
+    ["https://google.com/*", "https://www.google.com/*"],
+    "no origin may be asked for a host no rule of this build can match",
+  );
+
+  // One shortcut, one rule: the two ticked ids resolve to one engine.
+  policy = policy.register("one", g.ProjectKey.parse("ABC").value,
+    g.JiraInstance.parse("https://example.atlassian.net").value).value;
+  policy = policy.armShortcut("one").value;
+  const rules = g.RuleFactory.buildRules(
+    policy,
+    catalog,
+    (entry) => g.Re2Budget.forEnvelope(entry.guardEnvelopeCost()),
+  ).rules();
+  assert.equal(rules.length, 1, "a duplicated domain must not ship a second rule");
+});
+
+/**
+ * THE MEASURED BOUNDARIES OF A CUSTOM HOST, pinned against the constant that is
+ * supposed to govern them.
+ *
+ * `CustomEngine.MAX_HOST_LENGTH` justified itself, in writing, on "at 40 the
+ * costliest parseable host produces an envelope that exhausts the budget, so the
+ * two bounds meet almost exactly". Measured 2026-09-07 on Chrome 152.0.7977.82,
+ * by asking isRegexSupported from a loaded extension's own service worker, they do
+ * not meet -- and the bound they were compared on is not the one that binds:
+ *
+ *   the catch-all's REDIRECT, per host length:   28 accepted, 29 refused
+ *   a 20-character named key's redirect:         34 accepted, 35 refused
+ *   the reserved-prefix GUARDS, even at host 40: all accepted
+ *
+ * The guards -- what the per-engine budget was invented for -- are the cheap
+ * rules. What blows is the catch-all's redirect, which carries the unrolled
+ * `{1,5}` and two capture groups and has no budget of any kind.
+ *
+ * BOTH NUMBERS MOVED OUTWARD WHEN THE CASE REPAIR LANDED, and that is worth
+ * recording rather than silently re-pinning. They were 26/27 and 32/33 while every
+ * condition shipped `isUrlFilterCaseSensitive: false`; going case-SENSITIVE on the
+ * redirects -- with the named key spelling its own two cases -- bought two
+ * characters of host on each. Under an insensitive flag RE2 folds the path, the
+ * parameter name and the host itself; the folding costs more program than the
+ * explicit class it replaces. The repair closed a fidelity gap AND widened what
+ * installs, which is the opposite of what the deferral assumed for a year.
+ *
+ * WHAT THIS TEST IS, AND IS NOT. It executes no RE2 -- nothing in this repository
+ * does. It is a CHANGELOCK on three numbers that were measured once: the two
+ * boundaries, and the constant that sits above them. It goes red if somebody
+ * moves MAX_HOST_LENGTH without re-measuring, or if the emitted pattern's LENGTH
+ * at those boundaries moves -- which is the observable proxy a desk can hold.
+ *
+ * It deliberately does NOT assert that 40 is wrong. Leaving it there is a product
+ * decision with its own paragraph in custom-engine.js: the excess is over-budget
+ * for ONE FEATURE, and a domain of 29 to 40 characters keeps its named shortcuts
+ * while losing its catch-all -- fail-closed, reported, on one engine.
+ */
+test("changelock: the measured RE2 boundaries of a custom host, and the bound above them", () => {
+  // Mesures au pas de 1, sur les regles telles que RuleFactory les emet -- pas sur
+  // une reconstruction, et pas interpolees.
+  const CATCH_ALL_BOUNDARY = 28;   // dernier accepte, Chrome 152, 2026-09-07
+  const NAMED_BOUNDARY = 34;       // idem, cle de 20 caracteres, eclatee
+  const MEASURED_LEN_AT_CATCH_ALL = 138;
+  const MEASURED_LEN_AT_NAMED = 208;
+
+  assert.ok(
+    CATCH_ALL_BOUNDARY < g.CustomEngine.MAX_HOST_LENGTH,
+    "si la borne descend sous la frontiere mesuree, le paragraphe de custom-engine.js n'a plus d'objet",
+  );
+  assert.ok(CATCH_ALL_BOUNDARY < NAMED_BOUNDARY, "le catch-all est le plus cher des deux");
+
+  const hostOfLength = (n) => {
+    const tail = ".example.org";
+    return "a".repeat(n - tail.length) + tail;
+  };
+  const engineOfLength = (n) => {
+    const host = hostOfLength(n);
+    assert.equal(host.length, n);
+    const custom = g.CustomEngine.parse({ host, shape: "search-q" });
+    assert.equal(custom.ok, true, `${host} doit etre parseable`);
+    const policy = g.JumpPolicy.empty().withCustomEngine(custom.value).value;
+    return g.SearchEngineCatalog.forPolicy(policy).find(custom.value.id());
+  };
+
+  // LA FORME LA PLUS CHERE : `search-q`, dont le chemin est le plus long des deux.
+  const catchAll = engineOfLength(CATCH_ALL_BOUNDARY)
+    .searchUrlPattern(g.ReferencePattern.patternFor(g.CatchAllKey.only()));
+  assert.equal(catchAll.length, MEASURED_LEN_AT_CATCH_ALL,
+    "la regle mesuree a la frontiere du catch-all a change de taille : re-mesurer");
+
+  const named = engineOfLength(NAMED_BOUNDARY)
+    .searchUrlPattern(g.ReferencePattern.patternFor(g.ProjectKey.parse("A".repeat(20)).value));
+  assert.equal(named.length, MEASURED_LEN_AT_NAMED,
+    "la regle mesuree a la frontiere des cles nommees a change de taille : re-mesurer");
+
+  // ET LES GARDES RESTENT LES MOINS CHERES, a la borne, ce qui est la raison pour
+  // laquelle le budget par moteur ne protegeait pas ce qui casse.
+  const guards = g.ReferencePattern.reservedPrefixGuards(
+    g.CatchAllKey.only(),
+    g.Re2Budget.forEnvelope(engineOfLength(g.CustomEngine.MAX_HOST_LENGTH).guardEnvelopeCost()),
+  );
+  assert.ok(guards.length > 0, "une garde doit etre constructible a la borne");
 });
