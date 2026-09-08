@@ -2263,3 +2263,57 @@ test("every build script under scripts/ parses", async () => {
     }
   }
 });
+
+/**
+ * THE PACKAGE DOOR REFUSES, AND ITS REFUSAL PATH HAD NO TEST.
+ *
+ * `scripts/package-filter.mjs` is what stops anything that is not the extension
+ * from reaching a store: both builds copy `src/` through it, and it THROWS rather
+ * than skipping, on the argument written there — "a file meant to ship that is
+ * silently dropped is a broken package that builds green".
+ *
+ * Every build exercises the ACCEPTING half, on every run. Nothing exercised the
+ * REFUSING half. If it stopped throwing — a widened `SHIPPABLE`, a dropped dotfile
+ * branch — the builds would stay green and a `.env` dropped in `src/` for five
+ * minutes, an editor's `.bak`, a source map or a screenshot carrying a real Jira
+ * host would ship to both stores. That is the one control between this repository
+ * and that outcome, and `npm test` never asked it a question.
+ *
+ * THE CORPUS IS THE POINT, not the count: each entry is a file somebody actually
+ * leaves lying in a source tree.
+ */
+test("the package door refuses everything that is not the extension", async () => {
+  const { shippableFilter, SHIPPABLE } = await import("../scripts/package-filter.mjs");
+
+  // A directory carries no extension and is always traversed; the files inside are
+  // each asked in turn.
+  for (const accepted of [
+    "src/background.js", "src/manifest.json", "src/options.html", "src/ui/tokens.css",
+    "src/icons/icon-16.png", "src/ui/fonts/jetbrains-mono.woff2", "src/core", "src/ui/sections",
+  ]) {
+    assert.equal(shippableFilter(accepted), true, `${accepted} is part of the extension`);
+  }
+
+  for (const [refused, what] of [
+    ["src/.env", "a secret dropped there for five minutes"],
+    ["src/.DS_Store", "an editor's dotfile"],
+    ["src/notes.md", "notes"],
+    ["src/background.js.bak", "an editor's backup"],
+    ["src/bundle.js.map", "a source map"],
+    ["src/capture.jpg", "a screenshot with a real Jira host in it"],
+    ["src/key.pem", "a signing key"],
+    ["src/archive.zip", "an archive"],
+    ["src/script.sh", "a shell script"],
+    ["src/data.sqlite", "a database"],
+  ]) {
+    assert.throws(() => shippableFilter(refused), /build refuses/,
+      `${refused} (${what}) must be refused LOUDLY, never skipped`);
+  }
+
+  // AND THE ALLOW-LIST STAYS AN ALLOW-LIST. Widening it is a deliberate edit --
+  // package-filter.mjs says "add the type on purpose" -- so the set is pinned here
+  // rather than left to grow by accident.
+  assert.deepEqual([...SHIPPABLE].sort(),
+    [".css", ".html", ".js", ".json", ".png", ".woff2"],
+    "a new shippable type is a decision, and this is where it is recorded");
+});
