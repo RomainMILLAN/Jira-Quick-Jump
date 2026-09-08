@@ -729,6 +729,23 @@ pinned by commit through a submodule that CI never clones. Two controls cover it
 both hermetic: its provenance header is asserted, and **its content is pinned by
 SHA-256** — a hand edit, or a resync onto a different upstream, goes red.
 
+**The maintenance path for it was broken, and the two controls above are why that
+was survivable.** `scripts/sync-signature.mjs` builds that provenance header
+inside a template literal, and three of the literal's backticks were never
+escaped: the first one closed it, after which `--remote` parsed as a decrement
+operator. `make sync-signature` — documented step 3 of updating the stylesheet,
+and a line of the release checklist — could not run at all. Four audit passes read
+the file and read its text as prose, and nothing *executed* it: the two builds
+exercise `package-filter.mjs` and both `build-*-src.mjs`, `icons.test.js`
+exercises `make-icons.mjs`, and that left exactly one script no green suite had
+ever parsed. What was broken is the maintenance path, never the detection: both
+controls are tests and both held throughout, and the failure was loud — a
+maintainer following the procedure gets a `SyntaxError`, not a silent wrong
+answer. The risk was that they would then edit the mirror by hand, which the
+header forbids and the digest catches. Every script under `scripts/` is now
+required to parse, which is the hermetic form of the check: CI still clones no
+external repository, so it cannot run the resync itself.
+
 What that stylesheet cannot do is exfiltrate: the CSP ships `default-src 'none'`
 with `connect-src 'none'` and `img/font/style-src 'self'`, which closes every
 network channel CSS has. What it *could* do, if it were ever replaced by something

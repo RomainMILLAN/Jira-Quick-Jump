@@ -2218,3 +2218,48 @@ test("every document spells the repository and its artefacts the way the build d
     }
   }
 });
+
+/**
+ * EVERY BUILD SCRIPT PARSES, and one of them did not for the life of a release.
+ *
+ * `scripts/sync-signature.mjs` builds the provenance header of the vendored
+ * stylesheet inside a template literal, and three of that literal's backticks
+ * were never escaped. The first one CLOSED the literal, after which `--remote`
+ * was parsed as a decrement operator: `SyntaxError: Invalid left-hand side
+ * expression in postfix operation`. `make sync-signature` — the documented step 3
+ * of updating that stylesheet, and a line of the release checklist — could not
+ * run at all.
+ *
+ * WHY NOTHING CAUGHT IT, which is the part worth fixing rather than the escaping.
+ * Four audit passes read that file and read its text as PROSE. And nothing
+ * EXECUTES it: `npm test` does not, and CI runs test, audit, lint and the two
+ * builds — the builds exercise `package-filter.mjs` and the two `build-*-src.mjs`,
+ * and `icons.test.js` exercises `make-icons.mjs`, which left exactly one script
+ * that no green suite had ever parsed.
+ *
+ * WHAT IT DID NOT BREAK, so the next reader does not over-read this: the two
+ * controls SECURITY.md names over that stylesheet are TESTS — the provenance
+ * header is asserted and the content is pinned by SHA-256 — and both were intact
+ * the whole time. What was broken is the MAINTENANCE PATH, and it failed loudly:
+ * a maintainer following the documented procedure gets a SyntaxError, not a silent
+ * wrong answer. The danger was that they would then edit the mirror by hand, which
+ * the header forbids and the digest catches.
+ *
+ * `--check` RATHER THAN `import()`: these scripts have side effects — two of them
+ * `rmSync` a build directory — so parsing them is the only safe way to ask.
+ */
+test("every build script under scripts/ parses", async () => {
+  const { execFileSync } = await import("node:child_process");
+  const dir = join(ROOT, "scripts");
+  const scripts = readdirSync(dir).filter((name) => name.endsWith(".mjs"));
+  assert.ok(scripts.length >= 5, `expected the build scripts, found ${scripts.length}`);
+
+  for (const name of scripts) {
+    try {
+      execFileSync(process.execPath, ["--check", join(dir, name)], { stdio: "pipe" });
+    } catch (error) {
+      const said = String(error.stderr ?? error.message).split("\n").slice(0, 4).join(" ");
+      assert.fail(`scripts/${name} does not parse: ${said}`);
+    }
+  }
+});

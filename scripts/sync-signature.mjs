@@ -45,13 +45,13 @@ const header = `/*!
  *
  * Step 2 is what the pin does NOT do for you. The gitlink protects against silent
  * DRIFT: nothing moves unless someone moves it. It does not protect against a
- * deliberate move to hostile content -- `--remote` jumps to whatever upstream HEAD
- * is now, sync-signature rewrites the sha in the header, and `make sync-signature`
+ * deliberate move to hostile content -- \`--remote\` jumps to whatever upstream HEAD
+ * is now, sync-signature rewrites the sha in the header, and \`make sync-signature\`
  * is green because the copy does match its source. The only thing that changes is
  * the sha in a diff nobody reads.
  *
  * What the CSP already rules out: exfiltration. manifest.json ships
- * `default-src 'none'` with `connect-src 'none'` and `img/font/style-src 'self'`,
+ * \`default-src 'none'\` with \`connect-src 'none'\` and \`img/font/style-src 'self'\`,
  * which closes every network channel a stylesheet has. What it does NOT rule out is
  * INTERFACE REDIRECTION -- covering the Access section, hiding the origin list,
  * disguising the disarm control. That risk is accepted, and reading the log is what
