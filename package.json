@@ -1,6 +1,6 @@
 {
   "name": "jira-quick-jump",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Type JIR-1234 in the address bar and land straight on the Jira issue.",
   "private": true,
   "type": "module",
