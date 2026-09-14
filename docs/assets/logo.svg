@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="512" height="512" role="img" aria-label="Quick Jump for Jira">
+  <!--
+    The mark, and the only reusable source file for it.
+
+    The geometry is NOT a drawing: it is the same 24-unit grid as CHEVRONS in
+    scripts/make-icons.mjs, which paints the toolbar icon, and as the inline SVG
+    in src/options.html and src/popup.html. Four copies of one object.
+    test/mark.test.js compares all four and fails if one moves.
+
+    The tile radius is 24 * 0.22, the same ratio the icon generator applies at
+    every size. The fill is --brand.
+  -->
+  <rect width="24" height="24" rx="5.28" fill="#1868db"/>
+  <g fill="none" stroke="#ffffff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M4.5 6l6 6-6 6"/>
+    <path d="M13.5 6l6 6-6 6"/>
+  </g>
+</svg>

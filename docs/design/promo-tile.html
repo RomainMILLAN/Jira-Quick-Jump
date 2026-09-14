@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Store promo tile</title>
+<!--
+  Source for docs/assets/promo-440x280.png. Rendered by docs/design/render.sh with headless
+  Chrome; do not edit the PNG, edit this file and re-render.
+
+  JetBrains Mono is loaded from the copy the extension ships, so the keys and URLs
+  drawn here are the ones the options page draws.
+-->
+<style>
+  @font-face {
+    font-family: "JetBrains Mono";
+    src: url("../../src/ui/fonts/jetbrains-mono.woff2") format("woff2");
+    font-weight: 400 700;
+  }
+  html, body { margin: 0; padding: 0; }
+</style>
+</head>
+<body>
+<div style="width: 440px; height: 280px; display: flex; flex-direction: column; justify-content: center; gap: 18px; padding: 0 34px; box-sizing: border-box; background: #f5f4f0; font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;">
+  <div style="display: flex; align-items: center; gap: 12px;">
+    <svg width="44" height="44" viewBox="0 0 24 24" role="img" aria-label="">
+      <rect width="24" height="24" rx="5.28" fill="#1868db"></rect>
+      <g fill="none" stroke="#ffffff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M4.5 6l6 6-6 6"></path>
+        <path d="M13.5 6l6 6-6 6"></path>
+      </g>
+    </svg>
+    <div style="font-size: 22px; font-weight: 600; letter-spacing: -0.015em; color: #16211f; line-height: 1.2;">Quick Jump <span style="color: #1868db;">for Jira</span></div>
+  </div>
+  <div style="font-size: 24px; font-weight: 600; line-height: 1.25; letter-spacing: -0.015em; color: #16211f; text-wrap: pretty;">Type an issue key.<br>Land on the issue.</div>
+  <div style="display: flex; align-items: center; gap: 10px;">
+    <div style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 14px; font-weight: 700; color: #16211f; background: #ffffff; border: 1px solid #e6e4dd; border-radius: 7px; padding: 7px 11px;">ABC-1234</div>
+    <svg width="26" height="14" viewBox="0 0 26 14" fill="none" stroke="#1868db" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M2 7h21"></path>
+      <path d="M17 2l5 5-5 5"></path>
+    </svg>
+    <div style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 14px; font-weight: 500; color: #1152b3; background: #e9f2ff; border: 1px solid #c2d9ff; border-radius: 7px; padding: 7px 11px;">/browse/ABC-1234</div>
+  </div>
+</div>
+</body>
+</html>

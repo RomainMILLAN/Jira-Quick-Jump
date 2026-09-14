@@ -262,9 +262,9 @@ const STAR = "cccccccc-3333-4333-8333-333333333333";
 
 const ordered = () => {
   let p = g.JumpPolicy.empty().withEngines(["google.com"]).value;
-  p = p.register(ORDER_A, g.ProjectKey.parse("ECR").value, instance("https://a.atlassian.net")).value;
+  p = p.register(ORDER_A, g.ProjectKey.parse("OPS").value, instance("https://a.atlassian.net")).value;
   p = p.register(STAR, g.CatchAllKey.only(), instance("https://c.atlassian.net")).value;
-  p = p.register(ORDER_B, g.ProjectKey.parse("JUL").value, instance("https://b.atlassian.net")).value;
+  p = p.register(ORDER_B, g.ProjectKey.parse("DEV").value, instance("https://b.atlassian.net")).value;
   return p;
 };
 
@@ -307,11 +307,11 @@ test("withOrder written against a stale set is refused rather than applied to a 
 
 test("a catch-all may sit anywhere, and everything after it is shadowed", () => {
   const p = ordered();
-  assert.deepEqual(p.shadowedShortcuts().map((s) => s.keyText()), ["JUL"]);
+  assert.deepEqual(p.shadowedShortcuts().map((s) => s.keyText()), ["DEV"]);
   const last = p.withOrder([ORDER_A, ORDER_B, STAR]).value;
   assert.deepEqual(last.shadowedShortcuts(), []);
   const first = p.withOrder([STAR, ORDER_A, ORDER_B]).value;
-  assert.deepEqual(first.shadowedShortcuts().map((s) => s.keyText()), ["ECR", "JUL"]);
+  assert.deepEqual(first.shadowedShortcuts().map((s) => s.keyText()), ["OPS", "DEV"]);
 });
 
 test("a shadowed shortcut produces no binding at all, and comes back when the catch-all goes", () => {
@@ -320,7 +320,7 @@ test("a shadowed shortcut produces no binding at all, and comes back when the ca
   p = p.armShortcut(ORDER_A).value.armShortcut(ORDER_B).value.armShortcut(STAR).value;
   assert.deepEqual(p.activeBindings().map((b) => b.describe()), ["the catch-all on google.com"]);
   const without = p.remove(STAR).value;
-  assert.deepEqual(without.activeBindings().map((b) => b.describe()).sort(), ["ECR on google.com", "JUL on google.com"]);
+  assert.deepEqual(without.activeBindings().map((b) => b.describe()).sort(), ["DEV on google.com", "OPS on google.com"]);
 });
 
 test("there can be only one catch-all, and the second one is refused with its own code", () => {
@@ -374,7 +374,7 @@ test("diagnose distinguishes nothing armed, nothing acknowledged, and everything
   // the previous diagnosis called "everything is disarmed", to someone who had
   // just armed it.
   let awaiting = g.JumpPolicy.empty().withEngines(["google.com"]).value;
-  awaiting = awaiting.register(ORDER_A, g.ProjectKey.parse("ECR").value, instance("http://intra.example.org")).value;
+  awaiting = awaiting.register(ORDER_A, g.ProjectKey.parse("OPS").value, instance("http://intra.example.org")).value;
   awaiting = awaiting.acknowledge(ORDER_A, "INSECURE_SCHEME").value;
   awaiting = awaiting.acknowledge(ORDER_A, "INTERNAL_HOST").value;
   awaiting = awaiting.armShortcut(ORDER_A).value;
@@ -449,7 +449,7 @@ test("moving the catch-all reports ONE fact that names the host, not one per sha
   assert.equal(facts.length, 1);
   assert.equal(facts[0].type, "ShadowingChanged");
   assert.equal(facts[0].catchAllBaseUrl, "https://c.atlassian.net", "the journal must say WHERE the traffic goes");
-  assert.deepEqual(facts[0].affectedKeys, ["ECR"]);
+  assert.deepEqual(facts[0].affectedKeys, ["OPS"]);
 });
 
 test("a wholesale replacement collapses into a single fact rather than evicting the journal", () => {

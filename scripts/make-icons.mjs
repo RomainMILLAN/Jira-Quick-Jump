@@ -20,11 +20,13 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const OUT = join(ROOT, "src", "icons");
 
-const TEAL = [13, 127, 116];
+// Jira blue. Must equal --brand in src/ui/tokens.css, which paints the same tile
+// in the options page and the popup -- test/mark.test.js fails if they drift.
+export const BRAND = [24, 104, 219]; // #1868db
 const WHITE = [255, 255, 255];
 
 // The mark, on the SVG's 24-unit grid: two chevrons.
-const CHEVRONS = [
+export const CHEVRONS = [
   [[4.5, 6], [10.5, 12]],
   [[10.5, 12], [4.5, 18]],
   [[13.5, 6], [19.5, 12]],
@@ -121,7 +123,7 @@ export const renderPixels = (size) => {
       // The glyph is punched over the tile, then both are cut by the tile's alpha.
       const i = (y * size + x) * 4;
       for (let c = 0; c < 3; c += 1) {
-        rgba[i + c] = Math.round(TEAL[c] * (1 - glyph) + WHITE[c] * glyph);
+        rgba[i + c] = Math.round(BRAND[c] * (1 - glyph) + WHITE[c] * glyph);
       }
       rgba[i + 3] = Math.round(tile * 255);
     }

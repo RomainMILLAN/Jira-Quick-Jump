@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="189" height="22" viewBox="0 0 189 22" role="img" aria-label="browsers: Chrome · Firefox">
+  <title>browsers: Chrome · Firefox</title>
+  <clipPath id="r"><rect width="189" height="22" rx="4"/></clipPath>
+  <g clip-path="url(#r)">
+    <rect width="69" height="22" fill="#4a5157"/>
+    <rect x="69" width="120" height="22" fill="#1868db"/>
+  </g>
+  <g fill="#ffffff" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="11" font-weight="500">
+    <text x="34.5" y="15" text-anchor="middle">browsers</text>
+    <text x="129" y="15" text-anchor="middle" font-weight="600">Chrome · Firefox</text>
+  </g>
+</svg>

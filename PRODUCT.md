@@ -75,23 +75,36 @@ without the same mechanism: the search request does not happen.
   *journal* (the record of what changed), *claimed* / *unclaimed* (a change a
   commit revendicates, versus one nobody does — only the second is an alarm),
   *attribution* (which revision, written by whom: the identity of a commit, never
-  merely its height).
+  merely its height), *brand* (the accent token, never the name of its current
+  hue).
   One word per concept: not *wildcard*, not *unreachable*, not *deny-list*, and
   not *manual* / *unknown*, which named the same pair twice.
 
 ## Brand Commitments
 
-- Name: **Jira Quick Jump**. Author signature (the animated `RomainMILLAN`
-  tag) sits in the options page footer, linking to `romainmillan.fr` with the
-  domain visible.
+- Name: **Quick Jump for Jira**, one spelling, everywhere a human reads it --
+  the manifest, the listing, the README, the wordmark. `jira-quick-jump` is a
+  package and repository slug, not a second name. Author signature (the animated
+  `RomainMILLAN` tag) sits in the options page footer, linking to
+  `romainmillan.fr` with the domain visible.
 - The visual system is defined by `src/ui/tokens.css`, which is the single
-  source of truth: teal `#0d7f74` carries the product, paper `#f5f4f0`, and the
-  state pair red `#b3372c` (refused) / amber `#8a6a1e` (accept once). **Teal
-  never means a state**, and no state is signalled by colour alone -- every one
-  of them also carries a word, which is what WCAG 2.2 AA requires here.
+  source of truth: the **brand** accent `#1868db` (Jira blue) carries the
+  product, paper `#f5f4f0`, and the state pair red `#b3372c` (refused) / amber
+  `#8a6a1e` (accept once). **The accent never means a state**, and no state is
+  signalled by colour alone -- every one of them also carries a word, which is
+  what WCAG 2.2 AA requires here. The accent is the only token whose hue may
+  move; it already has, from the green this project shipped first. Red and amber
+  MEAN something, so their hue is part of the meaning.
   One bundled face, JetBrains Mono, for keys and URLs only; everything else is
   the system UI face. A dark palette redefines the same tokens under
   `prefers-color-scheme: dark`.
+- The **mark** is a double chevron on a rounded tile. It lives in four places --
+  `scripts/make-icons.mjs`, `src/options.html`, `src/popup.html` and
+  `docs/assets/logo.svg` -- and `test/mark.test.js` holds them to one geometry
+  and one colour. Blue is borrowed from Jira; the mark is not: it stays clearly
+  distinct from Atlassian's, because an extension whose threat model is "the
+  user stopped reading the address bar" must not also help them mistake it for
+  an official product.
 
 ## Evidence on Hand
 

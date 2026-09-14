@@ -381,7 +381,7 @@ test("a regex refused only once capturing is required skips its unit, not the ba
   await withPlatform(fakeDnr({ refuseCapturing: true }), async () => {
     let p = armedCatchAll();
     p = p.registerAboveCatchAll(
-      "named", g.ProjectKey.parse("JUL").value, g.JiraInstance.parse("https://spiriit.atlassian.net").value
+      "named", g.ProjectKey.parse("DEV").value, g.JiraInstance.parse("https://example.atlassian.net").value
     ).value;
     p = p.armShortcut("named").value;
     const report = await g.RuleInstaller.install(p, 0);

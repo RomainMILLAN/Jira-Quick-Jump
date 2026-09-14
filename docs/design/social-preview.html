@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>GitHub social preview</title>
+<!--
+  Source for docs/assets/social-preview.png. Rendered by docs/design/render.sh with headless
+  Chrome; do not edit the PNG, edit this file and re-render.
+
+  JetBrains Mono is loaded from the copy the extension ships, so the keys and URLs
+  drawn here are the ones the options page draws.
+-->
+<style>
+  @font-face {
+    font-family: "JetBrains Mono";
+    src: url("../../src/ui/fonts/jetbrains-mono.woff2") format("woff2");
+    font-weight: 400 700;
+  }
+  html, body { margin: 0; padding: 0; }
+</style>
+</head>
+<body>
+<div style="width: 1280px; height: 640px; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 38px; padding: 0 80px; box-sizing: border-box; background: #f5f4f0; font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;">
+
+  <div style="display: flex; align-items: center; gap: 20px;">
+    <svg width="76" height="76" viewBox="0 0 24 24" role="img" aria-label="">
+      <rect width="24" height="24" rx="5.28" fill="#1868db"></rect>
+      <g fill="none" stroke="#ffffff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M4.5 6l6 6-6 6"></path>
+        <path d="M13.5 6l6 6-6 6"></path>
+      </g>
+    </svg>
+    <div style="font-size: 46px; font-weight: 600; letter-spacing: -0.02em; color: #16211f;">Quick Jump <span style="color: #1868db;">for Jira</span></div>
+  </div>
+
+  <div style="font-size: 54px; font-weight: 600; line-height: 1.2; letter-spacing: -0.028em; color: #16211f; text-align: center;">Type an issue key in the address bar.<br>Land on the issue.</div>
+
+  <div style="display: flex; align-items: center; gap: 20px;">
+    <div style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 26px; font-weight: 700; color: #16211f; background: #ffffff; border: 1px solid #e6e4dd; border-radius: 12px; padding: 14px 22px;">ABC-1234</div>
+    <svg width="42" height="22" viewBox="0 0 42 22" fill="none" stroke="#1868db" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M2 11h36"></path>
+      <path d="M30 3l8 8-8 8"></path>
+    </svg>
+    <div style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 26px; font-weight: 500; color: #1152b3; background: #e9f2ff; border: 1px solid #c2d9ff; border-radius: 12px; padding: 14px 22px;">example.atlassian.net/browse/<span style="font-weight: 700; color: #0f3f8a;">ABC-1234</span></div>
+  </div>
+
+  <div style="display: flex; align-items: center; gap: 26px; font-size: 21px; color: #6a7370;">
+    <div>No keyword</div>
+    <div style="width: 5px; height: 5px; border-radius: 50%; background: #c9cdc7;"></div>
+    <div>No results page</div>
+    <div style="width: 5px; height: 5px; border-radius: 50%; background: #c9cdc7;"></div>
+    <div>Chrome and Firefox, Manifest V3</div>
+  </div>
+
+</div>
+</body>
+</html>

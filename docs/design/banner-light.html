@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Banner (light)</title>
+<!--
+  Source for docs/assets/banner-light.png. Rendered by docs/design/render.sh with headless
+  Chrome; do not edit the PNG, edit this file and re-render.
+
+  JetBrains Mono is loaded from the copy the extension ships, so the keys and URLs
+  drawn here are the ones the options page draws.
+-->
+<style>
+  @font-face {
+    font-family: "JetBrains Mono";
+    src: url("../../src/ui/fonts/jetbrains-mono.woff2") format("woff2");
+    font-weight: 400 700;
+  }
+  html, body { margin: 0; padding: 0; }
+</style>
+</head>
+<body>
+<div style="width: 1280px; height: 320px; display: flex; align-items: center; gap: 56px; padding: 0 64px; box-sizing: border-box; background: #f5f4f0; font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;">
+
+  <div style="display: flex; flex-direction: column; gap: 16px; width: 452px; flex-shrink: 0;">
+    <div style="display: flex; align-items: center; gap: 16px;">
+      <svg width="60" height="60" viewBox="0 0 24 24" role="img" aria-label="">
+        <rect width="24" height="24" rx="5.28" fill="#1868db"></rect>
+        <g fill="none" stroke="#ffffff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4.5 6l6 6-6 6"></path>
+          <path d="M13.5 6l6 6-6 6"></path>
+        </g>
+      </svg>
+      <div style="font-size: 38px; font-weight: 600; letter-spacing: -0.02em; color: #16211f; line-height: 1.1;">Quick Jump <span style="color: #1868db;">for Jira</span></div>
+    </div>
+    <div style="font-size: 19px; line-height: 1.5; color: #6a7370; text-wrap: pretty;">Type an issue key in the address bar. Land on the issue — no keyword, no results page, and the key never reaches your search engine.</div>
+  </div>
+
+  <div style="display: flex; flex-direction: column; gap: 14px; flex-grow: 1;">
+    <div style="display: flex; align-items: center; gap: 13px; background: #ffffff; border: 1px solid #e6e4dd; border-radius: 999px; padding: 13px 20px; box-shadow: 0 8px 22px rgba(10, 14, 20, 0.06);">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#9aa39f" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="11" cy="11" r="7"></circle>
+        <path d="M20 20l-4.2-4.2"></path>
+      </svg>
+      <div style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 20px; font-weight: 700; color: #16211f; letter-spacing: 0.01em;">ABC-1234</div>
+      <div style="width: 2px; height: 22px; background: #1868db; border-radius: 1px;"></div>
+    </div>
+
+    <div style="display: flex; align-items: center; gap: 11px; padding-left: 22px;">
+      <svg width="18" height="26" viewBox="0 0 18 26" fill="none" stroke="#1868db" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M9 2v18"></path>
+        <path d="M3 15l6 6 6-6"></path>
+      </svg>
+      <div style="font-size: 14px; font-weight: 500; color: #1152b3; letter-spacing: 0.02em;">rewritten before the request leaves your machine</div>
+    </div>
+
+    <div style="display: flex; align-items: center; gap: 13px; background: #e9f2ff; border: 1px solid #c2d9ff; border-radius: 999px; padding: 13px 20px;">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#1152b3" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M6 4l6 6-6 6"></path>
+        <path d="M13 4l6 6-6 6"></path>
+      </svg>
+      <div style="font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace; font-size: 17px; font-weight: 500; color: #1152b3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">example.atlassian.net/browse/<span style="font-weight: 700; color: #0f3f8a;">ABC-1234</span></div>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

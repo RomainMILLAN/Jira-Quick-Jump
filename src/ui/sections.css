@@ -17,11 +17,11 @@ body {
 }
 
 a {
-  color: var(--teal);
+  color: var(--brand);
   text-decoration: none;
 }
 a:hover {
-  color: var(--teal-deep);
+  color: var(--brand-deep);
   text-decoration: underline;
 }
 code {
@@ -53,7 +53,7 @@ code {
   width: 34px;
   height: 34px;
   border-radius: 10px;
-  background: var(--teal);
+  background: var(--brand);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -89,7 +89,7 @@ code {
   font-size: 9.5px;
   letter-spacing: 0.2em;
   text-transform: uppercase;
-  color: var(--teal-deep);
+  color: var(--brand-deep);
 }
 
 .sections {
@@ -147,8 +147,8 @@ code {
   white-space: nowrap;
 }
 .tag.ok {
-  background: var(--teal-wash);
-  color: var(--teal-deep);
+  background: var(--brand-wash);
+  color: var(--brand-deep);
 }
 .tag.warn {
   background: var(--amber-wash);
@@ -176,7 +176,7 @@ code {
   width: var(--sw-w);
   height: var(--sw-h);
   border-radius: 999px;
-  background: var(--teal);
+  background: var(--brand);
   border: none;
   position: relative;
   flex-shrink: 0;
@@ -317,13 +317,13 @@ ol.rows {
    the catch-all. A signal belongs to one state only. No transition anywhere, so
    prefers-reduced-motion has nothing new to ask for. */
 .row.is-dragging {
-  box-shadow: 0 0 0 2px var(--teal);
+  box-shadow: 0 0 0 2px var(--brand);
 }
 .row.is-drop-before {
-  box-shadow: inset 0 3px 0 0 var(--teal);
+  box-shadow: inset 0 3px 0 0 var(--brand);
 }
 .row.is-drop-after {
-  box-shadow: inset 0 -3px 0 0 var(--teal);
+  box-shadow: inset 0 -3px 0 0 var(--brand);
 }
 /* 28x28, above the 24x24 minimum of WCAG 2.2 rule 2.5.8. */
 .btn.move {
@@ -478,7 +478,7 @@ input.f[aria-invalid="true"] {
   height: 16px;
   margin: 0;
   flex-shrink: 0;
-  accent-color: var(--teal);
+  accent-color: var(--brand);
 }
 
 .btn {
@@ -487,7 +487,7 @@ input.f[aria-invalid="true"] {
   font-weight: 500;
   border: 1px solid var(--line);
   background: var(--card);
-  color: var(--teal-deep);
+  color: var(--brand-deep);
   border-radius: 8px;
   padding: 0 13px;
   min-height: 32px;
@@ -497,11 +497,11 @@ input.f[aria-invalid="true"] {
   background: var(--field);
 }
 .btn.primary {
-  background: var(--teal);
-  border-color: var(--teal);
-  /* --on-teal, not #fff: on the dark palette the teal lightens, and white text
-     on it drops below the AA floor. The token moves with the ground. */
-  color: var(--on-teal);
+  background: var(--brand);
+  border-color: var(--brand);
+  /* --on-brand, not #fff: on the dark palette the accent lightens, and white
+     text on it drops below the AA floor. The token moves with the ground. */
+  color: var(--on-brand);
 }
 .btn.plain {
   color: var(--muted);
@@ -538,9 +538,9 @@ input.f[aria-invalid="true"] {
   cursor: pointer;
 }
 .chip[aria-pressed="true"] {
-  background: var(--teal-wash);
-  border-color: var(--teal-line);
-  color: var(--teal-deep);
+  background: var(--brand-wash);
+  border-color: var(--brand-line);
+  color: var(--brand-deep);
 }
 
 .access {
@@ -554,7 +554,7 @@ input.f[aria-invalid="true"] {
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: var(--teal);
+  background: var(--brand);
   flex-shrink: 0;
 }
 /* The palette's amber, not a second one. `#c9a227` sat here while --amber served
@@ -616,7 +616,7 @@ input.f[aria-invalid="true"] {
 .preview {
   margin-top: 9px;
   padding-left: 13px;
-  border-left: 2px solid var(--teal);
+  border-left: 2px solid var(--brand);
   font-family: var(--mono);
   font-size: 12.5px;
 }

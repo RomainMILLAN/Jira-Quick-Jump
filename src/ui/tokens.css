@@ -1,10 +1,21 @@
 /**
  * Design tokens.
  *
- * Teal carries the product and never means a state: states are red (refused),
- * amber (accept once) and teal only ever confirms. Colour is never the sole
- * signal — every state also carries a word, which is what WCAG 2.2 AA requires
- * and what makes the UI readable to someone who cannot separate the two.
+ * The brand accent carries the product and never means a state: states are red
+ * (refused), amber (accept once) and the accent only ever confirms. Colour is
+ * never the sole signal — every state also carries a word, which is what WCAG
+ * 2.2 AA requires and what makes the UI readable to someone who cannot separate
+ * the two.
+ *
+ * The naming is deliberately hybrid: --brand is semantic, --red and --amber name
+ * a hue. That is not an oversight. The accent is the ONLY token whose hue may
+ * change -- it did once already, from green to Jira blue -- because it means
+ * nothing but "this product". Red and amber MEAN something, so their hue is part
+ * of the meaning and cannot move.
+ *
+ * --brand must stay in step with BRAND in scripts/make-icons.mjs, which paints
+ * the toolbar icon: the tile in the options page and the icon in the toolbar are
+ * the same object. test/mark.test.js fails if they drift.
  *
  * The interface uses the system UI face, so there is one bundled font instead of
  * three: JetBrains Mono, for keys and URLs only.
@@ -18,10 +29,10 @@
 }
 
 :root {
-  --teal: #0d7f74;
-  --teal-deep: #0a635b;
-  --teal-wash: #e6f4f1;
-  --teal-line: #bfe0da;
+  --brand: #1868db;
+  --brand-deep: #1152b3;
+  --brand-wash: #e9f2ff;
+  --brand-line: #c2d9ff;
 
   --text: #16211f;
   --muted: #6a7370;
@@ -38,9 +49,9 @@
   /* A neutral with enough presence to read as a surface rather than an edge: the
      switch's off state used a hexadecimal that belonged to no scale. */
   --line-strong: #cfcdc5;
-  /* What reads on a teal fill. It follows the ground, because the dark palette
-     lightens --teal and white on it falls under 4.5:1. */
-  --on-teal: #ffffff;
+  /* What reads on a brand fill. It follows the ground, because the dark palette
+     lightens --brand and white on it falls under 4.5:1. */
+  --on-brand: #ffffff;
   --line-soft: #efede7;
   --field: #fbfbf9;
 
@@ -51,7 +62,7 @@
   --amber-wash: #fbf5e6;
   --amber-line: #e6d7b4;
 
-  --shadow: 0 8px 22px rgba(22, 33, 31, 0.05);
+  --shadow: 0 8px 22px rgba(10, 14, 20, 0.06);
 
   --ui: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
@@ -59,23 +70,28 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --teal: #3fbfad;
-    --teal-deep: #6fd6c6;
-    --teal-wash: #14312d;
-    --teal-line: #2a5b54;
+    --brand: #579dff;
+    --brand-deep: #85b8ff;
+    --brand-wash: #12253f;
+    --brand-line: #29416b;
 
-    --text: #e4e9e7;
-    --muted: #97a09d;
+    /* The dark neutrals used to carry a green cast, tuned to the accent this
+       palette had before. Under a blue one that residue reads as dirt, so they
+       are cold neutrals now. The LIGHT neutrals keep their warmth: the paper is
+       a deliberate off-white, and warm paper under a blue accent is a pairing,
+       not a clash. */
+    --text: #e6e8ec;
+    --muted: #99a0aa;
     /* Same reasoning on the dark ground: 4.8:1 on --card. */
-    --faint: #98a29e;
+    --faint: #9aa1ab;
 
-    --paper: #121716;
-    --card: #171c1b;
-    --line: #2c3230;
-    --line-strong: #3d4643;
-    --on-teal: #06211e;
-    --line-soft: #262b29;
-    --field: #1e2422;
+    --paper: #121417;
+    --card: #171a1e;
+    --line: #2c3036;
+    --line-strong: #3d434b;
+    --on-brand: #0a1b33;
+    --line-soft: #262a2f;
+    --field: #1e2228;
 
     --red: #ef8a7d;
     --red-wash: #2c211d;
@@ -93,11 +109,11 @@
 }
 
 ::selection {
-  background: var(--teal);
+  background: var(--brand);
   color: #fff;
 }
 
 :focus-visible {
-  outline: 2px solid var(--teal);
+  outline: 2px solid var(--brand);
   outline-offset: 2px;
 }
