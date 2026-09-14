@@ -8,6 +8,10 @@ export const HOSTILE_KEYS = [
   "A-B", "A/B", "A#B", "A@B", "A'B", 'A"B', "A;B", "A(B", "A)B",
   "АВС", "ＡＢＣ", "AB​C", "AB\tC", "AB‮C",
   "AB C", "", " ", "A", "1AB", "_AB", "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+  // The bare asterisk was missing: it was hostile to nobody until a catch-all
+  // existed. ProjectKey.parse must still refuse it, and ShortcutKey.parse is now
+  // the ONLY door that turns it into a key.
+  "*", "**", "*A", "A*B", "\uff0a",
 ];
 
 /** Legitimate keys that must be accepted, with their normalised form. */

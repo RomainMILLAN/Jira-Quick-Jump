@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "default_locale": "en",
   "name": "__MSG_extensionName__",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "description": "__MSG_extensionDescription__",
   "icons": {
     "16": "icons/icon-16.png",
@@ -10,7 +10,7 @@
     "48": "icons/icon-48.png",
     "128": "icons/icon-128.png"
   },
-  "homepage_url": "https://github.com/RomainMILLAN/jira-quick-jump",
+  "homepage_url": "https://github.com/RomainMILLAN/Jira-Quick-Jump",
   "permissions": [
     "declarativeNetRequestWithHostAccess",
     "storage"
@@ -25,7 +25,7 @@
   "declarative_net_request": {
     "rule_resources": [
       {
-        "id": "guard",
+        "id": "firefox-1921353-workaround",
         "enabled": true,
         "path": "rules.json"
       }
@@ -36,21 +36,36 @@
     "scripts": [
       "platform.js",
       "core/mutation-result.js",
+      "core/engine-id.js",
+      "core/reserved-prefix.js",
       "core/issue-reference.js",
-      "core/destination-warning.js",
+      "core/shortcut-warning.js",
       "core/consent.js",
       "core/project-shortcut.js",
+      "core/catch-all-key.js",
+      "core/shortcut-key.js",
+      "core/shortcut-id.js",
       "core/shortcut-registry.js",
       "core/custom-engine.js",
       "core/jump-policy.js",
+      "core/diagnosis.js",
+      "core/policy-diff.js",
       "core/admission.js",
       "interception/search-engine-catalog.js",
+      "interception/re2-budget.js",
+      "interception/not-installed.js",
       "interception/reference-pattern.js",
+      "interception/rule-ranking.js",
+      "interception/installed-rule.js",
+      "interception/rule-set.js",
       "interception/rule-factory.js",
       "interception/origin-requirements.js",
       "interception/jump-preview.js",
       "versioned-entry.js",
+      "install-outcome.js",
       "stored-policy.js",
+      "local-acknowledgements.js",
+      "installed-projection.js",
       "policy-repository.js",
       "destination-journal.js",
       "rule-installer.js",
@@ -70,6 +85,10 @@
   },
   "commands": {
     "disarm-all": {
+      "suggested_key": {
+        "default": "Alt+Shift+J",
+        "mac": "Alt+Shift+J"
+      },
       "description": "__MSG_commandDisarmAll__"
     }
   },

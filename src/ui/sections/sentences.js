@@ -1,0 +1,428 @@
+/**
+ * One sentence per fact, per warning, per refused rule -- the catalogues.
+ *
+ * They live together because they answer one kind of question ("what do we tell
+ * the reader about X?") and because they are the part of this screen a
+ * translator touches. A section builds nodes; it does not decide wording.
+ *
+ * Every entry goes through Platform.t with its English as the fallback, which is
+ * what keeps the French build honest -- and what a scan of this file can check.
+ */
+(function (global) {
+  "use strict";
+
+  const { el, t } = global.SectionParts;
+  const { CatchAllKey, Dom } = global;
+
+  /**
+   * The nouns behind the fact types carried by PolicyReplaced.
+   *
+   * A MAP, because the keys come from a STORED FACT -- `{ kinds: ["constructor"] }`
+   * would resolve through Object.prototype on a literal, and `.get()` makes the
+   * bracket inexpressible rather than merely harmless. See the table-shape rule in
+   * core/mutation-result.js.
+   *
+   * An unknown kind answers `undefined` and is filtered out, which is the safe
+   * direction: the count is still said.
+   */
+  const KIND_NOUN = () => new Map(Object.entries({
+    DestinationChanged: t("kindDestination", "destinations"),
+    KeyChanged: t("kindKey", "keys"),
+    ShortcutArmed: t("kindArmed", "shortcuts switched on"),
+    CatchAllAppeared: t("kindCatchAll", "a catch-all"),
+    ShadowingChanged: t("kindShadowing", "which shortcut wins"),
+    EnginesAdded: t("kindEngines", "search engines"),
+    EnginesRemoved: t("kindEnginesRemoved", "search engines removed"),
+    PolicyArmed: t("kindPolicyArmed", "the extension switched on"),
+    QuarantinedReadmitted: t("kindReadmitted", "quarantined entries brought back"),
+    DomainsAdded: t("kindDomains", "search domains added"),
+    DomainsRemoved: t("kindDomainsRemoved", "search domains removed"),
+    DomainsReshaped: t("kindDomainsReshaped", "how a search domain is intercepted"),
+    UnknownFact: t("kindUnknown", "a change this version cannot name"),
+  }));
+
+  /**
+   * THE THREE NODE FACTORIES, OUTSIDE the switch that uses them.
+   *
+   * They were declared INSIDE FACT_SENTENCE, so three closures were rebuilt for
+   * every fact -- up to twenty per render. No measurable cost at this scale, but
+   * it reads "encapsulate what varies" backwards: these three are the STABLE part
+   * and the fact is what varies.
+   *
+   * BOTH `host` AND `plain` GO THROUGH Dom.visibleText, and the reason is not the
+   * same as the quarantine's -- it is the same DANGER.
+     *
+     * A fact comes back from `storage.local` through DestinationJournal.entryOf,
+     * which bounds the LENGTH of a text field and validates nothing else. It is
+     * NOT re-parsed at render time, so the claim in Dom.visibleText's old
+     * docstring -- "a host on any other screen has survived JiraInstance.parse" --
+     * did not hold here. An RTL override in a journalled baseUrl printed the
+     * destination backwards, on the one surface whose entire job is to have a
+     * destination checked by eye.
+     *
+     * Only a LOCAL writer can put one there (the facts this build produces come
+     * from an already-admitted policy, and the sync channel does not reach
+     * storage.local), so this is defence in depth in a zone SECURITY.md declares
+   * out of scope. It costs two calls.
+   */
+  const host = (text) => el("span", { class: "dest host", text: Dom.visibleText(text) });
+  // NOT `.dest`: this paints a key, or a phrase standing in for one -- never a
+  // destination. One class for three meanings made a rule about where traffic
+  // goes govern the word beside it.
+  const plain = (text) => el("span", { class: "mono-token", text: Dom.visibleText(text) });
+  /**
+   * A list of values from the journal, printed as one token.
+   *
+   * Joining first and cleaning after is safe HERE, and only because the deceptive
+   * class deliberately excludes the ordinary space: the ", " separators this
+   * composes survive. Were the space ever added to that class, this would have to
+   * clean each member and join afterwards -- which is why the exclusion is argued
+   * in project-shortcut.js rather than assumed.
+   */
+  const plainList = (values) => plain((values || []).join(", "));
+
+  const FACT_SENTENCE = (fact) => {
+    switch (fact.type) {
+      case "ShortcutAppeared":
+      case "CatchAllAppeared":
+        return [
+          plain(fact.key || t("catchAllKey", "Any short key")),
+          " ",
+          t("factAppeared", "was added, pointing to"),
+          " ",
+          host(fact.baseUrl),
+          ".",
+        ];
+      case "ShortcutRemoved":
+      case "CatchAllRemoved":
+        return [
+          plain(fact.key || t("catchAllKey", "Any short key")),
+          " ",
+          t("factRemoved", "was removed. It pointed to"),
+          " ",
+          host(fact.baseUrl),
+          ".",
+        ];
+      case "ShadowingChanged":
+        // TWO FACTS, BECAUSE THEY ARE TWO. The single sentence read "these keys now
+        // go to the catch-all", which is FALSE for a key of more than six
+        // characters or a reserved prefix: the catch-all does not claim those at
+        // all, so they are not intercepted any more and leave IN CLEAR for the
+        // search engine. The wrong destination, named on the surface whose whole
+        // job is to be believed -- and wrong in the reassuring direction.
+        return [
+          t("factShadowedStopped", "These keys no longer fire, because the catch-all moved above them:"),
+          " ",
+          plainList(fact.affectedKeys),
+          ". ",
+          t("factShadowedClaims", "What the catch-all does claim goes to"),
+          " ",
+          host(fact.catchAllBaseUrl),
+          ".",
+        ];
+      case "PolicyReplaced": {
+        // AND WHICH KINDS, when the diff carried them. Without this the collapse
+        // rewarded noise: six moved destinations read "the whole configuration
+        // changed" while ONE read the old and the new host by name. The kinds are
+        // a closed vocabulary this repository writes -- unlike an engine id, none
+        // of these words is authored by whoever wrote the policy.
+        const nouns = KIND_NOUN();
+        const said = (fact.kinds || []).map((kind) => nouns.get(kind)).filter(Boolean);
+        if (said.length === 0) {
+          return [t("factReplaced", "The whole configuration changed elsewhere. Check every destination.")];
+        }
+        return [
+          t("factReplaced", "The whole configuration changed elsewhere. Check every destination."),
+          " ",
+          t("factReplacedKinds", "What changed:"),
+          " ",
+          said.join(", "),
+          ".",
+        ];
+      }
+      case "KeyChanged":
+        return [
+          plain(fact.oldKey),
+          " ",
+          t("factKeyChanged", "no longer intercepts what it did; the key is now"),
+          " ",
+          plain(fact.newKey),
+          ". ",
+          t("changedNow", "now points to"),
+          " ",
+          host(fact.baseUrl),
+          ".",
+        ];
+      case "ShortcutArmed":
+        return [
+          plain(fact.key || t("catchAllKey", "Any short key")),
+          " ",
+          t("factArmed", "was armed and now redirects to"),
+          " ",
+          host(fact.baseUrl),
+          ".",
+        ];
+      case "EnginesAdded":
+        return [
+          t("factEnginesAdded", "More search engines are intercepted than before. Check the Access section."),
+        ];
+      case "EnginesRemoved":
+        // The reassuring direction -- a smaller surface -- but still a change to
+        // the policy made somewhere else, and saying it is what stops "one engine
+        // added" from being the whole story of a swap.
+        return [
+          t("factEnginesRemoved", "Fewer search engines are intercepted than before."),
+        ];
+      case "DomainsAdded":
+        /**
+         * IT NAMES THE DOMAINS, where EnginesAdded can only count.
+         *
+         * A domain added to the catalogue is a host the user can read, and the one
+         * that matters is the one that DUPLICATES an engine they already granted:
+         * `google.com` under the other shape ships a second rule, on a path the
+         * built-in entry never matched, against a permission already in place. So
+         * the sentence sends them to the section where the domain can be removed,
+         * not to Access, where nothing new would be asked.
+         */
+        return [
+          t("factDomainsAdded", "Search domains were added, and searches on them are now intercepted:"),
+          " ",
+          plainList(fact.affectedHosts),
+          ".",
+        ];
+      case "DomainsRemoved":
+        return [
+          t("factDomainsRemoved", "Search domains were removed, so their searches go through untouched:"),
+          " ",
+          plainList(fact.affectedHosts),
+          ".",
+        ];
+      case "DomainsReshaped":
+        /**
+         * THE HOST DID NOT MOVE; WHAT IT CAPTURES DID.
+         *
+         * The dangerous case is the quiet one: the permission for that host is
+         * already granted, so the new interception path is live immediately. So
+         * the sentence sends the reader to the section where the domain can be
+         * removed, and says what actually changed rather than "a domain changed".
+         */
+        return [
+          t("factDomainsReshaped",
+            "The address a search domain is intercepted on changed, so different searches are now captured:"),
+          " ",
+          plainList(fact.affectedHosts),
+          ".",
+        ];
+      case "UnknownFact":
+        /**
+         * A CHANGE WE CANNOT NAME IS STILL A CHANGE.
+         *
+         * The journal's reading door coerces any type it does not know to this
+         * one. It used to let it fall through to the `default:` branch below --
+         * the DestinationChanged sentence -- which prints three fields the entry
+         * does not carry, so the banner read " now points to  . It used to point
+         * to ." A fabricated claim with holes in it, on the surface that must be
+         * believed. Over-signalling, by name, is the honest answer.
+         */
+        return [t("factUnknown",
+          "A change was recorded that this version cannot describe. Check every destination.")];
+      case "PolicyArmed":
+        return [t("factPolicyArmed",
+          "The extension was switched back on elsewhere, and every shortcut redirects again.")];
+      case "PolicyUnreadable":
+        // The path a compromised sync reaches most easily, and it used to be
+        // mute: purge, badge to `off`, not one line anywhere.
+        return [t("factUnreadable",
+          "What was saved stopped being readable, so nothing is installed. Check every destination.")];
+      case "ProjectionStale":
+        // The change detector's baseline could not be refreshed. Nothing is wrong
+        // with the rules; what is at risk is the NEXT comparison, which may report
+        // an ordinary edit as unattributed. Said, so a spurious banner afterwards
+        // has an explanation instead of looking like a compromise.
+        return [t("factProjectionStale",
+          "The change detector could not refresh its baseline, so the next alert may name a change you made yourself.")];
+      default:
+        return [
+          plain(fact.key),
+          " ",
+          t("changedNow", "now points to"),
+          " ",
+          host(fact.newBaseUrl),
+          ". ",
+          t("changedWas", "It used to point to"),
+          " ",
+          plain(fact.oldBaseUrl),
+          ".",
+        ];
+    }
+  };
+
+  // The core returns a CODE; the sentence is written here, and therefore
+  // translated here. Built lazily: t() reads the browser's locale, which is not
+  // available while this file is still being evaluated in a service worker.
+  /**
+   * The four warning messages never went through t(), so the French build was
+   * half English on exactly the screens this feature adds. Lazy, like DIAGNOSIS
+   * below: t() reads the locale, which is not available while this file is still
+   * being evaluated in a service worker.
+   */
+  // Null-prototyped, like KIND_NOUN and SKIPPED_SENTENCE above. The kind reaching
+  // this table has passed ShortcutWarning.parse, so nothing hostile arrives -- and
+  // that is why the guard is free. Two tables in one file with two rules is how the
+  // next reader learns the rule is optional.
+  const WARNING_MESSAGE = () => Object.assign(Object.create(null), {
+    INSECURE_SCHEME: t("warnInsecureScheme", "Traffic and your Jira session cookie travel in clear text."),
+    INTERNAL_HOST: t("warnInternalHost", "This destination is on a private or non-public network."),
+    LITERAL_IP: t("warnLiteralIp", "This destination is an IP address rather than a host name."),
+    PUNYCODE: t("warnPunycode", "This host name uses non-ASCII characters and may imitate another one."),
+    CATCH_ALL: t("warnCatchAll", "Every search shaped like a 2-to-6-character key, a hyphen and a number will leave for this destination, on each engine you ticked. Only a short reserved list is held back."),
+  });
+
+  /**
+   * The three parallel tables that lived here -- DIAGNOSIS, TAG_TEXT, TAG_TONE --
+   * are now ONE table in ui/diagnosis-presentation.js, whose CONSTRUCTION refuses
+   * an incomplete catalogue. Only TAG_TONE ever had a fallback, and it was
+   * `|| "off"`: the LEAST alarming tone applied to the code that says "I do not
+   * know whether jumps are departing".
+   */
+
+  /**
+   * What a move did to the row that moved, as a CATALOGUE keyed by a TRIPLET --
+   * not a chain of ifs, and not a pair.
+   *
+   * The key is (was shadowed, the resulting status, the direction), because a move
+   * with NO change of shadowing is the majority case and must keep saying which way
+   * it went. A pair would have left that case with no entry, and the next reader
+   * would either drop the direction or bolt an `if` in front of the table.
+   *
+   * ONE JUDGE, ONE CALL. `SHADOWED` is the FIRST test in statusOf's chain, so
+   * asking the aggregate for the status IS asking the registry whether the row is
+   * shadowed -- identically, not approximately. The transition therefore needs no
+   * separate reading, and this file never has to reach past the aggregate to its
+   * collection (a structure test holds that line, comments included). What
+   * guarantees the equivalence is the order at jump-policy.js:172-175, and that is
+   * why that order does not get rearranged.
+   *
+   * AND THE ASYMMETRY, which is the whole reason this is a catalogue:
+   *
+   *   shadowed  =>  never fires   (unconditional, safe to promise)
+   *   not shadowed  =/=>  fires   (three other doors can be shut)
+   *
+   * An unlocked door is not an open door. So only the "now shadowed" direction may
+   * promise anything about firing; coming back out, the sentence stops at "no
+   * longer shadowed" unless the status is actually ACTIVE. Saying "it fires again"
+   * to a screen-reader user about a row that is merely awaiting an
+   * acknowledgement would be a lie in the only channel that speaks to them.
+   *
+   * It is also a THIRD comparator of two states, and deliberately so. PolicyDiff
+   * answers "what changed, for the journal" -- in a batch, only newlyShadowed,
+   * inside the commit closure. This answers "what does THIS gesture do to THIS
+   * row, before writing it" -- for one id, in both directions. Same material, two
+   * questions, neither can answer for the other.
+   */
+  const sentenceFor = (before, after, id, movedUp) => {
+    const wasShadowed = before.statusOf(id) === "SHADOWED";
+    const status = after.statusOf(id);
+    if (!wasShadowed && status === "SHADOWED") {
+      return t("nowShadowed", "Now shadowed: this shortcut no longer fires.");
+    }
+    if (wasShadowed && status !== "SHADOWED") {
+      return status === "ACTIVE"
+        ? t("noLongerShadowedActive", "No longer shadowed: this shortcut fires again.")
+        : t("noLongerShadowed", "No longer shadowed.");
+    }
+    return movedUp ? t("movedUp", "Moved up.") : t("movedDown", "Moved down.");
+  };
+
+  /**
+   * NO PROTOTYPE, because this table is the only one here indexed by a key that
+   * comes from OUTSIDE. `cause.code` and `cause.subject` are read back from the
+   * receipt, where install-outcome.js checks `typeof === "string"` and nothing
+   * else -- so `{ code: "constructor" }` would return the `Object` function,
+   * which is TRUTHY, so the `|| cause.code` fallback would not fire, and the
+   * panel meant to explain why a security control fell would print
+   * `function Object() { [native code] }`. Same for toString, valueOf, __proto__.
+   *
+   * `cause.subject` is the one that matters most: `code` is a closed vocabulary we
+   * write (Re2Budget.REASONS, frozen), while `subject` is free text derived from
+   * the policy -- the "text chosen by whoever wrote the policy" that policy-diff
+   * already refuses to carry elsewhere.
+   *
+   * Object.create(null) closes BOTH lookups at once. A hasOwn() at each call site
+   * would work too, and would be forgotten on one of the two.
+   */
+  const SKIPPED_SENTENCE = () => Object.assign(Object.create(null), {
+    UNKNOWN_ENGINE: t("skipUnknownEngine", "A ticked search engine is no longer known."),
+    REGEX_UNSUPPORTED: t("skipRegexUnsupported", "The browser refused the pattern for this rule."),
+    UNIT_INCOMPLETE: t("skipUnitIncomplete", "This rule was dropped with the group it belongs to."),
+    CONSTRUCTION_REFUSED: t("skipConstructionRefused", "The rules could not be built."),
+    RUN_OVER_BUDGET: t("skipRunOverBudget", "The reserved-prefix guard is too long for the browser."),
+    ENVELOPE_OVER_BUDGET: t("skipEnvelopeOverBudget", "This search engine's address leaves no room for a rule."),
+    KEY_LENGTH_OVER_BUDGET: t("skipKeyLengthOverBudget", "The catch-all claims longer keys than the browser can match."),
+    QUERY_PARAM_TOO_LONG: t("skipQueryParamTooLong", "This search engine's address uses a parameter name this version cannot match."),
+    SEPARATOR_HAS_NO_URL_FORM: t("skipSeparatorNoUrlForm", "This version cannot match one of the separators the key accepts."),
+    EMPTY_SEPARATORS: t("skipEmptySeparators", "That key accepts no separator, so no rule can be built for it."),
+  });
+
+  /** Lazy and translated, like DIAGNOSIS: these four never went through t(). */
+  /** The catch-all's own bounds, asked of the objects that hold them. */
+  const catchAllNote = () => {
+    const shortest = 2;
+    // The CONSTANT, never `CatchAllKey.only()`: this file must not mint a
+    // catch-all key, and a structure test holds that line.
+    const longest = CatchAllKey.CLAIMS_KEYS_UP_TO;
+    // The fallback carries the SAME placeholders as the catalogue, so the English
+    // and the French are filled by one substitution rather than two spellings of
+    // the bound. A template literal here would also hide the call from the i18n
+    // scan, which only reads double-quoted pairs.
+    return t("catchAllNote", "Any {min}-to-{max}-character key followed by a hyphen and a number goes to this destination, on the engines you ticked. A short reserved list is held back.")
+      .replace("{min}", String(shortest))
+      .replace("{max}", String(longest));
+  };
+
+  /**
+   * WHAT A FIELD OF THE SAVED CONFIGURATION COULD NOT SAY.
+   *
+   * Document-scoped facts, one per field the admission door could not read. They
+   * are NOT refused entries -- an entry that is refused goes to quarantine and has
+   * a row -- and that is why they have a table of their own rather than joining
+   * RefusalPresentation: the same code means "this line is set aside" there and
+   * "this field of the document was not usable" here.
+   *
+   * They had no reader at all until now: admission.js computed them and called the
+   * absent reader "named debt, not an oversight". Three producers later, a signal
+   * about the integrity of the saved configuration was still being computed and
+   * thrown away.
+   */
+  const UNREADABLE_SENTENCE = () => Object.assign(Object.create(null), {
+    ARMING_STATE_UNREADABLE: t("unreadableArming",
+      "The saved on/off state could not be read, so nothing is armed."),
+    ENGINE_ID_SHAPE: t("unreadableEngineId",
+      "A saved search engine was not an engine at all, so it is no longer selected."),
+    ENGINES_TRUNCATED: t("unreadableEnginesTruncated",
+      "The saved list of search engines was longer than the number that can exist, so the extra entries were refused."),
+    ENGINE_ID_NOT_A_STRING: t("unreadableEngineIdType",
+      "A saved search engine could not be read, so it is no longer selected."),
+  });
+
+  // Null-prototyped, for the same reason and with the same cost as WARNING_MESSAGE.
+  const PREVIEW_MISS = () => Object.assign(Object.create(null), {
+    NOT_A_URL: t("previewNotAUrl", "That is not a URL."),
+    // A configuration answer, never a verdict on the text: with nothing ticked
+    // the preview used to blame the input for a problem it did not have.
+    NO_ENGINES: t("previewNoEngines", "Tick a search engine first: nothing is intercepted yet."),
+    NOT_A_SEARCH_URL: t("previewNotASearchUrl", "That is not a search URL."),
+    NO_MATCH: t("previewNoMatch", "This search would go through untouched."),
+    INPUT_TOO_LONG: t("previewTooLong", "That is too long to be a search URL."),
+    RESERVED_PREFIX: t("previewNoMatch", "This search would go through untouched."),
+    // NON_DETERMINISTIC is an assertion canary and must stay unreachable, so it
+    // deliberately has no sentence of its own: translating something nobody can
+    // see would be a stage set.
+    NON_DETERMINISTIC: t("previewNoMatch", "This search would go through untouched."),
+  });
+
+  global.SectionSentences = {
+    FACT_SENTENCE, WARNING_MESSAGE, sentenceFor,
+    SKIPPED_SENTENCE, catchAllNote, PREVIEW_MISS, UNREADABLE_SENTENCE,
+  };
+})(globalThis);

@@ -1,0 +1,305 @@
+/**
+ * Where EVERY acknowledgement lives: storage.local, ALWAYS.
+ *
+ * A CONTROL THAT TRAVELS BY THE CHANNEL IT IS MEANT TO WATCH IS WORTHLESS. The
+ * journal already says that about itself; the same argument applies here, and it
+ * is why this is a separate entry rather than a field of Consent.
+ *
+ * Without it, a compromised sync account writes
+ *   { key: <the catch-all form>, consent: { armed: true, acknowledged: ["CATCH_ALL"] } }
+ * against a host the user has already granted, and the extension installs a
+ * universal redirector with no screen, no click and no banner.
+ *
+ * IT USED TO HOLD ONE SCOPE OUT OF TWO, and that was the hole. Consent.toJSON
+ * projected the DESTINATION-scoped acknowledgements into the configuration
+ * itself, so INSECURE_SCHEME, PUNYCODE, LITERAL_IP and INTERNAL_HOST travelled
+ * in storage.sync the moment a user ticked "Sync across devices" -- by exactly
+ * the channel the sentence above forbids, for four warnings two of which are
+ * HIGH severity. The argument was applied to the catch-all and stopped there.
+ * Measured: a synced document carrying `acknowledged: ["INSECURE_SCHEME"]` and
+ * `armed: true` produced an ACTIVE binding with no screen and no click. So the
+ * scope distinction is gone from the STORAGE decision -- every kind is filed
+ * here -- and it survives only where it is a domain fact (which warnings a
+ * change of destination forgets).
+ *
+ * WHAT STILL READS THE DOCUMENT, and why that is not a hole: an OLDER build
+ * wrote those acknowledgements into the policy, and JumpPolicy.restore carries
+ * them when -- and only when -- the area is `local`, where the record genuinely
+ * is this browser's. That is a named migration: the first write afterwards files
+ * them here, and toJSON never writes them again. On `sync` they are dropped.
+ *
+ * THE KEY OF AN ENTRY IS id + baseUrl + nature, not the id alone. An
+ * acknowledgement bound to the id recycles: delete the catch-all, reuse its id
+ * for one pointing elsewhere, and the old consent survives. Consent given to a
+ * catch-all towards catchall.atlassian.net is not consent towards
+ * evil-already-granted.net.
+ *
+ * ABSENT OR CORRUPT MEANS NOT ACKNOWLEDGED. Fail closed, never "we assume so".
+ * Which also means: turning sync on loses the acknowledgements on the other
+ * devices, so the shortcut disarms itself there -- the catch-all and, since this
+ * batch, the destination warnings too. That is the right sense of failure --
+ * every machine sees the warning once, exactly like everything imported arriving
+ * disarmed -- and it is now the SAME sentence for all four kinds instead of one.
+ *
+ * The limit, stated rather than hidden: a LOCAL attacker writes this entry too.
+ * This control does not separate the local attacker, it separates the SYNC
+ * CHANNEL -- the same argument, and the same limit, as the journal.
+ *
+ * READ ONCE BEFORE the compare-and-set and passed in as a snapshot; WRITTEN AFTER
+ * the winning commit. PolicyRepository._restore is synchronous and runs inside a
+ * mutate closure that VersionedEntry replays up to three times, so it can neither
+ * await a read nor perform a write.
+ */
+(function (global) {
+  "use strict";
+
+  const { Platform, VersionedEntry } = global;
+  /**
+   * THE STORAGE KEY IS FROZEN, AND THE MODULE'S NAME IS NOT.
+   *
+   * This was `KeyAcknowledgements`, which stopped being true the day it took
+   * every scope rather than the key one: a name that lies is what let the
+   * destination scopes sit in the configuration under a header forbidding exactly
+   * that. So the module is `LocalAcknowledgements` -- named for the property that
+   * carries the security, which is WHERE it lives and never WHICH kinds it holds.
+   *
+   * The ENTRY string stays `keyAcknowledgements` because renaming it would
+   * REVOKE EVERY ATTESTATION on every existing profile: the old key would be
+   * orphaned, the new one absent, and absent means not acknowledged -- so every
+   * catch-all would disarm itself and every user would be asked again. Fail-safe,
+   * and a pointless cost for a cosmetic edit. A schema name is a contract with
+   * data already written; a module name is a contract with the next reader. They
+   * are allowed to disagree, and this comment is what stops the disagreement from
+   * looking like an oversight.
+   */
+  const ENTRY = "keyAcknowledgements";
+  // Bounded, because the one entry whose job is to say "no" must not grow
+  // unwatched -- and bounded AT THE READING DOOR.
+  //
+  // WHAT WE WRITE BACK IS STILL WELL UNDER IT, and the arithmetic changed with
+  // the scopes: it used to be AT MOST ONE row (one key-scoped kind, one
+  // catch-all per policy); it is now at most ONE ROW PER SHORTCUT, and
+  // JumpPolicy.MAX_SHORTCUTS is 200. The kinds of a shortcut share its row, so
+  // four warnings do not make four rows. 400 therefore still does not govern
+  // us -- it governs what a local writer may have put there before we read --
+  // and it keeps a factor of two over the domain's own ceiling.
+  // See Acknowledgements.admitting.
+  const MAX_ENTRIES = 400;
+
+  /**
+   * The row key is INJECTIVE, and a join was not.
+   *
+   * `[id, baseUrl, nature].join(" ")` reads as a key and is not one: the parts
+   * are pasted with a separator that a part could contain, so two different
+   * triples can spell the same row. A base URL cannot hold a space today -- the
+   * parse refuses whitespace -- which makes this a latent flaw rather than a live
+   * one, and latent flaws in a table that decides whether a universal redirector
+   * may arm itself are exactly the ones to close early.
+   *
+   * JSON, because it escapes what it contains: the round trip is total, and the
+   * shape is legible to whoever reads the stored entry.
+   */
+  const rowKey = (shortcut) => {
+    // THE AGGREGATE HANDS OVER THE SUBJECT. This used to read three accessors off
+    // the entity -- id, baseUrl, nature -- so a neighbouring context knew this
+    // one's internal shape, and the rule "a consent is never recycled" was
+    // enforced by the side that does not state it.
+    const subject = shortcut.consentSubject();
+    return JSON.stringify([subject.id, subject.baseUrl, subject.nature]);
+  };
+
+  /**
+   * The attestations, as a value rather than a bag of rows.
+   *
+   * IT USED TO BE TWO GESTURES UNDER ONE NAME, with contradictory needs: record()
+   * both recorded the living attestations AND pruned the orphans by omission. The
+   * second required overwriting, the first required merging -- so no write could
+   * be correct, and the one that shipped lost attestations. Measured: a tab
+   * acknowledges the catch-all while another commits an unrelated edit, the
+   * commit rebuilds the whole table from its own policy, and the click is gone.
+   * The user is asked to accept the warning again, which is how a security
+   * control teaches people to click it without reading.
+   *
+   * So: `merged` is additive, associative and idempotent -- safe under the
+   * compare-and-set replay -- and `forgetLapsed` is the other gesture, named for
+   * what it is. An attestation whose (id, baseUrl, nature) triple no longer
+   * exists has NO OBJECT any more; it cannot authorise anything. That is a
+   * lapse, not housekeeping.
+   *
+   * A Map, never an object literal: the rows are keyed by strings from storage,
+   * and ShortcutRegistry already argues at length why `obj[key]` is unsafe there.
+   */
+  class Acknowledgements {
+    /**
+     * `losses` is what the READING DOOR could not carry across the airlock, and it
+     * is ALWAYS an object -- never absent, so no caller writes a presence test.
+     * Every other constructor site is downstream of that door and loses nothing,
+     * hence the default.
+     */
+    constructor(rows, losses = { overflowed: 0, unknownKinds: 0 }) {
+      this._rows = rows;
+      this._losses = losses;
+    }
+
+    /** WHAT THE SAS DROPPED, as one value. Zero on every path but the door. */
+    losses() {
+      return { overflowed: this._losses.overflowed, unknownKinds: this._losses.unknownKinds };
+    }
+
+    /**
+     * The reading door, and the only place the bound is applied.
+     *
+     * Hostile size only ever arrives HERE: what gets WRITTEN back is pruned by
+     * forgetLapsed first, and the honest ceiling there is ONE -- the key scope
+     * holds a single kind (CATCH_ALL) and a policy holds a single catch-all. So
+     * the bound never governs our own writes; it governs an entry any local
+     * writer can inflate before we read it.
+     *
+     * Excess is REFUSED AT THE DOOR rather than evicted after the fact -- but be
+     * precise about what that buys: the `break` below drops whatever sits past the
+     * bound, and a LIVE attestation sitting at position 401 is dropped with the
+     * rest. It is fail-closed (the shortcut disarms and the user is asked again),
+     * never a hole, and it is the same direction this file already states: ABSENT
+     * OR CORRUPT MEANS NOT ACKNOWLEDGED. What refusing at the door does buy is
+     * that we never un-acknowledge something we had already accepted in the same
+     * breath -- which is what evicting after a merge would do.
+     */
+    static admitting(raw) {
+      const rows = new Map();
+      // TWO LOSSES USED TO HAPPEN HERE WITHOUT A WORD, and this door is the
+      // anticorruption layer of a distinct bounded context -- key-scoped consent,
+      // local-only because a control that travels by the channel it watches is
+      // worthless. Losing facts AT the airlock is the airlock leaking.
+      //
+      // Both losses are FAIL-SAFE (a forgotten acknowledgement DISARMS, it never
+      // arms) and neither is reachable by this project's named adversary: the sync
+      // channel cannot write here. They are counted, not refused, because refusing
+      // would un-acknowledge in the same breath -- see the paragraph above.
+      let overflowed = 0;
+      let unknownKinds = 0;
+      if (!raw || typeof raw !== "object" || Array.isArray(raw)) return new Acknowledgements(rows);
+      for (const [key, kinds] of Object.entries(raw)) {
+        if (rows.size >= MAX_ENTRIES) { overflowed += 1; continue; }
+        if (typeof key !== "string" || !Array.isArray(kinds)) continue;
+        const kept = [];
+        for (const kind of kinds) {
+          if (typeof kind !== "string") continue;
+          const scope = global.ShortcutWarning.scopeOf(kind);
+          // THE TWIN LEAK, and the more insidious of the two: an unknown kind --
+          // a future build, a tampered local store -- vanished disguised as a
+          // filter. `undefined` is the null this repository bans everywhere else.
+          if (scope === undefined) { unknownKinds += 1; continue; }
+          // EVERY KNOWN SCOPE IS KEPT. It used to be `if (scope === "key")`,
+          // which was the storage half of the hole: a destination-scoped kind
+          // read here was DISCARDED, because its home was the configuration --
+          // i.e. storage.sync. `scope` is still read, because an unknown kind
+          // must still be counted rather than filtered away in silence.
+          kept.push(kind);
+        }
+        if (kept.length > 0) rows.set(key, [...new Set(kept)]);
+      }
+      return new Acknowledgements(rows, { overflowed, unknownKinds });
+    }
+
+    /** The attestations a policy carries, as an Acknowledgements. */
+    static attestedBy(policy) {
+      const rows = new Map();
+      // NO COUNT HERE, on purpose: these kinds come from the policy this build
+      // just admitted, not from the store. An unknown one would be a bug in our
+      // own admission, not a fact to show the user.
+      for (const shortcut of policy.shortcuts()) {
+        const kinds = shortcut
+          .consent()
+          .acknowledgedKinds()
+          // EVERY KNOWN KIND, matching admitting() above. The `=== "key"` filter
+          // that stood here is what made this entry hold one scope out of two --
+          // and it is also what completes the migration: a destination-scoped
+          // acknowledgement carried out of an older local document is filed here
+          // by the first commit that follows, after which toJSON never writes it
+          // into the configuration again.
+          .filter((kind) => global.ShortcutWarning.scopeOf(kind) !== undefined);
+        if (kinds.length > 0) rows.set(rowKey(shortcut), [...kinds]);
+      }
+      return new Acknowledgements(rows);
+    }
+
+    /** Union. Associative and idempotent, hence safe to replay. */
+    merged(other) {
+      const rows = new Map(this._rows);
+      for (const [key, kinds] of other._rows) {
+        rows.set(key, [...new Set([...(rows.get(key) ?? []), ...kinds])]);
+      }
+      return new Acknowledgements(rows);
+    }
+
+    /** Drops what no longer has an object. Never call it with a stale policy. */
+    forgetLapsed(policy) {
+      const live = new Set(policy.shortcuts().map(rowKey));
+      const rows = new Map();
+      for (const [key, kinds] of this._rows) {
+        if (live.has(key)) rows.set(key, [...kinds]);
+      }
+      return new Acknowledgements(rows);
+    }
+
+    kindsFor(shortcut) {
+      // A COPY. Handing the stored array out made this object mutable from the
+      // outside -- `ack.kindsFor(s).push("INJECTED")` reached toJSON, i.e. the
+      // written entry. An immutable value that lends its insides is not one.
+      return [...(this._rows.get(rowKey(shortcut)) ?? [])];
+    }
+
+    toJSON() {
+      return Object.fromEntries(this._rows);
+    }
+  }
+
+  const LocalAcknowledgements = {
+    ENTRY,
+    MAX_ENTRIES,
+    // rowKey is NOT exported. Its last outside caller was PolicyRepository._merge,
+    // which now asks kindsFor(shortcut); leaving the spelling of a row key on the
+    // public surface reopens the string-indexed access this class closed.
+    Acknowledgements,
+
+    /** A snapshot, read once, before any compare-and-set. */
+    async read() {
+      try {
+        const { value } = await VersionedEntry.read(Platform.api.storage.local, ENTRY);
+        return Acknowledgements.admitting(value);
+      } catch {
+        // Corrupt reads the same as absent: nothing is acknowledged.
+        return Acknowledgements.admitting(undefined);
+      }
+    },
+
+    /**
+     * Records what this commit attests, WITHOUT forgetting what it never saw.
+     *
+     * The mutate argument is used -- it was ignored, which turned a compare-and-set
+     * into a blind overwrite. `policy` must be the WINNING commit, never the
+     * snapshot: forgetLapsed is only safe against a policy that already carries
+     * whatever the other surface created.
+     */
+    async record(policy) {
+      return VersionedEntry.update(Platform.api.storage.local, ENTRY, (raw) => ({
+        ok: true,
+        // FORGET FIRST, THEN MERGE -- and the honest reason, measured: with the
+        // bound applied in admitting() and merged() uncapped, SWAPPING THESE TWO
+        // GIVES THE SAME BYTES. The order is not what saves the click; an uncapped
+        // merge is. It is written this way because pruning before adding is the
+        // order that keeps the intermediate table small and stays correct if a
+        // bound is ever put back on the merge -- not because it is load-bearing
+        // today. Saying otherwise would send the next reader to protect the wrong
+        // line.
+        value: Acknowledgements.admitting(raw)
+          .forgetLapsed(policy)
+          .merged(Acknowledgements.attestedBy(policy))
+          .toJSON(),
+        events: [],
+      }));
+    },
+  };
+
+  global.LocalAcknowledgements = LocalAcknowledgements;
+})(globalThis);

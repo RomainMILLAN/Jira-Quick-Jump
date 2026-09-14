@@ -1,0 +1,396 @@
+/**
+ * What Chrome's RE2 can afford, and the SOLE owner of that measurement.
+ *
+ * MEASURED, not reasoned about: Chrome 2026-09-01, via
+ * chrome.declarativeNetRequest.isRegexSupported, on the COMPLETE RULE.
+ *
+ *   repetition  : {1,19} REFUSED (memoryLimitExceeded) even as [A-Z] | {1,9} accepted
+ *   alternation : cost 211 refused | 107 refused | 70 accepted
+ *
+ * RE2 UNROLLS BOUNDED REPETITIONS, so [A-Za-z0-9_]{1,19} copies a 63-character
+ * class nineteen times. The BOUND decides, not the class -- narrowing the class
+ * alone was measured and still refused. And the guard's cost is in the
+ * ALTERNATION, not in the parameter prefix: 49 words are refused even without
+ * (?:.*&)?. So there is no rewrite that makes it fit; it has to be cut.
+ *
+ * THE FORMULA lives here, next to the measurements: cost = sum(lengths) + n. The
+ * three data points only pin it to within one -- sum + (n-1) would give
+ * 210/106/69 -- so it is written rather than left to be guessed by regression.
+ *
+ * THE BUDGET IS NOT 70. The last measured-good point costs exactly 70 and the
+ * real limit lies in (70, 107] -- unknown. At 70 the greedy cut produces a run of
+ * SEVENTEEN words, more alternatives than any configuration ever measured good.
+ * At 60: four runs of 13/13/13/10, max cost 59. Same number of rules, real
+ * margin. The margin is free.
+ *
+ * RE-MEASURED 2026-09-07, Chrome 152.0.7977.82 and Firefox 154.0, by asking
+ * isRegexSupported from a loaded extension's own service worker -- and the
+ * campaign said three things, of which two were not what it went looking for.
+ *
+ *   THE ALTERNATION CEILING, on this file's own scalar, in google.com's guard
+ *   envelope, with five-character words:
+ *       cost 108 (18 words)  ACCEPTED
+ *       cost 114 (19 words)  memoryLimitExceeded
+ *   So the budget of 50 keeps rather more than two-fold margin.
+ *
+ *   FIREFOX IS NOT THE CONSTRAINT. Gecko 154 accepted every question asked --
+ *   including cost 294, and including the whole shipped set. Chrome is the engine
+ *   this file is calibrated against, and it should stay the one it is measured on.
+ *
+ *   AND THE SCALAR IS A PROXY, NOT THE QUANTITY RE2 CHARGES. That is the finding
+ *   that matters here, and it is written because the numbers above would otherwise
+ *   read as a promise. Two facts falsify any reading of "cost" as memory:
+ *     - the 2026-09-01 note above records cost 107 REFUSED; a cost of 108 was
+ *       accepted six days later. Either Chrome moved, or two alternations of the
+ *       same cost are not the same program -- the word lengths differ.
+ *     - LENGTH is not it either: a guard of 154 characters is accepted while the
+ *       catch-all's redirect of 137 is refused. What RE2 charges is PROGRAM size,
+ *       and the catch-all's is dominated by the unrolled `{1,5}` over a
+ *       63-character class, times its capture groups -- not by the envelope.
+ *   The margin is what protects, not the arithmetic. Do not tighten it on the
+ *   strength of a number in this comment.
+ *
+ *   THE CASE REPAIR IS DONE, AND IT GAVE BUDGET BACK INSTEAD OF SPENDING IT.
+ *   `(?-i:...)` -- the remedy SECURITY.md used to name -- is unusable here:
+ *   `interception/jump-preview.js` compiles the DELIVERED regexFilter with
+ *   `new RegExp`, and JavaScript has no inline flag groups (measured,
+ *   `SyntaxError: Invalid group`). Every rule would have broken the one organ
+ *   where a user can check this extension against itself.
+ *   What shipped instead needs no engine feature: the named key spells its own two
+ *   cases (`[Aa][Bb][Cc]`, ReferencePattern.spell) and the REDIRECT conditions go
+ *   case-SENSITIVE, so the path and the parameter name stop being folded. The
+ *   guards keep the insensitive flag -- they must, or a lower-case reserved prefix
+ *   leaks. Measured 2026-09-07, same campaign: ZERO rules that install today stop
+ *   installing, and BOTH custom-host boundaries moved OUTWARD -- the catch-all's
+ *   from 26 to 28, a 20-character named key's from 32 to 34. Under an insensitive
+ *   flag RE2 folds the path, the parameter name and the host itself; the folding
+ *   costs more program than the explicit class that replaces it. A repair that
+ *   closes a fidelity gap and widens what installs is not the trade this file
+ *   spent a year refusing to make from a desk -- it is the one the measurement
+ *   found once somebody looked.
+ *
+ * AND IT IS A FRAGMENT BUDGET. The measurements are on the complete rule; the
+ * post-condition is on the fragment, because this file does not know the engines.
+ * The quantity constrained is therefore never the one that was measured, and the
+ * ELEVEN units of margin are precisely what pays for the unmeasured envelope.
+ * That is a DATED BET, not a proof.
+ *   IF GOOGLE REFUSES AT 60: drop to 50 (five runs). Do NOT raise the key bound,
+ *   which is a domain decision and not ours.
+ *
+ * Worst case is not Google either: a CUSTOM engine domain of sixty characters
+ * adds sixty units and more to an envelope this scalar was calibrated against
+ * Google for. That WAS the silent, per-engine failure -- isRegexSupported refuses,
+ * the whole unit falls, nothing leaks, and nobody is told which engine lost its
+ * catch-all.
+ *
+ * IT IS NO LONGER SILENT, AND NO LONGER MISSIZED. forEnvelope() has the caller
+ * this paragraph used to predict: rule-installer.js builds a provider on it and
+ * rule-factory cuts the guards ONCE PER ENGINE, against that engine's own
+ * envelope. A costlier envelope now buys more and smaller runs instead of shipping
+ * Google's runs inside somebody else's rule, and an envelope that leaves nothing
+ * to spend is refused BY NAME, costing that engine its catch-all rather than the
+ * whole install.
+ */
+(function (global) {
+  "use strict";
+
+  /**
+   * FIFTY, AND THE REASON IS MEASURED RATHER THAN GUESSED.
+   *
+   * It was 60, with eleven units of margin against an envelope this file admits it
+   * never measured -- "A DATED BET, not a proof", with the remedy written beside it:
+   * "IF GOOGLE REFUSES AT 60: drop to 50 (five runs). Do NOT raise the key bound."
+   *
+   * The bet came due. Closing the query-parameter hole (the rule must fire on the
+   * FIRST `q=`, not any of them) added one alternation of two to every engine's
+   * envelope, and Chrome then refused the reserved-prefix guards outright:
+   * REGEX_UNSUPPORTED on three of them, the rest falling with their units, and the
+   * catch-all going down with the group -- reported from a real profile with four
+   * engines, one of them a custom domain.
+   *
+   * So this is the documented remedy, applied for the documented reason. Five runs
+   * instead of four; the longest alternation goes from 58 characters to 49. The
+   * cost is one extra `allow` rule per engine, which is cheap: the alternative is a
+   * catch-all that claims nothing.
+   *
+   * WHAT NOT TO DO INSTEAD, and the file said this first: do not widen the query
+   * pattern back, which would reopen an outbound flow any page could aim, and do
+   * not raise the key bound, which is a domain decision and not this file's.
+   */
+  const MAX_ALTERNATION_COST = 50;
+  // The quantity that was MEASURED, not a bound offset by one. {1,9} was accepted,
+  // and {1,9} claims ten characters.
+  const LONGEST_MEASURED_KEY = 10;
+
+  /**
+   * The named causes a construction refusal can carry.
+   *
+   * They live HERE rather than in reference-pattern.js because RUN_OVER_BUDGET is
+   * raised by the cut, which is here, and this file is loaded FIRST of the two --
+   * so there is exactly one enumeration and no third file. A second enumeration
+   * is what a plan that left this "to be settled while writing" would have got.
+   *
+   * UNKNOWN is not one of the six: an unexpected TypeError must never be reported
+   * as "the partition is broken", or someone spends two hours in
+   * ReservedPrefix.ALL looking for a bug that is in the code.
+   */
+  const REASONS = Object.freeze({
+    EMPTY_REACH: "EMPTY_REACH",
+    PREFIX_NOT_KEY_SHAPED: "PREFIX_NOT_KEY_SHAPED",
+    GUARD_HAS_CAPTURE_GROUP: "GUARD_HAS_CAPTURE_GROUP",
+    GUARD_DOES_NOT_HOLD: "GUARD_DOES_NOT_HOLD",
+    GUARDS_NOT_A_PARTITION: "GUARDS_NOT_A_PARTITION",
+    RUN_OVER_BUDGET: "RUN_OVER_BUDGET",
+    // The envelope alone leaves nothing to spend. Distinct from RUN_OVER_BUDGET
+    // on purpose: that one says a WORD is too long, this one says the budget was
+    // never usable -- two different things to fix.
+    ENVELOPE_OVER_BUDGET: "ENVELOPE_OVER_BUDGET",
+    // The domain claims a key length the measured RE2 ceiling cannot carry.
+    KEY_LENGTH_OVER_BUDGET: "KEY_LENGTH_OVER_BUDGET",
+    // An engine whose query parameter is longer than one character. A budget
+    // question rather than a free one -- a longer name needs one alternative per
+    // position in the "no earlier parameter of this name" prefix -- so it is a
+    // NAMED refusal and not a bare throw. It used to be the latter, which is the
+    // mute path SHAPES-as-a-Map has just closed next door: a plain Error leaves
+    // buildRules, rule-installer cannot name it, and the whole programme is purged
+    // under the cause UNKNOWN.
+    QUERY_PARAM_TOO_LONG: "QUERY_PARAM_TOO_LONG",
+    // A separator the URL table cannot spell. It used to be no refusal at all:
+    // `IN_URL[s]` answered undefined, `join` wrote it as an empty string, and the
+    // alternation carried an EMPTY BRANCH -- so the separator became optional and
+    // `ABC1234` matched a rule written for `ABC-1234`. A matcher wider than the
+    // validator, obtained by a lookup miss, which is the one failure direction
+    // this project refuses everywhere else.
+    SEPARATOR_HAS_NO_URL_FORM: "SEPARATOR_HAS_NO_URL_FORM",
+    // A key that hands over no separator at all. Same widening, one step further:
+    // the emitted pattern would be `keyFragment(\d+)`.
+    EMPTY_SEPARATORS: "EMPTY_SEPARATORS",
+    UNKNOWN: "UNKNOWN",
+  });
+
+  /**
+   * A typed refusal, so the cause survives the throw and reaches `skipped`.
+   *
+   * `detail` NEVER carries the user's destination or key: today it only ever
+   * holds a shipped word, and while refusals land in the service worker console
+   * that constraint has to be written rather than assumed. And `cause` is always
+   * forwarded -- a catch that swallows destroys the only thing that helps debug,
+   * and lets code continue in a state it believes valid.
+   *
+   * A NAMED DEROGATION from "no inheritance", and the only one in the project.
+   * A NAMED DEROGATION -- and the name is what was missing, not the argument.
+   * rule-set.js labels its own derogation in those words; this one reasoned
+   * correctly under no heading, so a reader meeting `extends` could not tell
+   * whether it had been argued or overlooked.
+   *
+   * `throw` is a platform contract: a value that is not an Error loses the stack,
+   * and every tool that reads a crash -- the console, the browser, node's test
+   * runner -- reads Error. Refusing to extend it here would not buy purity, it
+   * would buy an unreadable failure at the exact moment a failure has to be read.
+   *
+   * THE CONSTRUCTOR ASSIGNS AND NOTHING ELSE. It used to normalise the reason and
+   * unwrap `detail` -- deciding, in a constructor, in a project whose second rule
+   * is that constructors do not decide. Both now happen in the factory below,
+   * which is the one door anyone uses.
+   */
+  class Refusal extends Error {
+    constructor(message, reason, detail, options) {
+      super(message, options);
+      this.name = "Refusal";
+      this.reason = reason;
+      this.detail = detail;
+    }
+  }
+
+  /**
+   * What may travel IN THIS `detail`: never the user's destination or key, only
+   * shipped words and numbers. The constraint is written rather than assumed,
+   * because THESE refusals land in the service worker console, where nobody asked
+   * to see a customer name.
+   *
+   * THE SCOPE IS THIS CHANNEL, NOT THE PROJECT -- and the sentence used to read as
+   * if it governed both. `NotInstalled.of(code, subject)` sits one file away and
+   * carries `binding.describe()`, i.e. THE PROJECT KEY, into installOutcome and
+   * then onto the screen. That is not a violation of this rule, it is a different
+   * channel with a different audience: the user is owed WHICH shortcut was not
+   * installed, and "the catch-all could not be installed" without its subject is a
+   * sentence that helps nobody. jump-policy.js says as much where describe() is
+   * defined -- "A LABEL FOR A LOG LINE", deliberately distinct from the persisted
+   * discriminant.
+   *
+   * So do not "harmonise" the two by stripping NotInstalled.subject. The asymmetry
+   * is the design.
+   */
+  const detailOf = (detail) => {
+    if (!detail || typeof detail !== "object") return undefined;
+    const kept = {};
+    for (const field of ["word", "claimed", "envelopeCost"]) {
+      if (detail[field] !== undefined) kept[field] = detail[field];
+    }
+    return Object.keys(kept).length > 0 ? kept : undefined;
+  };
+
+  /** The single door. It decides; the constructor stores. */
+  const refusal = (reason, detail) =>
+    new Refusal(
+      "construction refused: " + reason,
+      REASONS[reason] || REASONS.UNKNOWN,
+      // THE WHOLE DETAIL, minus the cause. Keeping `word` alone silently threw
+      // away `{ claimed }` and `{ envelopeCost }` -- two of the three call sites --
+      // so a refusal reached `skipped` with nothing to say about itself.
+      detailOf(detail),
+      detail && detail.cause ? { cause: detail.cause } : undefined
+    );
+
+  class Re2Budget {
+    constructor(maxAlternationCost, longestKey) {
+      this._maxAlternationCost = maxAlternationCost;
+      this._longestKey = longestKey;
+    }
+
+    /** BOTH axes are carried by the instance. Half a Strategy is not a Strategy:
+     *  a custom engine's envelope shortens the key axis too, so a per-engine
+     *  budget must be able to answer both by instance. */
+    affordsKeyOfLength(n) {
+      return n <= this._longestKey;
+    }
+
+    costOfAlternation(words) {
+      return words.reduce((total, word) => total + word.length + 1, 0);
+    }
+
+    affordsAlternation(words) {
+      return this.costOfAlternation(words) <= this._maxAlternationCost;
+    }
+
+    /**
+     * The cut, DERIVED from the budget -- no counting constant to keep in sync.
+     *
+     * IT CHECKS ITS OWN OUTPUT and FREEZES each run. The cutter that checks its
+     * own output is the sealed blister; an airlock that re-checks the cutter's
+     * output is the note stuck on it. And the freeze: hoisting the call out of
+     * the per-engine loop removed the cache, NOT the sharing -- one run is
+     * referenced by the rules of every engine and by the label the journal
+     * strips. A shared value object is frozen, not watched.
+     *
+     * A word that nothing can pay for alone would loop forever, so it refuses.
+     * The caller's shaped.test() makes that unreachable (a key-shaped word costs
+     * at most 21 < 60), but an invariant held by another file breaks the day the
+     * cut is called from elsewhere.
+     */
+    cutIntoAffordableRuns(words) {
+      const runs = [];
+      let run = [];
+      for (const word of words) {
+        if (run.length === 0 && !this.affordsAlternation([word])) {
+          throw refusal("RUN_OVER_BUDGET", { word });
+        }
+        if (run.length > 0 && !this.affordsAlternation([...run, word])) {
+          runs.push(Object.freeze(run));
+          run = [];
+        }
+        run.push(word);
+      }
+      if (run.length > 0) runs.push(Object.freeze(run));
+      for (const produced of runs) {
+        if (!this.affordsAlternation(produced)) throw refusal("RUN_OVER_BUDGET");
+      }
+      return Object.freeze(runs);
+    }
+  }
+
+  /** The measured budget, conservative for every engine because the longest
+   *  path is the worst case. */
+  Re2Budget.conservative = () => new Re2Budget(MAX_ALTERNATION_COST, LONGEST_MEASURED_KEY);
+
+  /**
+   * The per-engine budget, the day the envelope stops being ignorable. Named now
+   * so that `if (engineId === "duckduckgo.com")` stays unwritable.
+   *
+   * IT REFUSES AN UNUSABLE BUDGET RATHER THAN MINTING ONE. Subtracting an
+   * envelope was unguarded, so the client the header used to predict -- a custom
+   * domain of sixty-odd characters -- produced a budget of zero or less. The
+   * cutter then threw RUN_OVER_BUDGET on the FIRST word, which rule-installer
+   * turns into a global INSTALL_FAILED: one long domain name, and nothing
+   * installs at all. A budget that cannot pay for a single shortest word is not a
+   * tight budget, it is an arithmetic error, and it must be named where the
+   * arithmetic happens.
+   *
+   * The floor is the cheapest word this cutter can ever be handed: a two-letter
+   * key plus its separator.
+   */
+  const CHEAPEST_WORD_COST = 3;
+
+  /**
+   * THE ENVELOPE THE 50 WAS CALIBRATED AGAINST, and subtracting it is the whole
+   * difference between a working per-engine budget and one that refuses Google.
+   *
+   * MEASURED, like its neighbours: it is the guard-form envelope of
+   * `google.com` + `search-q`, the engine the alternation measurements above were
+   * taken on -- `^https://(?:www\.)?google\.com/search\?(?:.*&)?q=(?:&|$)`, 56
+   * characters. A changelock in interception.test.js compares this number to what
+   * the catalogue actually emits, so the two cannot drift.
+   *
+   * WHY AN EXCESS AND NOT THE WHOLE ENVELOPE. The first version of forEnvelope did
+   * `MAX_ALTERNATION_COST - envelopeCost`. Measured, on this catalogue: Google's
+   * guard envelope is 56 and the budget is 50, so it returned MINUS SIX and threw
+   * ENVELOPE_OVER_BUDGET -- for google.com, the engine the number was measured on,
+   * which would have taken every catch-all on every engine down with it. The 50 is
+   * already NET of a Google-sized envelope; only what an engine costs BEYOND that
+   * is a new expense.
+   *
+   * THE UNIT CONVERSION IS AN ASSUMPTION, and it is the one thing here that is not
+   * measured: nothing relates a character of envelope to a unit of alternation
+   * cost. This charges one for one, which OVER-charges -- an envelope character is
+   * almost certainly cheaper to RE2 than an alternation branch. The direction is
+   * what makes that acceptable: over-charging yields MORE, SMALLER runs, hence
+   * cheaper regexes and MORE of them. It costs rule budget, never a refused rule.
+   * Under-charging would be the other way round, and would be a silent fail.
+   */
+  const CALIBRATION_ENVELOPE_COST = 56;
+
+  /**
+   * The per-engine budget, and it now HAS a caller: rule-installer.js hands
+   * rule-factory a provider built on this, and the guards are cut once per engine.
+   * The header's "the day the envelope stops being ignorable" is that day.
+   *
+   * IT REFUSES AN UNUSABLE BUDGET RATHER THAN MINTING ONE. A budget that cannot
+   * pay for a single shortest word -- a two-letter key plus its separator -- is
+   * not a tight budget, it is an arithmetic error, and it must be named where the
+   * arithmetic happens. Its caller drops THAT ENGINE'S catch-all and says why,
+   * instead of failing the whole build.
+   *
+   * THE KEY AXIS IS DELIBERATELY NOT SHORTENED, and that is a gap with a reason
+   * rather than an oversight. The header above promises a per-engine budget can
+   * answer BOTH axes, and the instance genuinely carries both -- but no
+   * measurement relates an envelope to a key-length ceiling, and inventing a ratio
+   * would put an unsourced number in the file whose whole discipline is that its
+   * numbers are measured. So the key axis keeps LONGEST_MEASURED_KEY, which is the
+   * measured value and does not vary. If it ever must shrink, the fix starts with
+   * isRegexSupported and a stopwatch, not with arithmetic here.
+   */
+  Re2Budget.forEnvelope = (envelopeCost) => {
+    if (!Number.isFinite(envelopeCost) || envelopeCost < 0) {
+      throw refusal("ENVELOPE_OVER_BUDGET", { envelopeCost });
+    }
+    // Floored at zero: an engine CHEAPER than the calibration one does not earn
+    // extra budget. bing.com and duckduckgo.com sit at 54, two under Google, and
+    // paying them back would spend margin the measurement never promised.
+    const excess = Math.max(0, envelopeCost - CALIBRATION_ENVELOPE_COST);
+    const remaining = MAX_ALTERNATION_COST - excess;
+    if (remaining < CHEAPEST_WORD_COST) {
+      throw refusal("ENVELOPE_OVER_BUDGET", { envelopeCost });
+    }
+    return new Re2Budget(remaining, LONGEST_MEASURED_KEY);
+  };
+
+  Re2Budget.CALIBRATION_ENVELOPE_COST = CALIBRATION_ENVELOPE_COST;
+  Re2Budget.CHEAPEST_WORD_COST = CHEAPEST_WORD_COST;
+  Re2Budget.MAX_ALTERNATION_COST = MAX_ALTERNATION_COST;
+  Re2Budget.LONGEST_MEASURED_KEY = LONGEST_MEASURED_KEY;
+  Re2Budget.REASONS = REASONS;
+  Re2Budget.refusal = refusal;
+  Re2Budget.Refusal = Refusal;
+
+  global.Re2Budget = Re2Budget;
+})(globalThis);

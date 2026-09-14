@@ -19,45 +19,233 @@
 
   const { MutationResult, ShortcutAdmission } = global;
 
+  /**
+   * THE READING DOOR OF A SET-ASIDE ENTRY -- the half of this class that
+   * destination-journal.js closed and this one did not.
+   *
+   * That file rebuilds a journalled fact FIELD BY FIELD and says why: "two things
+   * this closes, and neither is an injection: a surplus field written back for
+   * ever, and a field with NO BOUND -- a 5 MB `newBaseUrl` freezes the banner,
+   * and twenty of them freeze it for good". Every clause is true here, and this is
+   * the half that reaches an `<input>`: a quarantined entry is by hypothesis
+   * attacker-shaped, `toJSON` wrote it back verbatim at every commit, and
+   * MAX_QUARANTINE bounded the NUMBER of entries while nothing bounded their SIZE
+   * or their SHAPE. Measured, before this door: an entry carrying a 1 000-character
+   * field nobody reads survived the round trip intact and was re-persisted for ever.
+   *
+   * THE BOUND CANNOT MANGLE A REPAIRABLE VALUE, and that is why it is 256 rather
+   * than a number chosen to be generous: JiraInstance.parse refuses a base URL
+   * longer than 256, ProjectKey.parse a key longer than 20 and ShortcutId an
+   * identifier longer than 64. Anything this truncates was already unrepairable.
+   *
+   * NEVER DROPPED, EVEN EMPTY, and that is the opposite choice from the journal's.
+   * There, a corrupt byte promoted to a synthetic fact made noise inevictable.
+   * Here the count feeds PARTIAL_POLICY -- "the configuration is incomplete" -- so
+   * dropping an entry would make the diagnosis say the policy is whole. An entry
+   * with nothing readable in it becomes an empty row that the Fix button refuses,
+   * which is over-signalling, the direction this project requires.
+   *
+   * ONE CONSEQUENCE, STATED: the handle is a fingerprint OF THE CONTENT, so
+   * filtering changes every handle once, at the first read after this ships --
+   * harmless, since a handle only lives as long as the render that shows it. And
+   * two entries that differ only in what this door drops become byte-identical,
+   * hence one handle for two rows: deleting twice removes both, which is already
+   * this file's stated reading of two identical entries.
+   */
+  const QUARANTINE_FIELDS = ["id", "key", "baseUrl"];
+  const MAX_QUARANTINE_TEXT = 256;
+
+  const admitted = (raw) => {
+    const entry = {};
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return entry;
+    for (const field of QUARANTINE_FIELDS) {
+      if (typeof raw[field] === "string") entry[field] = raw[field].slice(0, MAX_QUARANTINE_TEXT);
+    }
+    return entry;
+  };
+
+  /**
+   * A quarantined entry is addressed BY WHAT IT IS, never by where it sits.
+   *
+   * Both gestures took an index, captured from a rendered snapshot -- and
+   * VersionedEntry REPLAYS intentions against a re-read folder. If the winner
+   * promoted or deleted another entry first, the loser's replay landed on a
+   * DIFFERENT ROW: the user deletes something they never pointed at. That is the
+   * exact contradiction of the rule the registry states for everything else --
+   * "EVERY mutation is addressed BY IDENTITY, never by key".
+   *
+   * The content is the identity here, because a quarantined entry has no trusted
+   * id to offer -- that is why it is in quarantine. Two byte-identical entries
+   * share a fingerprint, and picking either is correct: they are the same entry
+   * twice.
+   */
+  const fingerprintOf = (entry) => {
+    try {
+      return JSON.stringify(entry) ?? "undefined";
+    } catch {
+      // A cyclic or unserialisable entry cannot have come from storage, but the
+      // folder must not throw on the way to refusing it.
+      return "unserialisable";
+    }
+  };
+
   class StoredPolicy {
     constructor(policy, quarantine) {
       this._policy = policy;
       this._quarantine = quarantine;
     }
 
+    /**
+     * THE INVARIANT THIS FOLDER EXISTS FOR, asked out loud.
+     *
+     * The header states it -- "an entry is in the policy OR in quarantine, never
+     * both, never neither" -- and nothing checked it. PolicyRepository then
+     * concatenated two sources of quarantine without deduplicating, so an entry
+     * repaired on one device and re-quarantined by another reader existed TWICE.
+     * An object that holds an invariant has to be able to say whether it holds.
+     *
+     * A QUESTION, not a throw: this is reconstituted from a foreign shape, and
+     * refusing to exist would lose the very configuration quarantine protects.
+     * The answer belongs to whoever can act on it.
+     */
+    duplicatedIds() {
+      const held = new Set(this._policy.orderedIds());
+      const seen = new Set();
+      const duplicated = [];
+      for (const raw of this._quarantine) {
+        const id = raw && typeof raw.id === "string" ? raw.id : undefined;
+        if (id === undefined) continue;
+        if (held.has(id) && !seen.has(id)) {
+          seen.add(id);
+          duplicated.push(id);
+        }
+      }
+      return duplicated;
+    }
+
     policy() { return this._policy; }
-    quarantined() { return [...this._quarantine]; }
+    /** Each entry with the handle the caller must give back to act on it. */
+    quarantined() {
+      return this._quarantine.map((entry) => ({ entry, fingerprint: fingerprintOf(entry) }));
+    }
     quarantinedCount() { return this._quarantine.length; }
+
+    _indexOf(fingerprint) {
+      return this._quarantine.findIndex((entry) => fingerprintOf(entry) === fingerprint);
+    }
 
     withPolicy(policy) {
       return new StoredPolicy(policy, this._quarantine);
     }
 
-    /** "Fix": goes back through the ONE door and may legitimately fail. */
-    promote(index, key, instance) {
-      const raw = this._quarantine[index];
-      if (raw === undefined) {
+    /**
+     * TWO NAMED DOORS, where there was one method and an optional argument.
+     *
+     * `promote(index, key, instance)` carried the whole difference in `key ===
+     * undefined` -- a parameter whose ABSENCE meant "readmit the entry's own
+     * key". That is the meaningful absence this project bans, and it hid a dead
+     * path: the only caller parsed the key first with ProjectKey.parse, which
+     * REFUSES `*`, so a legitimately quarantined catch-all could never reach the
+     * branch written to save it. The header promised it was repairable; it was
+     * only deletable.
+     */
+    promoteAs(fingerprint, key, instance, freshId) {
+      return this._readmit(fingerprint, { ok: true, value: key }, instance, freshId);
+    }
+
+    /** Readmits the entry under the key it already carries -- the only way back
+     *  for a quarantined catch-all, whose key no interface may type. */
+    readmit(fingerprint, instance, freshId) {
+      const at = this._indexOf(fingerprint);
+      if (at === -1) {
         return MutationResult.refused("UNKNOWN_QUARANTINED", "This entry is no longer in quarantine.");
       }
-      const id = typeof raw?.id === "string" && raw.id.length > 0 ? raw.id : global.crypto.randomUUID();
-      const registered = this._policy.register(id, key, instance);
+      return this._readmit(fingerprint, global.ShortcutKey.parse(this._quarantine[at]?.key), instance, freshId);
+    }
+
+    /**
+     * `freshId` IS STRUCK BY THE CALLER, and that is what makes this replayable.
+     *
+     * It used to call crypto.randomUUID() in here -- inside an intention that
+     * VersionedEntry re-runs up to three times, so each attempt invented a
+     * different identity. The outcome happened to be one entry (the losing values
+     * are thrown away), but the letter of the contract every other intention
+     * keeps was broken, and the same reasoning that makes `register` idempotent
+     * says why: the id comes from OUTSIDE, so a retry is a no-op rather than a
+     * second creation.
+     *
+     * It also removes the last unin­jected source of entropy in a domain method.
+     */
+    _readmit(fingerprint, readmitted, instance, freshId) {
+      const at = this._indexOf(fingerprint);
+      if (at === -1) {
+        return MutationResult.refused("UNKNOWN_QUARANTINED", "This entry is no longer in quarantine.");
+      }
+      const raw = this._quarantine[at];
+      // ADOPTED, not passed through: this is a PARSE refusal, and it is leaving
+      // through a mutation channel that promises `events`.
+      if (!readmitted.ok) return MutationResult.adopting(readmitted);
+      // A FRESH IDENTITY on two conditions, not one.
+      //
+      // Malformed was already handled here, with the reason that still applies:
+      // this entry comes from quarantine, hence by hypothesis from an attacker.
+      // ALREADY HELD falls under exactly the same hypothesis, and leaving it out
+      // was a LOSS OF DATA rather than a refusal: a quarantined entry carrying a
+      // living id, with the same key and the same instance, landed on register's
+      // replay no-op -- so it left quarantine WITHOUT ANYTHING BEING ADDED, a
+      // silent merge into someone else's shortcut.
+      //
+      // Striking a new id costs nothing the user can miss: register is called
+      // WITHOUT a consent, so the entry is readmitted disarmed, and its fresh
+      // (id, baseUrl, nature) triple holds no attestation -- the destination
+      // warnings must be acknowledged again, while looking at the destination.
+      const held = global.ShortcutId.isWellFormed(raw?.id) && this._policy.shortcutFor(raw.id) !== undefined;
+      const keepsItsOwn = global.ShortcutId.isWellFormed(raw?.id) && !held;
+      if (!keepsItsOwn && !global.ShortcutId.isWellFormed(freshId)) {
+        return MutationResult.refused(
+          "MISSING_FRESH_ID",
+          "This entry needs a new identifier before it can be readmitted."
+        );
+      }
+      const id = keepsItsOwn ? raw.id : freshId;
+      const registered = this._policy.register(id, readmitted.value, instance);
       if (!registered.ok) return registered;
-      const quarantine = this._quarantine.filter((_, i) => i !== index);
-      return MutationResult.ok(new StoredPolicy(registered.value, quarantine), registered.events);
+      const quarantine = this._quarantine.filter((_, i) => i !== at);
+      return MutationResult.ok(new StoredPolicy(registered.value, quarantine), [
+        // The readmitted entry is NOT the shortcut the user lost: fresh identity,
+        // fresh consent. Saying so is the difference between recovering a
+        // shortcut and being handed a new one that looks like it.
+        { type: "QuarantinedReadmitted", key: readmitted.value.toString(), renamed: id !== raw?.id },
+      ]);
     }
 
     /** Deleting is a deliberate gesture by the user, never a side effect. */
-    dropQuarantined(index) {
-      if (this._quarantine[index] === undefined) {
+    dropQuarantined(fingerprint) {
+      const at = this._indexOf(fingerprint);
+      if (at === -1) {
         return MutationResult.refused("UNKNOWN_QUARANTINED", "This entry is no longer in quarantine.");
       }
-      return MutationResult.ok(new StoredPolicy(this._policy, this._quarantine.filter((_, i) => i !== index)));
+      return MutationResult.ok(new StoredPolicy(this._policy, this._quarantine.filter((_, i) => i !== at)));
     }
 
     toJSON() {
       return { policy: this._policy.toJSON(), quarantine: this._quarantine };
     }
   }
+
+  /**
+   * The door, for the one layer that reads the folder from storage.
+   *
+   * On StoredPolicy rather than on the repository because the shape of a
+   * quarantined entry is this class's business -- it is what `readmit`,
+   * `duplicatedIds` and `fingerprintOf` read -- while the repository only knows
+   * WHERE the bytes came from.
+   */
+  StoredPolicy.admitting = function (entries) {
+    return (Array.isArray(entries) ? entries : []).map(admitted);
+  };
+  StoredPolicy.QUARANTINE_FIELDS = Object.freeze([...QUARANTINE_FIELDS]);
+  StoredPolicy.MAX_QUARANTINE_TEXT = MAX_QUARANTINE_TEXT;
 
   StoredPolicy.empty = function () {
     return new StoredPolicy(global.JumpPolicy.empty(), []);

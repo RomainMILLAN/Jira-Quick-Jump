@@ -1,0 +1,1103 @@
+/**
+ * The service worker, exercised as a worker.
+ *
+ * Until this file existed background.js had NO behavioural test at all, and its
+ * export was consumed nowhere -- so every claim about what the worker does on a
+ * failed load, a cold start or a compromised store was an argument, not a fact.
+ * The point of this file is to make those claims fail when they stop being true.
+ *
+ * ONE fake platform, posed before the first import, never swapped: see the
+ * header of fake-platform.js for why a per-test swap cannot work here.
+ */
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { installPlatform, reset, fire, store, dnrFaults, holdRead, holdWrite, permissionState, i18nCatalogue } from "./fake-platform.js";
+import { loadCore } from "./load-core.js";
+
+// BEFORE any import of src/: platform.js captures `global.chrome` by VALUE at
+// load time. loadCore() imports dynamically, inside the function, which is what
+// makes this ordering possible in an ES module.
+installPlatform();
+
+const g = await loadCore();
+await import("../src/background.js");
+
+const bg = g.JiraQuickJumpBackground;
+
+/** A policy that installs something: one armed, acknowledged catch-all. */
+const armedCatchAll = () => {
+  let p = g.JumpPolicy.empty().withEngines(["google.com"]).value;
+  p = p.registerCatchAll("star", g.JiraInstance.parse("https://catchall.atlassian.net").value).value;
+  p = p.acknowledge("star", "CATCH_ALL").value;
+  return p.armShortcut("star").value;
+};
+
+const named = (key, host) => {
+  const id = "11111111-1111-4111-8111-111111111111";
+  let p = g.JumpPolicy.empty().withEngines(["google.com"]).value;
+  p = p.register(id, g.ProjectKey.parse(key).value, g.JiraInstance.parse(host).value).value;
+  return p.armShortcut(id).value;
+};
+
+/**
+ * Writes a policy where the repository will find it, envelope included -- AND
+ * its key-scoped acknowledgements, which live in their OWN entry.
+ *
+ * JumpPolicy.toJSON does not carry them, by design: _restore closes that
+ * separate context back at reconstitution. A fixture that seeds only the policy
+ * therefore hands the worker an UNACKNOWLEDGED catch-all, which is excluded from
+ * activeBindings() and installs nothing -- measured, and it is the state every
+ * fresh catch-all passes through, not an artefact of the test.
+ */
+const seedPolicy = async (policy, rev = 1) => {
+  store.put("policy", { rev, value: new g.StoredPolicy(policy, []).toJSON() });
+  await g.LocalAcknowledgements.record(policy);
+};
+
+/** What the projection holds, as background.js writes it. */
+const seedProjection = (policy, loggedRev = 0, rev = 1) =>
+  store.put("installedProjection", { rev, value: { policy: policy.toJSON(), loggedRev } });
+
+const journal = () => g.DestinationJournal.read();
+
+test.beforeEach(() => reset());
+
+// ---------------------------------------------------------------------------
+// The five behaviours that must be GREEN ON THE CURRENT CODE. They are the net,
+// not the change: if any of them is red before a production line moves, the
+// diagnosis behind this batch is wrong and the batch stops.
+// ---------------------------------------------------------------------------
+
+test("1. a readable policy is installed, and the count follows the installed reality", async () => {
+  await seedPolicy(armedCatchAll());
+
+  await bg.sync();
+
+  const installed = store.rules();
+  assert.ok(installed.length > 0, "the catch-all reached the platform");
+  // The badge derives from what is really installed, never from policy.armed().
+  await bg.refreshBadge();
+  assert.notEqual(store.badge(), "off", "rules are live, so the badge must not say off");
+});
+
+test("2. an unreadable policy purges, and `off` is then the truth", async () => {
+  // First install something, so there is something to lose.
+  await seedPolicy(armedCatchAll());
+  await bg.sync();
+  assert.ok(store.rules().length > 0, "precondition: rules are live");
+
+  // Now what a compromised sync writes: an entry that cannot be restored.
+  store.put("policy", { rev: 2, value: { policy: "not a policy" } });
+  await bg.sync();
+
+  assert.equal(store.rules().length, 0, "fail-closed: the rules are emptied");
+  await bg.refreshBadge();
+  assert.equal(store.badge(), "off", "and `off` is now a true statement");
+});
+
+test("3. reconcile with NO baseline reports an unattributed change", async () => {
+  // A wiped storage.local, a fresh profile, a new device. Returning here would
+  // move the in-memory hole thirty lines rather than close it.
+  const policy = armedCatchAll();
+  await seedPolicy(policy);
+  assert.equal(store.entry("installedProjection"), undefined, "precondition: no baseline");
+
+  await bg.sync();
+
+  const log = await journal();
+  assert.equal(log.entries.length, 1);
+  assert.equal(log.entries[0].type, "PolicyReplaced");
+  assert.equal(log.acknowledged, false, "an unattributed change must raise the banner");
+});
+
+test("4. a policy changed OUTSIDE the door is journalled as UNKNOWN", async () => {
+  // Emission by the mutation catches what comes through the door; this catches
+  // what comes through the window. No withBaseUrlFor was ever called.
+  const before = named("ABC", "https://honest.atlassian.net");
+  await seedPolicy(before);
+  seedProjection(before);
+
+  const after = before.withBaseUrlFor(
+    before.shortcuts()[0].id(),
+    g.JiraInstance.parse("https://evil.example.org").value
+  ).value;
+  await seedPolicy(after, 2);
+
+  await bg.sync();
+
+  const log = await journal();
+  assert.ok(log.entries.length > 0, "the window is watched, not just the door");
+  const change = log.entries.find((e) => e.type === "DestinationChanged");
+  assert.ok(change, "a destination change is named, not hashed");
+  assert.equal(change.source, "UNKNOWN", "unattributed, which is MORE alarming");
+  assert.equal(change.newBaseUrl, "https://evil.example.org", "the trust model promises the host, not a hash");
+});
+
+test("4bis. a REPLAY of a state the door once claimed is journalled as UNKNOWN", async () => {
+  /**
+   * END TO END, THROUGH THE WORKER, because the silence was end to end.
+   *
+   * A claim is the fingerprint of a CONTENT on a four-slot ring, and nothing used
+   * to spend it -- so any state the page had committed within the last four
+   * commits could be REWRITTEN by the compromised sync channel and covered by its
+   * own stale claim. The cheapest route, measured before this batch: the user
+   * arms a shortcut (the door claims F(armed)), presses Alt+Shift+J (which claims
+   * nothing and emits no fact, so F(armed) is not even pushed off the ring), and
+   * the adversary puts the armed document back. Result: zero entries, no banner,
+   * a quiet badge -- the emergency stop undone in silence.
+   *
+   * The worker now spends the claim right after a successful projection write, so
+   * this walks the whole route rather than the journal alone.
+   */
+  const armed = named("ABC", "https://honest.atlassian.net");
+  const disarmed = armed.disarm();
+
+  // The page commits the armed policy: it claims the content it is about to
+  // write, exactly as section-host.js does.
+  await g.DestinationJournal.claimAhead(armed.fingerprint());
+  await seedPolicy(armed);
+  await bg.sync();
+  assert.equal(
+    (await journal()).claims.length, 0,
+    "precondition: a successful install spends the claim it was covering"
+  );
+
+  // The kill switch. Disarming produces no fact and claims nothing.
+  await seedPolicy(disarmed, 2);
+  await bg.sync();
+  assert.equal((await journal()).unseen.length, 0, "precondition: the stop raises no alarm");
+
+  // And the replay: the very bytes the user had committed, written by somebody
+  // else.
+  await seedPolicy(armed, 3);
+  await bg.sync();
+
+  const log = await journal();
+  const replay = log.unseen.find((e) => e.type === "PolicyArmed" || e.type === "ShortcutArmed");
+  assert.ok(replay, "the re-arming is reported, not covered by its own stale claim");
+  assert.equal(replay.source, "UNKNOWN", "unattributed, which is the alarming reading");
+  assert.equal(log.acknowledged, false, "and the banner rises");
+});
+
+test("5. the projection is NOT written after a failed install", async () => {
+  // A stale comparison base would re-diff the same gap at every wake-up and fill
+  // a twenty-entry journal with duplicates -- evicting the very UNKNOWN a
+  // compromise left behind.
+  await seedPolicy(armedCatchAll());
+  dnrFaults.rejectUpdate = true;
+
+  await bg.sync();
+
+  assert.equal(store.rules().length, 0, "precondition: nothing was installed");
+  assert.equal(
+    store.entry("installedProjection"),
+    undefined,
+    "the detector keeps its baseline rather than adopting a state that never existed"
+  );
+});
+
+// ---------------------------------------------------------------------------
+// The behaviours that arrive WITH their gesture. Each of these was RED before
+// its change, which is the only thing that makes it a witness rather than a
+// description.
+// ---------------------------------------------------------------------------
+
+test("6. after a fail-closed, the receipt says installed: false", async () => {
+  // THE MAIN FAIL-CLOSED PATH IS NOT AN EXCEPTION. load() returns { ok: false } as
+  // a VALUE, so the early return traversed the finally with `outcome` still {} --
+  // the receipt saying "I know nothing" where it had LEARNED NO, on the path a
+  // compromised sync reaches most easily.
+  store.put("policy", { rev: 1, value: { policy: "not a policy" } });
+
+  await bg.sync();
+
+  assert.deepEqual(store.entry("installOutcome").value, { installed: false, coverageSatisfied: false });
+});
+
+/**
+ * A POLICY THAT IS `null` IS A FACT, NOT A JET -- and the journal is the assertion.
+ *
+ * `PolicyRepository._restore` read `value.policy` straight through, so the one
+ * shape a hostile writer reaches with a single byte -- `{"rev": 1, "value": null}`
+ * -- threw a TypeError out of `load()`, on the path whose every other failure is a
+ * VALUE. The fail-closed held: purge, receipt `installed: false`, badge `off`. What
+ * did NOT hold is the JOURNAL: the `!loaded.ok` branch is what calls
+ * recordUnclaimable, and a throw lands in the outer catch thirty lines past that
+ * door. Measured, before the fix: `journal: []` where every other unreadable
+ * spelling wrote `PolicyUnreadable`.
+ *
+ * background.js carries fifteen lines saying that this exact path used to be mute
+ * -- "on the channel SECURITY.md makes the pivot of detection, along the route a
+ * compromised sync reaches most easily". One spelling of it still was.
+ *
+ * THE TABLE IS WALKED rather than one case asserted, because the defect was an
+ * ASYMMETRY between spellings of the same fact: a test on `null` alone would have
+ * gone green the day another shape started throwing.
+ */
+test("6bis. every unreadable spelling of the policy is journalled, `null` included", async () => {
+  for (const value of [null, 5, "not a policy", [], { policy: null }, { schemaVersion: 99 }]) {
+    reset();
+    store.put("policy", { rev: 1, value });
+
+    // NOT bg.sync() directly: through the listener the browser actually calls, so
+    // a jet has the same nowhere to land as it does in production.
+    await fire.startup();
+
+    const journal = await g.DestinationJournal.read();
+    const shown = JSON.stringify(value);
+    assert.deepEqual(
+      journal.entries.map((entry) => entry.type),
+      ["PolicyUnreadable"],
+      `a policy of ${shown} left no line in the journal`,
+    );
+    assert.equal(journal.entries[0].source, "UNKNOWN", `${shown} was journalled as an act`);
+    assert.equal(store.rules().length, 0, `${shown} left rules installed`);
+    assert.equal(store.entry("installOutcome").value.installed, false,
+      `${shown} did not leave a receipt saying so`);
+  }
+});
+
+test("7. permissions.onAdded refreshes the badge, and every listener shares one protocol", async () => {
+  // Granting access from the options page must install the rules without waiting
+  // for a browser restart -- and the badge must follow, or the extension looks
+  // broken on the very screen where permission was just given.
+  await seedPolicy(armedCatchAll());
+
+  await fire.permissionAdded({ origins: ["https://www.google.com/*"] });
+
+  assert.ok(store.rules().length > 0, "the grant installed the rules");
+  assert.notEqual(store.badge(), undefined, "the badge was refreshed by the envelope");
+  assert.notEqual(store.badge(), "off");
+});
+
+test("7bis. a body that rejects does NOT prevent the sync, and the badge still runs", async () => {
+  // The exact fault sync() fixes, redone one level up: onInstalled with
+  // reason === "update" does a storage.local.set that rejects on a full quota, and
+  // the update then installs nothing, reconciles nothing, journals nothing.
+  await seedPolicy(armedCatchAll());
+  const badgeCallsBefore = store.badgeCalls();
+  store.failWrites(true);
+
+  // The body's own write throws; the envelope treats the body as INCIDENTAL.
+  await fire.installed({ reason: "update" });
+  store.failWrites(false);
+
+  assert.ok(store.badgeCalls() > badgeCallsBefore, "the badge ran despite the body throwing");
+  // And the rules were installed: the body's failure did not cancel the sync.
+  assert.ok(store.rules().length > 0, "syncing matters more than what triggered it");
+});
+
+test("7ter. the kill switch is INSIDE the protocol, not the one listener without it", async () => {
+  // Left outside, a throw from sync() would skip the badge, the old rules would
+  // stay alive (a DNR rejection is atomic), and the screen would keep its previous
+  // text -- possibly empty, i.e. "all is well".
+  await seedPolicy(armedCatchAll());
+  await bg.sync();
+  assert.ok(store.rules().length > 0, "precondition: armed and installed");
+
+  await fire.command("disarm-all");
+
+  assert.equal(store.rules().length, 0, "the emergency stop really stopped");
+  assert.equal(store.badge(), "off", "and the badge says so, through the same envelope");
+});
+
+test("7quater. a command that is not disarm-all returns false, and syncs nothing", async () => {
+  await seedPolicy(armedCatchAll());
+  const before = store.badgeCalls();
+
+  // PROVED BY CONTRAST. It checked `rules().length === 0` on a policy that had
+  // never been synced -- a precondition already true BEFORE the gesture, so the
+  // test passed whatever the listener did. What has to be shown is that this
+  // event does not sync while another one does, on the same starting state.
+  await fire.command("something-else");
+  assert.equal(store.rules().length, 0, "an unknown command syncs nothing");
+  assert.ok(store.badgeCalls() > before, "but the badge is refreshed either way");
+
+  // The discriminant: an event whose body does NOT decline installs the rules.
+  await fire.permissionAdded({ origins: ["https://catchall.atlassian.net/*"] });
+  assert.ok(store.rules().length > 0, "so the absence above was the command's doing, not the fixture's");
+});
+
+test("8. a healthy install writes installed: true in BOTH the receipt and the projection", async () => {
+  await seedPolicy(armedCatchAll());
+
+  await bg.sync();
+
+  assert.deepEqual(store.entry("installOutcome").value, { installed: true, coverageSatisfied: true });
+  assert.ok(store.entry("installedProjection"), "and the detector gets its baseline");
+});
+
+test("9. the badge IGNORES the forgeable fact: a forged receipt cannot silence `off`", async () => {
+  // Forging { installed: true } silences the STATUS LINE. It must touch neither the
+  // badge, which counts the rules really installed, nor the banner, which reads the
+  // journal. This is the behavioural half of the single-writer witness, so it cannot
+  // live in structure.test.js.
+  store.put("installOutcome", { rev: 99, value: { installed: true, coverageSatisfied: true } });
+  assert.equal(store.rules().length, 0, "precondition: nothing is installed");
+
+  await bg.refreshBadge();
+
+  assert.equal(store.badge(), "off", "the badge asks the platform, never the receipt");
+});
+
+test("9bis. refreshBadge under a DNR failure never says `off`", async () => {
+  // `off` is the only one of the three values that ASSERTS something. An unknown
+  // count must not be reported as "nothing is installed".
+  dnrFaults.rejectGet = true;
+
+  await bg.refreshBadge();
+
+  assert.equal(store.badge(), "!", "an unknown count is never the reassuring branch");
+});
+
+test("9ter. refreshBadge survives a dead storage AND lets sync's own error live", async () => {
+  // DestinationJournal.read() used to sit OUTSIDE the try, with only setBadgeText
+  // swallowed -- and a throw from inside a finally ERASES the in-flight exception
+  // while never reaching setBadgeText.
+  await seedPolicy(armedCatchAll());
+  await bg.sync();
+  store.failReads(true);
+
+  await bg.refreshBadge();
+
+  store.failReads(false);
+  assert.notEqual(store.badge(), undefined, "setBadgeText was still reached");
+  assert.notEqual(store.badge(), "off", "and an unreadable journal is NOT acknowledged");
+});
+
+// ---------------------------------------------------------------------------
+// The receipt's own guards
+// ---------------------------------------------------------------------------
+
+test("a QUOTA refusal ERASES the receipt rather than leaving a stale `true` standing", async () => {
+  // The remanence argument is NOT bounded by "the same area": VersionedEntry has
+  // three failure modes and two break it. Under QUOTA_EXCEEDED `set` dies and READS
+  // STAY ALIVE, so a stale `installed: true` reads back perfectly -- READY, empty
+  // badge, no banner. That is exactly what forget() was written to close.
+  await seedPolicy(armedCatchAll());
+  await bg.sync();
+  assert.equal(store.entry("installOutcome").value.installed, true, "precondition: a true receipt");
+
+  // Now the quota dies while the policy becomes unreadable.
+  store.put("policy", { rev: 2, value: { policy: "not a policy" } });
+  store.failWrites(true);
+  await bg.sync();
+  store.failWrites(false);
+
+  assert.equal(store.entry("installOutcome"), undefined,
+               "absent means UNKNOWN, which is the safe direction; a stale `true` is not");
+});
+
+test("the doorbell rings TWICE on the same pair of booleans", async () => {
+  // Date.now() alone is not enough: hundreds of awaited operations fit inside one
+  // millisecond, so two consecutive record() calls of the same pair would write two
+  // BYTE-IDENTICAL envelopes and storage.onChanged -- which only fires when the
+  // bytes change -- would stay silent. This witness is the one that meets that
+  // first.
+  let rings = 0;
+  g.InstallOutcome.onRecorded(() => { rings += 1; });
+
+  await g.InstallOutcome.record({ installed: true, coverageSatisfied: true });
+  const first = store.entry("installOutcome").rev;
+  await g.InstallOutcome.record({ installed: true, coverageSatisfied: true });
+  const second = store.entry("installOutcome").rev;
+
+  assert.notEqual(first, second, "the envelope must differ from the previous entry");
+  // THE BELL IS NOT RUNG BY HAND. It used to call fire.storageChanged() itself and
+  // then assert `rings > 0` -- so the only interesting link, "different bytes make
+  // the browser notify", was simulated BY THE TEST. The fake now notifies on a real
+  // write, exactly as the browser does on changed bytes, and the count is what the
+  // two writes above produced.
+  assert.equal(rings, 2, "two writes of the same pair still wake the page twice");
+});
+
+test("the doorbell FILTERS the area, or a sync writer would wake every open page", async () => {
+  let rings = 0;
+  g.InstallOutcome.onRecorded(() => { rings += 1; });
+
+  await fire.storageChanged({ installOutcome: {} }, "sync");
+  assert.equal(rings, 0, "storage.sync cannot ring this bell");
+
+  await fire.storageChanged({ installOutcome: {} }, "local");
+  assert.equal(rings, 1, "storage.local can");
+});
+
+test("the policy subscription filters the area too, or an unread entry still costs a full sync", async () => {
+  // THE ASYMMETRY WITH ITS NEIGHBOUR ABOVE WAS UNINTENTIONAL, and it had a price.
+  //
+  // onPolicyChanged fired on `policy` changing in EITHER area, justified by "it
+  // must not care which area an entry came from". True of READING -- load() asks
+  // the facade which area is in charge -- and false of WAKING: on a profile
+  // storing locally, a write to sync["policy"] changes nothing we will ever read
+  // and was still starting the worker, reloading, and REPLACING EVERY DYNAMIC
+  // RULE. That is a free wake-up per write, from the one channel this whole
+  // module models as hostile.
+  let woken = 0;
+  g.PolicyRepository.onPolicyChanged(() => { woken += 1; });
+
+  // `storageArea` is absent, so the facade answers "local" -- the default.
+  await fire.storageChanged({ policy: {} }, "sync");
+  assert.equal(woken, 0, "a write to the area we do not read must not wake anything");
+
+  await fire.storageChanged({ policy: {} }, "local");
+  assert.equal(woken, 1, "the area in charge still wakes it");
+
+  // A change to ANOTHER entry in the right area is still not our business.
+  await fire.storageChanged({ installOutcome: {} }, "local");
+  assert.equal(woken, 1, "only the policy entry");
+});
+
+test("switching areas is felt, because the filter would otherwise silence the migration", async () => {
+  // migrateTo's own header describes the window this closes: the copy INTO the
+  // target area fires onChanged before `storageArea` names the target, so sync()
+  // reloaded from the area being LEFT and reinstalled its rules. With the filter
+  // that wake is correctly ignored -- which is why the deliberate second put,
+  // AFTER the switch, is the one that has to land. Without it the area would
+  // change and the worker would go on serving the old rules until the next edit.
+  let woken = 0;
+  g.PolicyRepository.onPolicyChanged(() => { woken += 1; });
+
+  await seedPolicy(armedCatchAll());
+  woken = 0;
+
+  const outcome = await g.PolicyRepository.migrateTo("sync");
+  assert.equal(outcome.ok, true, `migration refused: ${outcome.code}`);
+  assert.equal(await g.Platform.storageAreaName(), "sync", "the switch happened");
+  assert.ok(woken > 0, "the worker must be told, or it keeps serving the area we left");
+});
+
+test("read() reconstructs: a forged `rules` or `applied` cannot ride along", async () => {
+  store.put("installOutcome", {
+    rev: 1,
+    value: { installed: true, coverageSatisfied: false, rules: ["FORGED"], applied: 99 },
+  });
+
+  // `skipped` is ALWAYS an array -- the page maps over it -- and the forged
+  // `rules`/`applied` still cannot ride along: read() reconstructs, never spreads.
+  assert.deepEqual(await g.InstallOutcome.read(),
+    { installed: true, coverageSatisfied: false, skipped: [] });
+});
+
+test("the causes of a refusal survive the trip to the page", async () => {
+  // They were produced by the worker, returned by _install and refused: every
+  // named reason in Re2Budget.REASONS existed only in a value nobody kept, while
+  // the options page rendered `skipped.length` from an array it always built
+  // empty. Six named causes for a counter that read zero.
+  await g.InstallOutcome.record({
+    installed: false,
+    coverageSatisfied: false,
+    skipped: [g.NotInstalled.of("RUN_OVER_BUDGET", "reserved prefixes")],
+  });
+  const receipt = await g.InstallOutcome.read();
+  assert.deepEqual(receipt.skipped, [{ code: "RUN_OVER_BUDGET", subject: "reserved prefixes" }]);
+
+  // And a forged entry that is not a cause is not admitted as one.
+  store.put("installOutcome", { rev: 9, value: { skipped: [{ code: 42 }, "junk", null] } });
+  assert.deepEqual((await g.InstallOutcome.read()).skipped, []);
+});
+
+test("read() never throws, on the three shapes the store can hold", async () => {
+  // VersionedEntry.read validates the ENVELOPE ONLY: on an absent entry it returns
+  // { rev: 0 } with value === undefined, so a naive value.installed throws -- and
+  // that is the NORMAL case, a fresh profile on first opening.
+  assert.deepEqual(await g.InstallOutcome.read(), { skipped: [] }, "absent");
+  store.put("installOutcome", { rev: 1, value: null });
+  assert.deepEqual(await g.InstallOutcome.read(), { skipped: [] }, "a null value");
+  store.put("installOutcome", { rev: 2, value: { installed: "false" } });
+  assert.deepEqual(await g.InstallOutcome.read(), { skipped: [] }, "a non-boolean is not a fact");
+  store.failReads(true);
+  assert.deepEqual(await g.InstallOutcome.read(), { skipped: [] }, "a dead area");
+  store.failReads(false);
+});
+
+test("forget() returns nothing and never throws, INCLUDING when remove itself fails", async () => {
+  // `failReads` only touched `get`, and forget() calls `remove` -- which the fake
+  // made infallible. So the try/catch this test exists for was NEVER ENTERED: the
+  // assertion held because nothing could throw, not because the code catches.
+  store.failReads(true);
+  assert.equal(await g.InstallOutcome.forget(), undefined, "it returns NOTHING");
+  store.failReads(false);
+
+  store.failRemoves(true);
+  assert.equal(await g.InstallOutcome.forget(), undefined, "and a dead remove is still silent");
+  store.failRemoves(false);
+});
+
+// ---------------------------------------------------------------------------
+// The generation guard: single-writer describes a SITE, not a serialisation
+// ---------------------------------------------------------------------------
+
+test("a delayed HEALTHY sync does not overwrite a recent `false`", async () => {
+  // Measured order: A (healthy) is suspended on its projection write; B learns the
+  // policy is unreadable and writes `false`; A resumes, sees a newer generation, and
+  // MUST NOT write its stale `true`.
+  const healthy = armedCatchAll();
+  await seedPolicy(healthy);
+  seedProjection(healthy);
+
+  const release = holdWrite("installedProjection");
+  const first = bg.sync();
+  // Let A reach the gate.
+  await new Promise((r) => setImmediate(r));
+
+  store.put("policy", { rev: 2, value: { policy: "not a policy" } });
+  await bg.sync();
+  assert.equal(store.entry("installOutcome").value.installed, false, "B learned NO and said so");
+
+  release();
+  await first;
+
+  assert.equal(store.entry("installOutcome").value.installed, false,
+               "the receipt is ABSOLUTE, so the last to leave is not the last to arrive");
+});
+
+test("a SUPPLANTED sync that learned `false` writes it anyway", async () => {
+  // DO NOT RE-SYMMETRISE THIS GUARD. `false` is always safe to write; only `true`
+  // needs ordering. Symmetric, two syncs that had both learned NO would silence
+  // each other and the receipt would still say `true` -- the guard would fabricate
+  // the very fail-open the batch exists to close.
+  store.put("policy", { rev: 1, value: { policy: "not a policy" } });
+
+  const release = holdRead("policy");
+  const first = bg.sync();
+  await new Promise((r) => setImmediate(r));
+
+  await bg.sync();                       // B bumps the generation and writes false
+  await g.InstallOutcome.forget();       // erase it, so only A's own write can show
+  assert.equal(store.entry("installOutcome"), undefined, "precondition: nothing left");
+
+  release();
+  await first;
+
+  assert.equal(store.entry("installOutcome").value.installed, false,
+               "a supplanted run that learned NO is not silenced by the guard");
+});
+
+// ---------------------------------------------------------------------------
+// The queue: its three bugs, and the purge that primes
+// ---------------------------------------------------------------------------
+
+test("the queue keeps the PAIR: a replayed install does not lose quarantinedCount", async () => {
+  // The slot held the policy alone and the replay called install(next) with ONE
+  // argument, so a re-run silently re-defaulted the count to 0 and PARTIAL_POLICY
+  // could never fire.
+  const policy = armedCatchAll();
+  // THE GATE HOLDS THE ENTRY THIS TEST IS ABOUT. It used to hold "__never" -- a
+  // name nothing writes -- so the barrier never retained anything and the whole
+  // scenario rested on natural coalescing while its setup claimed otherwise.
+  const release = holdWrite("installOutcome");
+  release();
+
+  const first = g.RuleInstaller.install(policy, 0);
+  const second = g.RuleInstaller.install(policy, 7);
+  const [, report] = await Promise.all([first, second]);
+
+  assert.equal(report.diagnosis, "PARTIAL_POLICY", "the count survived the replay");
+});
+
+test("a coalesced caller gets the report of ITS OWN request, not the previous one", async () => {
+  // `return pending` handed back the run ALREADY IN FLIGHT, which does not include
+  // the request just made -- and a naive `return pending.then(...)` still returns
+  // the old one.
+  const policy = armedCatchAll();
+  const firstPromise = g.RuleInstaller.install(policy, 0);
+  const coalesced = g.RuleInstaller.install(policy, 3);
+  const [first, second] = await Promise.all([firstPromise, coalesced]);
+
+  assert.notEqual(first, second, "two distinct reports, not one shared object");
+  assert.equal(second.diagnosis, "PARTIAL_POLICY", "the coalesced caller sees its own count");
+});
+
+test("the purge PRIMES the queue: the fail-closed gesture is never coalesced away", async () => {
+  // Otherwise the gesture would be cancelled by the very queue meant to protect it.
+  const policy = armedCatchAll();
+  await g.RuleInstaller.install(policy, 0);
+  assert.ok(store.rules().length > 0, "precondition: rules are live");
+
+  const running = g.RuleInstaller.install(policy, 0);
+  const purging = g.RuleInstaller.purge();
+  await Promise.all([running, purging]);
+
+  assert.equal(store.rules().length, 0, "the purge replaced the slot rather than queueing behind");
+});
+
+test("a failed purge stops saying `off`, because the badge ASKS", async () => {
+  await seedPolicy(armedCatchAll());
+  await bg.sync();
+  assert.ok(store.rules().length > 0, "precondition: rules are live");
+
+  // The purge cannot land: updateDynamicRules is ATOMIC, so the previous rules
+  // STAY ALIVE. The old `lastReport = null` printed `off` over them.
+  store.put("policy", { rev: 2, value: { policy: "not a policy" } });
+  dnrFaults.rejectUpdate = true;
+  // sync() REJECTS here, and that is deliberate: LOUD. The value-path purge throws,
+  // the outer catch assigns `outcome` BEFORE retrying it -- which is the whole
+  // reason for that ordering -- and the second attempt throws too. What must NOT
+  // happen is a silent swallow.
+  await assert.rejects(() => bg.sync(), /MAX_NUMBER_OF_UNSAFE_DYNAMIC_RULES/);
+  dnrFaults.rejectUpdate = false;
+
+  // And the receipt was still written, because the finally runs on the way out.
+  assert.equal(store.entry("installOutcome").value.installed, false,
+               "outcome is assigned BEFORE the purge that can throw");
+
+  await bg.refreshBadge();
+  assert.notEqual(store.badge(), "off", "the rules are still there, so `off` would be a lie");
+});
+
+// ---------------------------------------------------------------------------
+// The detector that fails WITHOUT throwing
+// ---------------------------------------------------------------------------
+
+test("a detector that fails silently leaves the projection UNWRITTEN", async () => {
+  // reconcile threw away DestinationJournal.record's return at both sites, so a full
+  // quota meant NO ENTRY, NO EXCEPTION, projection written -- and the detection
+  // window closed FOREVER.
+  const before = named("ABC", "https://honest.atlassian.net");
+  await seedPolicy(before);
+  seedProjection(before);
+
+  const after = before.withBaseUrlFor(
+    before.shortcuts()[0].id(),
+    g.JiraInstance.parse("https://evil.example.org").value
+  ).value;
+  await seedPolicy(after, 2);
+
+  // The journal write refuses, quietly.
+  store.failWrites(true);
+  await bg.sync();
+  store.failWrites(false);
+
+  const projection = store.entry("installedProjection");
+  assert.deepEqual(projection.value.policy, before.toJSON(),
+                   "the baseline is KEPT, so the gap is re-diffed rather than lost");
+});
+
+// ---------------------------------------------------------------------------
+// The fail-closed by THROW, which is the third path and the second fact
+// ---------------------------------------------------------------------------
+
+test("a load that REJECTS also purges, writes `false`, and sets the badge", async () => {
+  // "I learned nothing", "I learned no by value" and "I learned no by throw" are
+  // THREE PATHS AND TWO FACTS. PolicyRepository.load() awaits Platform.storageArea()
+  // outside any try, so it can reject rather than merely refuse.
+  await seedPolicy(armedCatchAll());
+  await bg.sync();
+  assert.ok(store.rules().length > 0, "precondition: rules are live");
+
+  store.failReads(true);
+  await bg.sync();          // load() REJECTS: the outer catch owns this path
+  store.failReads(false);
+
+  assert.equal(store.rules().length, 0, "the rules are emptied");
+  assert.deepEqual(store.entry("installOutcome").value, { installed: false, coverageSatisfied: false });
+
+  await bg.refreshBadge();
+  assert.equal(store.badge(), "off", "and `off` is the truth again");
+});
+
+// ---------------------------------------------------------------------------
+// Nothing lets itself be overwritten, AT EITHER END
+// ---------------------------------------------------------------------------
+
+test("report() cannot be overwritten on the way OUT", async () => {
+  await seedPolicy(armedCatchAll());
+  await bg.sync();
+  const real = store.rules().length;
+  assert.ok(real > 0, "precondition: real rules exist");
+
+  const report = await g.RuleInstaller.report({
+    policy: armedCatchAll(),
+    quarantinedCount: 0,
+    reality: { installed: true, rules: ["FORGED RULE"], applied: 99, skipped: [] },
+    source: "PAGE",
+  });
+
+  assert.equal(report.applied, real, "the REAL count, not the forged one");
+  assert.notDeepEqual(report.rules, ["FORGED RULE"], "and the REAL rules, which the preview PAINTS");
+  assert.equal(report.source, "PAGE", "the discriminant is always present");
+});
+
+test("report() cannot be overwritten on the way IN, and the POLARITY is what counts", async () => {
+  // An attacker does not forge rulesInstalled: true, which makes the diagnosis MORE
+  // alarming; he forges FALSE, to extinguish the only non-forgeable term. So: an
+  // EMPTY registry, quarantine 0, three rules really installed, `installed` ABSENT.
+  // Named fields => INSTALL_STATE_UNKNOWN. A spread => NO_SHORTCUTS, the fail-open.
+  await seedPolicy(armedCatchAll());
+  await bg.sync();
+  assert.ok(store.rules().length > 0, "precondition: rules are really installed");
+
+  const report = await g.RuleInstaller.report({
+    policy: g.JumpPolicy.empty(),
+    quarantinedCount: 0,
+    reality: { rulesInstalled: false, skipped: [] },
+    source: "PAGE",
+  });
+
+  assert.equal(report.diagnosis, "INSTALL_STATE_UNKNOWN", "never NO_SHORTCUTS");
+});
+
+test("the TWO call sites pass `source`, and a third one would go red", async () => {
+  // "PURGE" is UNREACHABLE: purge() produces no report at all. What the field buys
+  // is a CHANGELOCK -- no caller can reach the projection guard with another source.
+  await seedPolicy(armedCatchAll());
+  const report = await g.RuleInstaller.install(armedCatchAll(), 0);
+  assert.equal(report.source, "INSTALL");
+
+  const page = await g.RuleInstaller.report({
+    policy: armedCatchAll(), quarantinedCount: 0, reality: { skipped: [] }, source: "PAGE",
+  });
+  assert.equal(page.source, "PAGE");
+
+  // And with no source at all the guard cannot be reached: `undefined` is exactly
+  // the meaningful absence the discriminant exists to abolish, and it fails CLOSED.
+  // Named fields make the omission VISIBLE at the call site, which is the point:
+  // positionally, this read as a three-argument call and looked deliberate.
+  const nameless = await g.RuleInstaller.report({
+    policy: armedCatchAll(), quarantinedCount: 0, reality: { installed: true, skipped: [] },
+  });
+  assert.equal(nameless.source, undefined);
+  assert.notEqual(nameless.source, "INSTALL", "a forgotten source never governs the projection");
+});
+
+// ---------------------------------------------------------------------------
+// The presentation: the CONSTRUCTION throws, the ACCESSES never do
+// ---------------------------------------------------------------------------
+
+test("the presentation is TOTAL over the catalogue, and its accesses never throw", async () => {
+  // The reference is JumpPolicy.DIAGNOSES -- exported and, until this batch, with no
+  // reader at all. NOT the tables against each other, which would be tautological.
+  // Two measured traps: PARTIAL_POLICY appears TWICE and READY is ABSENT.
+  for (const code of [...g.JumpPolicy.DIAGNOSES, "READY"]) {
+    assert.equal(typeof g.DiagnosisPresentation.sentence(code), "string", code);
+    assert.equal(typeof g.DiagnosisPresentation.label(code), "string", code);
+    assert.ok(["ok", "warn", "off", "bad"].includes(g.DiagnosisPresentation.tone(code)), code);
+  }
+
+  // An UNKNOWN code: the raw code back, and the MOST alarming tone. `|| "off"` used
+  // to apply the LEAST alarming tone to the code saying "I do not know whether jumps
+  // are departing".
+  assert.equal(g.DiagnosisPresentation.sentence("NOPE"), "NOPE");
+  assert.equal(g.DiagnosisPresentation.label("NOPE"), "NOPE");
+  assert.equal(g.DiagnosisPresentation.tone("NOPE"), g.DiagnosisPresentation.WORST);
+  assert.equal(g.DiagnosisPresentation.WORST, "bad");
+
+  // THE SCALE, which the same gesture had to correct or it would have INVERTED it:
+  // "I do not know" must not shout louder than "the installation failed".
+  assert.equal(g.DiagnosisPresentation.tone("INSTALL_FAILED"), "bad");
+  assert.equal(g.DiagnosisPresentation.tone("INSTALL_STATE_UNKNOWN"), "bad");
+  assert.equal(g.DiagnosisPresentation.tone("READY"), "ok");
+});
+
+test("the extension asks for the origins its own configuration needs, and no more", async () => {
+  // Both permission calls threw away `origins`, so nothing could detect that the
+  // extension asks for the WRONG origin, a TOO BROAD one, or the origin of an
+  // instance the user never configured. The whole Access section was
+  // unverifiable by construction.
+  await seedPolicy(armedCatchAll());
+  await bg.sync();
+
+  const asked = permissionState.asked.filter((call) => call.origins.length > 0);
+  assert.ok(asked.length > 0, "the façade really consults the platform");
+  const origins = new Set(asked.flatMap((call) => call.origins));
+
+  for (const origin of origins) {
+    assert.equal(origin.includes("*://"), false, `a scheme wildcard is too broad: ${origin}`);
+    assert.equal(origin, origin.trim());
+    assert.ok(/^https?:\/\/[^/]+\/\*$/.test(origin), `an origin, not a pattern: ${origin}`);
+  }
+  // And the catch-all's own destination is among them: that is what the rule needs.
+  assert.ok([...origins].some((o) => o.includes("catchall.atlassian.net")),
+    `the configured destination must be asked for, got ${[...origins].join(", ")}`);
+});
+
+test("a translated build is exercised, not merely compared key for key", async () => {
+  // getMessage returned "" for everything, so every t() fell back to its English
+  // literal: no test ever walked a translated path, and the French build was
+  // validated only by comparing key SETS.
+  i18nCatalogue.diagReady = "Tout est prêt.";
+  assert.equal(g.Platform.t("diagReady", "Everything is ready."), "Tout est prêt.");
+  assert.equal(g.DiagnosisPresentation.sentence("READY"), "Tout est prêt.",
+    "the presentation goes through the catalogue, not around it");
+
+  delete i18nCatalogue.diagReady;
+  assert.equal(g.Platform.t("diagReady", "Everything is ready."), "Everything is ready.",
+    "and an absent translation still falls back to the shipped English");
+});
+
+/**
+ * A CAUSE CANNOT WRECK THE PANEL BY BEING LONG.
+ *
+ * MAX_SKIPPED caps how MANY causes come back; nothing capped how LONG each is, and
+ * ten causes are enough to dislocate the layout if a `subject` weighs 50kB. The
+ * bound lives in read(), where the data crosses back out of storage.local -- not at
+ * render time, which is the order this repository keeps everywhere.
+ *
+ * TRUNCATED FROM THE START: a subject is often a URL, whose origin is at its front,
+ * so a clipped string stays true about where traffic goes.
+ */
+test("a skipped cause is bounded in length at the customs post, from the front", async () => {
+  const long = "https://jira.internal.example/" + "x".repeat(50_000);
+  store.put("installOutcome", {
+    rev: 3,
+    value: { installed: false, skipped: [{ code: "RUN_OVER_BUDGET", subject: long }] },
+  });
+
+  const [cause] = (await g.InstallOutcome.read()).skipped;
+  assert.equal(cause.subject.length, 200, "the subject is clipped");
+  assert.ok(cause.subject.startsWith("https://jira.internal.example/"),
+    "and clipped from the FRONT, so the origin survives -- a tail-clipped URL would " +
+    "make jira.internal look like jira.internal.evil.example");
+  assert.equal(cause.code, "RUN_OVER_BUDGET", "a short code passes through untouched");
+});
+
+/**
+ * A STALE DETECTOR BASELINE IS SAID, NOT SWALLOWED.
+ *
+ * `InstalledProjection.record` returns a MutationResult, and reconcile inspects its
+ * own writes twenty lines below -- this call did not. A QUOTA_EXCEEDED there leaves
+ * the comparison baseline stale in silence, and a stale baseline is what makes the
+ * detector cry on ordinary use: the next honest rename is compared against an old
+ * projection and reported as unattributed. That is the exact failure the waterline
+ * exists to prevent, so the asymmetry was unintentional, not a design.
+ *
+ * It is a MISSED update, never a lost one -- the next sync() records again from a
+ * fresh read -- so the fact is journalled rather than made fatal.
+ */
+test("a projection that cannot be refreshed leaves a fact behind", async () => {
+  await seedPolicy(armedCatchAll());
+  await bg.sync();
+
+  const before = (await g.DestinationJournal.read()).entries.length;
+  // TARGETED: the projection is the big entry, and the browser's quota is not
+  // all-or-nothing. Failing every write would also kill the journal we are
+  // looking for -- which would prove nothing.
+  store.failWritesTo("installedProjection");
+  await bg.sync();
+  store.failWritesTo(undefined);
+
+  const after = await g.DestinationJournal.read();
+  assert.ok(after.entries.length > before, "the failed refresh produced a fact");
+  assert.ok(after.entries.some((e) => e.type === "ProjectionStale"),
+    `no ProjectionStale among ${JSON.stringify(after.entries.map((e) => e.type))}`);
+});
+
+test("7quinquies. the kill switch DISARMS, and pressing it twice does not re-arm", async () => {
+  // IT USED TO TOGGLE, under a command named `disarm-all`, in a file that calls it
+  // THE KILL SWITCH five times. No acknowledgement was ever bypassed -- _isLive
+  // still excludes a shortcut whose warnings are unacknowledged -- so this was
+  // never a hole. It was worse in a different way: a gesture whose repetition
+  // CANCELS the emergency, on the one control a user reaches when they have decided
+  // something is wrong and do not have time to read a screen. A hand that presses
+  // twice because nothing seemed to happen is the normal way to use a stop button.
+  //
+  // It is also what the compare-and-set requires: VersionedEntry replays this
+  // intention up to three times, and `disarm()` replayed is still disarmed where a
+  // toggle replayed comes back armed.
+  await seedPolicy(armedCatchAll());
+  await bg.sync();
+  assert.ok(store.rules().length > 0, "precondition: armed and installed");
+
+  await fire.command("disarm-all");
+  assert.equal(store.rules().length, 0, "the first press stops everything");
+  assert.equal(store.badge(), "off", "and the badge says so");
+
+  await fire.command("disarm-all");
+  assert.equal(store.rules().length, 0, "and the second press does NOT bring them back");
+  assert.equal(store.badge(), "off", "the emergency stop stays closed");
+
+  // IDEMPOTENT, hence replay-safe: a third press is still the same state.
+  await fire.command("disarm-all");
+  assert.equal(store.rules().length, 0, "n presses mean the same thing as one");
+});
+
+test("a synced policy cannot arrive with its destination warnings already accepted", async () => {
+  // F-01 AT THE REPOSITORY LAYER. security.test.js pins the DOOR; this pins the
+  // wiring, which is the half that was actually wrong: the door always had a
+  // `consentFor` hook, and PolicyRepository handed the document's consent through
+  // it unconditionally because nobody told the door where the document came from.
+  //
+  // The attack, in one write: a browser account the user has lost control of puts
+  // an armed shortcut in storage.sync with the http warning already ticked.
+  store.inCharge("sync");
+  assert.equal(await g.Platform.storageAreaName(), "sync", "the fixture must really be on sync");
+
+  const hostile = {
+    schemaVersion: 1,
+    armed: true,
+    engines: ["google.com"],
+    customEngines: [],
+    shortcuts: [{
+      id: "55555555-5555-4555-8555-555555555555",
+      key: "ABC",
+      baseUrl: "http://jira.attacker.example",
+      consent: { armed: true, acknowledged: ["INSECURE_SCHEME"] },
+    }],
+  };
+  store.sync.put("policy", { rev: 1, value: { policy: hostile, quarantine: [] } });
+
+  const loaded = await g.PolicyRepository.load();
+  assert.equal(loaded.ok, true, "the entry is admitted, not quarantined");
+  const shortcut = loaded.stored.policy().shortcuts()[0];
+  assert.deepEqual(
+    shortcut.unacknowledgedWarnings().map((w) => w.kind),
+    ["INSECURE_SCHEME"],
+    "the warning is owed again, on this machine",
+  );
+  assert.equal(shortcut.armed(), true, "the arming is not the attestation");
+  assert.equal(loaded.stored.policy().activeBindings().length, 0, "so nothing installs");
+});
+
+test("a locally saved policy keeps its acknowledgements, and the next write files them outside it", async () => {
+  // The migration branch, end to end. An older build wrote the acknowledgement
+  // INTO the configuration; on storage.local that record is this browser's, so it
+  // is honoured -- and the first commit afterwards moves it to the local
+  // acknowledgement entry, after which toJSON never writes it into the policy
+  // again. Without that second half the migration would be re-run on every read
+  // for ever, which works but leaves the fix resting on the old shape.
+  const saved = {
+    schemaVersion: 1,
+    armed: true,
+    engines: ["google.com"],
+    customEngines: [],
+    shortcuts: [{
+      id: "66666666-6666-4666-8666-666666666666",
+      key: "ABC",
+      baseUrl: "http://jira.corp/jira",
+      consent: { armed: true, acknowledged: ["INSECURE_SCHEME", "INTERNAL_HOST"] },
+    }],
+  };
+  store.put("policy", { rev: 1, value: { policy: saved, quarantine: [] } });
+
+  const loaded = await g.PolicyRepository.load();
+  const shortcut = loaded.stored.policy().shortcuts()[0];
+  assert.equal(shortcut.unacknowledgedWarnings().length, 0, "no warning is owed twice");
+  assert.equal(loaded.stored.policy().activeBindings().length, 1, "and it installs");
+
+  // Any commit at all completes the migration.
+  const applied = await g.PolicyRepository.apply((s) => g.MutationResult.ok(s));
+  assert.equal(applied.ok, true, `commit refused: ${applied.code}`);
+
+  const written = store.entry("policy").value.policy.shortcuts[0].consent;
+  assert.deepEqual(Object.keys(written), ["armed"], "the configuration no longer carries attestations");
+  const filed = await g.LocalAcknowledgements.read();
+  assert.deepEqual(
+    filed.kindsFor(loaded.stored.policy().shortcuts()[0]).sort(),
+    ["INSECURE_SCHEME", "INTERNAL_HOST"],
+    "they were moved to the local entry, not lost",
+  );
+
+  // And the reload after the migration still finds them, from their new home.
+  const again = await g.PolicyRepository.load();
+  assert.equal(again.stored.policy().shortcuts()[0].unacknowledgedWarnings().length, 0);
+});
+
+/**
+ * F-10 : UN DOMAINE CUSTOM TROP LONG PERD SON CATCH-ALL, ET CELA SE VOIT.
+ *
+ * Measured on Chrome 152.0.7977.82, 2026-09-07, by asking isRegexSupported from a
+ * loaded extension's own service worker: the catch-all's REDIRECT is accepted up
+ * to a custom host of 28 characters and refused from 29, while a named key's
+ * redirect survives to 34 and the reserved-prefix GUARDS are accepted even at the
+ * 40-character bound. (Both redirect numbers were two lower before the case
+ * repair: going case-sensitive stopped RE2 folding the literals and gave two
+ * characters of host back. Re-measured at a step of 1.) The guards -- what the per-engine budget was invented for --
+ * are the cheap rules; what blows is the catch-all's redirect, which carries the
+ * unrolled `{1,5}` and two capture groups and has no budget of any kind.
+ *
+ * `CustomEngine.MAX_HOST_LENGTH` is 40, deliberately (see the paragraph there: the
+ * excess is over-budget for ONE FEATURE, not for the domain). SECURITY.md then
+ * claims the loss is "fail-closed, reported, one engine, not silent" -- and that
+ * claim had no test. This is it, and it asserts the three things that make it true
+ * rather than the one that is easy:
+ *
+ *   NOTHING LEAKS      the guards fall WITH the catch-all, per-unit atomicity, so
+ *                      `ISO-9001` cannot leave for the Jira instance;
+ *   NOTHING ELSE FALLS  the other engines keep their catch-all, and the named
+ *                      shortcut keeps its rule on the long domain;
+ *   IT IS SAID         coverage comes out false, the diagnosis says so, and the
+ *                      causes name themselves instead of a counter.
+ *
+ * THE FAULT IS A MODEL, and fake-platform.js says why in its own words: a length
+ * threshold cannot reproduce RE2's ordering (program size, not characters). What
+ * it reproduces is the SHAPE -- one rule of a unit refused, its neighbours
+ * accepted -- and the shape is what the reporting has to survive. The measured
+ * numbers are a changelock in interception.test.js, where nothing executes RE2.
+ */
+test("a custom domain too long for its catch-all loses that, says so, and leaks nothing", async () => {
+  const LONG = "intranet-recherche-interne.example.org";   // 38 caracteres, sous la borne de 40
+  assert.equal(LONG.length, 38);
+  assert.ok(LONG.length <= g.CustomEngine.MAX_HOST_LENGTH, "le domaine doit passer la porte");
+
+  const custom = g.CustomEngine.parse({ host: LONG, shape: "search-q" });
+  assert.equal(custom.ok, true);
+
+  let policy = g.JumpPolicy.empty().withCustomEngine(custom.value).value;
+  policy = policy.withEngines(["google.com", custom.value.id()]).value;
+  const inst = g.JiraInstance.parse("https://intra.example.org/jira").value;
+  policy = policy.register("11111111-1111-4111-8111-111111111111",
+    g.ProjectKey.parse("ABC").value, inst).value;
+  policy = policy.registerCatchAll("22222222-2222-4222-8222-222222222222", inst).value;
+  for (const s of policy.shortcuts()) {
+    for (const w of s.unacknowledgedWarnings()) policy = policy.acknowledge(s.id(), w.kind).value;
+    policy = policy.armShortcut(s.id()).value;
+  }
+  await seedPolicy(policy);
+
+  // Le seuil : la longueur mesuree du catch-all a la frontiere. Le catch-all du
+  // domaine long passe au-dessus, celui de google.com et toutes les gardes restent
+  // en dessous -- ce qui est exactement l'ordre mesure sur Chrome.
+  const catalog = g.SearchEngineCatalog.forPolicy(policy);
+  const fragment = g.ReferencePattern.patternFor(g.CatchAllKey.only());
+  const longCatchAll = catalog.find(custom.value.id()).searchUrlPattern(fragment).length;
+  const googleCatchAll = catalog.find("google.com").searchUrlPattern(fragment).length;
+  assert.ok(googleCatchAll < longCatchAll, "le domaine long doit bien produire la regle la plus longue");
+  dnrFaults.refuseLongerThan = longCatchAll - 1;
+
+  await fire.startup();
+
+  const installed = store.rules();
+  const onLong = installed.filter((r) => r.condition.regexFilter.includes(LONG.replace(/\./g, "\\.")));
+  const onGoogle = installed.filter((r) => r.condition.regexFilter.includes("google\\.com"));
+
+  // NOTHING LEAKS : ni catch-all ni garde sur le moteur refuse. Une garde
+  // survivante sans son catch-all serait inoffensive ; un catch-all survivant
+  // sans ses gardes serait la fuite, et l'unite interdit les deux.
+  assert.equal(
+    onLong.some((r) => r.action.type === "redirect" && r.priority === g.RuleRanking.CATCH_ALL),
+    false,
+    "le catch-all refuse ne doit pas etre installe",
+  );
+  assert.equal(
+    onLong.some((r) => r.action.type === "allow"),
+    false,
+    "les gardes tombent avec le catch-all de leur unite",
+  );
+
+  // NOTHING ELSE FALLS : le raccourci nomme garde sa regle sur le domaine long,
+  // et google.com garde son catch-all ET ses gardes.
+  assert.ok(
+    onLong.some((r) => r.action.type === "redirect" && r.priority === g.RuleRanking.NAMED),
+    "le raccourci nomme doit continuer a fonctionner sur ce domaine",
+  );
+  assert.ok(
+    onGoogle.some((r) => r.action.type === "redirect" && r.priority === g.RuleRanking.CATCH_ALL),
+    "l'autre moteur garde son catch-all",
+  );
+  assert.ok(onGoogle.some((r) => r.action.type === "allow"), "et ses gardes");
+
+  // IT IS SAID : la couverture, le diagnostic, et des causes qui se nomment.
+  const receipt = store.entry("installOutcome").value;
+  assert.equal(receipt.installed, true, "le reste du programme est bien installe");
+  assert.equal(receipt.coverageSatisfied, false, "un moteur voulait un catch-all et ne l'a pas eu");
+
+  const codes = new Set((receipt.skipped ?? []).map((s) => s.code));
+  assert.ok(codes.has("REGEX_UNSUPPORTED"), `la cause doit se nommer, vu: ${[...codes].join(", ")}`);
+  assert.ok(codes.has("UNIT_INCOMPLETE"), "et dire que le reste de l'unite est tombe avec elle");
+
+  const report = await g.RuleInstaller.report({
+    policy, quarantinedCount: 0, reality: await g.InstallOutcome.read(), source: "PAGE",
+  });
+  assert.equal(report.diagnosis, "CATCH_ALL_NOT_INSTALLED",
+    "la ligne d'etat doit dire que le catch-all n'est pas installe");
+});

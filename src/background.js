@@ -4,41 +4,257 @@
 (function (global) {
   "use strict";
 
+  /**
+   * THE BADGE'S TWO COLOURS, named. They cannot come from tokens.css: the badge is
+   * painted by the browser chrome, which no stylesheet of ours reaches. Naming them
+   * here is what keeps them findable when the palette moves -- they were two bare
+   * hexadecimals in the middle of a call.
+   *
+   * Both are the palette's own: --red-strong and --ink-soft.
+   */
+  const BADGE_COLOUR = Object.assign(Object.create(null), {
+    "!": "#b3372c",
+    off: "#6a7370",
+  });
+
   if (typeof importScripts === "function") {
     importScripts(
       "platform.js",
       "core/mutation-result.js",
+    "core/engine-id.js",
+      "core/reserved-prefix.js",
       "core/issue-reference.js",
-      "core/destination-warning.js",
+      "core/shortcut-warning.js",
       "core/consent.js",
       "core/project-shortcut.js",
+      "core/catch-all-key.js",
+      "core/shortcut-key.js",
+      "core/shortcut-id.js",
       "core/shortcut-registry.js",
+      "core/custom-engine.js",
       "core/jump-policy.js",
+    "core/diagnosis.js",
+      "core/policy-diff.js",
       "core/admission.js",
       "interception/search-engine-catalog.js",
+      "interception/re2-budget.js",
+    "interception/not-installed.js",
       "interception/reference-pattern.js",
+      "interception/rule-ranking.js",
+      "interception/installed-rule.js",
+      "interception/rule-set.js",
       "interception/rule-factory.js",
       "interception/origin-requirements.js",
       "interception/jump-preview.js",
       "versioned-entry.js",
+      "install-outcome.js",
       "stored-policy.js",
+      "local-acknowledgements.js",
+      "installed-projection.js",
       "policy-repository.js",
       "destination-journal.js",
       "rule-installer.js"
     );
   }
 
-  const { Platform, PolicyRepository, DestinationJournal, RuleInstaller, JumpPolicy } = global;
+  const { Platform, PolicyRepository, DestinationJournal, RuleInstaller,
+          InstalledProjection, InstallOutcome, PolicyDiff,
+          OriginRequirements, SearchEngineCatalog } = global;
   const api = Platform.api;
 
-  let lastKnown = null;
+  /**
+   * "SINGLE-WRITER" DESCRIBES A SITE, NOT A SERIALISATION.
+   *
+   * sync() is RE-ENTRANT: permissions.onAdded does not await its promise, and
+   * onPolicyChanged can run alongside. An A that succeeded and then got delayed on
+   * InstalledProjection.record -- up to three CAS attempts, which a local attacker
+   * can provoke -- may write its receipt AFTER a B that failed: the stale one
+   * overwrites the true one. A compare-and-set would change nothing; it protects a
+   * concatenation, it does not serialise intentions.
+   *
+   * Hence this counter: THE RECEIPT IS ABSOLUTE, so the last to leave is not
+   * necessarily the last to arrive.
+   */
+  let syncGeneration = 0;
 
+  /**
+   * FAIL CLOSED when the policy cannot be read, AND SAY SO.
+   *
+   * It used to `return` on a failed load, which left THE PREVIOUS RULES ALIVE
+   * while refreshBadge -- reading the policy rather than the installed reality --
+   * printed `off` over them. It then emptied the rules but told nobody: the status
+   * line kept the previous verdict.
+   *
+   * THREE ASSIGNMENTS OF `outcome`, NOT TWO. The main fail-closed path is NOT an
+   * exception: load() returns { ok: false } AS A VALUE, so an early return
+   * traversed the finally with outcome still {} -- the receipt said "I know
+   * nothing" where it had LEARNED NO, on the path a compromised sync reaches most
+   * easily. "I learned nothing", "I learned no by value" and "I learned no by
+   * throw" are THREE PATHS AND TWO FACTS.
+   *
+   * The fusible that never blew because the current never arrived is not an intact
+   * fusible: it is a disconnected meter.
+   */
   const sync = async () => {
-    const loaded = await PolicyRepository.load();
-    if (!loaded.ok) return;
-    await reconcile(loaded.stored.policy());
-    lastKnown = loaded.stored.policy();
-    await RuleInstaller.install(loaded.stored.policy(), loaded.stored.quarantinedCount());
+    let outcome = {};                    // ABSENT is the third term
+    let report;                          // LOCAL: no more shared lastReport
+    const gen = (syncGeneration += 1);
+    try {
+      const loaded = await PolicyRepository.load();
+      if (!loaded.ok) {
+        // FAIL-CLOSED BY VALUE, not by throw: a fact LEARNED, not an ignorance --
+        // and this is the path a compromised sync reaches by writing an unreadable
+        // policy.
+        outcome = { installed: false, coverageSatisfied: false };
+        await RuleInstaller.purge();
+        // AND IT IS SAID. This path was mute: purge, return, badge to `off`, and
+        // not one line in the journal -- on the channel SECURITY.md makes the
+        // pivot of detection, along the route a compromised sync reaches most
+        // easily. The badge says "nothing fires"; it does not say "what was
+        // saved stopped being readable", and those are different sentences.
+        //
+        // ITS OWN DOOR. There is no readable policy, hence no revision to
+        // attribute this to and no claim that could ever cover it. Pushing it
+        // through the unclaimed door with `rev: 0` silenced it on a fresh journal
+        // -- 0 >= 0 -- so the loudest path in the trust model was mute.
+        await DestinationJournal.recordUnclaimable(
+          [{ type: "PolicyUnreadable", code: loaded.code }],
+          Date.now()
+        );
+        return;                          // this return TRAVERSES the finally
+      }
+      const policy = loaded.stored.policy();
+      // A NESTED try, because a single one is not enough: a throw inside reconcile
+      // would jump to the outer catch, so install would STILL not be reached --
+      // the very fault this rewrite exists to fix, moved one level up.
+      let detectorIntact = true;
+      try {
+        detectorIntact = await reconcile(policy);
+      } catch {
+        detectorIntact = false;
+      }
+      report = await RuleInstaller.install(policy, loaded.stored.quarantinedCount());
+      outcome = {
+        installed: report.installed,
+        coverageSatisfied: report.coverageSatisfied,
+        // The causes reach the page only through here: they are produced during an
+        // installation, which only this worker performs.
+        skipped: report.skipped,
+      };
+      // AFTER reconciliation, and NOT AT ALL if the install failed or the detector
+      // did -- a stale comparison base would re-diff the same gap at every wake-up
+      // and fill a twenty-entry journal with duplicates.
+      //
+      // The condition NAMES THE THING IT PROTECTS -- "this report comes from an
+      // installation" -- instead of saying "a field is missing". And it reads the
+      // LOCAL, not a shared mutable.
+      // `report.source === "INSTALL"` is DELIBERATELY KEPT, and it cannot open:
+      // _install is the only producer of a report on this path, and "PURGE" is
+      // unreachable because purge() produces none. It is a CHANGELOCK, not a
+      // guard -- the day a factorisation lets another source reach the projection,
+      // this is what has to be looked at. Written down so the next reader does not
+      // delete it as dead, nor trust it as a live check.
+      if (detectorIntact && report.source === "INSTALL" && report.installed === true) {
+        // THE RETURN IS DELIBERATELY NOT ACTED UPON, and that is a claim worth
+        // being precise about rather than a second omission.
+        //
+        // A failed write leaves the comparison base stale, which used to mean the
+        // next wake-up re-diffed the same gap and refilled the journal with
+        // duplicates. It no longer does: recordDivergence consults the journal's
+        // own waterline inside its mutation, so a gap the door has already
+        // claimed is a NON-DISCOVERY and nothing is written. The stale base costs
+        // a recomputation, not a false alarm.
+        //
+        // What it would cost is a MISSED divergence -- but only for a change that
+        // is itself below the waterline, i.e. one already attributed. There is
+        // nothing to detect there.
+        // INSPECTED, like reconcile's own writes twenty lines below. A
+        // QUOTA_EXCEEDED here leaves the comparison baseline stale in silence,
+        // and a stale baseline is what makes the detector cry on ordinary use --
+        // the exact failure the waterline exists to prevent. The asymmetry with
+        // reconcile was unintentional; there is no argument for it.
+        const written = await InstalledProjection.record(policy);
+        if (!written.ok) {
+          // The next sync() records again from a fresh read, so this is a missed
+          // update rather than a lost one -- said, not swallowed.
+          await DestinationJournal.recordUnclaimable(
+            [{ type: "ProjectionStale", code: written.code }],
+            Date.now()
+          );
+        } else {
+          /**
+           * AND THE CLAIM IS SPENT HERE, which is what closes the REPLAY.
+           *
+           * A claim exists to stop the window from crying over the door's own
+           * commit. From the line above onward, the PROJECTION carries this
+           * content, so every future reconcile compares against it and finds no
+           * gap -- there is nothing legitimate left for the claim to cover. What
+           * it could still do is silence a rewrite of this very content by
+           * somebody else, and it did: with the claim retained, an adversary who
+           * puts back a document the user committed four commits ago produced no
+           * entry, no banner and a quiet badge. Measured; see
+           * JournalState.withoutClaim.
+           *
+           * IT IS DELIBERATELY NOT INSPECTED, and this is the same claim
+           * InstalledProjection.record's own comment makes about a stale
+           * baseline, in the opposite direction. A forgetting that fails leaves
+           * the claim on the ring, i.e. the PREVIOUS behaviour -- a window in
+           * which a replay of THIS content stays silent -- and the next sync()
+           * re-reads and re-forgets from scratch. Failing to remove a claim
+           * cannot invent a false alarm, so there is no fact here worth a journal
+           * entry of its own: pushing one would put a line on the tape for a
+           * degradation that heals itself, on the surface whose twenty slots are
+           * reserved for evidence.
+           *
+           * The order matters: AFTER the projection, never before. Forgetting
+           * first and then failing to record would leave the baseline stale AND
+           * the claim gone, which is the one combination that turns the user's
+           * own edit into an UNKNOWN.
+           *
+           * ITS OWN try, AND THAT IS THE LOAD-BEARING PART OF THIS BLOCK. This
+           * call sits on the SUCCESS path, which is the majority path, and a jet
+           * from it -- storage.local refusing a read -- would reach sync()'s outer
+           * catch and PURGE EVERY RULE. That is the shape of fault this whole
+           * function was rewritten to remove: a housekeeping write taking down
+           * the installation it was meant to protect the record of. The rules are
+           * already installed and correct at this point; nothing about this
+           * forgetting may reopen that decision.
+           */
+          try {
+            await DestinationJournal.forgetClaim(policy.fingerprint());
+          } catch {
+            /* the claim stays on the ring until the next sync(): see above */
+          }
+        }
+      }
+    } catch {
+      outcome = { installed: false, coverageSatisfied: false };   // BEFORE purge, which can throw
+      await RuleInstaller.purge();
+    } finally {
+      // THE try IS WRITTEN, NOT MERELY ANNOUNCED: record() is a BARE set, so it
+      // THROWS -- and throwing from a finally would erase the in-flight exception.
+      //
+      // THE TWO VALUES ARE NOT SYMMETRIC. `false` is ALWAYS safe to write (at worst
+      // an over-signalling that persists until the next sync(), which NO TIMER
+      // triggers); only `true` needs ordering.
+      //
+      // DO NOT RE-SYMMETRISE THIS GUARD. Measured scenario: sync #1 writes true;
+      // #2 learns false and waits on purge(); #3 starts and bumps the counter; #2
+      // reaches its finally, sees gen != syncGeneration and DOES NOT WRITE; #3 is
+      // killed by MV3 mid-purge. Both syncs that had learned NO silenced each
+      // other, and the receipt still says true. The symmetric guard fabricated the
+      // very fail-open this batch exists to close.
+      if (outcome.installed === false || gen === syncGeneration) {
+        try {
+          await InstallOutcome.record(outcome);
+        } catch {
+          // QUOTA_EXCEEDED lands HERE: `set` dies and READS STAY ALIVE, so without
+          // this the STALE `installed: true` receipt reads back perfectly --
+          // READY, empty badge, no banner.
+          await InstallOutcome.forget();
+        }
+      }
+    }
   };
 
   /**
@@ -51,76 +267,222 @@
    * of the five sources would have no producer at all, and the trust model would
    * promise a detection the code does not deliver.
    *
-   * An unattributed change is UNKNOWN, which is MORE alarming, and correctly so:
-   * a detector must fail by over-signalling, never by under-signalling.
+   * An unattributed change is a DIVERGENCE, which is more alarming than an
+   * attributed one, and correctly so: a detector must fail by over-signalling.
+   *
+   * But it must not signal on ordinary use. The door records its attribution
+   * right after its commit, and the same write wakes us; without the waterline
+   * every rename typed by the user produced a second line labelled UNKNOWN -- the
+   * code reserved for compromise -- and the banner cried on the act itself.
    */
   const reconcile = async (policy) => {
-    const previous = lastKnown;
-    if (!previous) return;
-    const before = new Map(previous.shortcuts().map((s) => [s.id(), s]));
-    const events = [];
-    for (const shortcut of policy.shortcuts()) {
-      const old = before.get(shortcut.id());
-      if (!old) continue;
-      // Whole baseUrl, never the origin: with a path allowed in the base URL,
-      // .../jira -> .../jira-fake shares an origin and would be a non-event.
-      const oldBaseUrl = old.instance().baseUrl();
-      const newBaseUrl = shortcut.instance().baseUrl();
-      if (oldBaseUrl !== newBaseUrl) {
-        events.push({ shortcutId: shortcut.id(), key: shortcut.key().toString(), oldBaseUrl, newBaseUrl });
+    const { policy: previous } = await InstalledProjection.read();
+    if (!previous) {
+      // ABSENT means the detector has no baseline -- a wiped storage.local, a
+      // fresh profile, a new device. Returning here would move the in-memory hole
+      // thirty lines rather than close it, so an armed non-empty policy is
+      // reported as an unattributed change instead of being swallowed.
+      if (policy.armed() && policy.shortcuts().length > 0) {
+        // THE RETURN IS INSPECTED. It used to be thrown away, at both sites: a full
+        // quota meant NO ENTRY, NO EXCEPTION, projection written -- and the
+        // detection window closed FOREVER. CONFLICT_EXHAUSTED is provocable too:
+        // three attempts, and a local attacker who already writes storage.local
+        // only has to hammer the entry while the worker starts. The channel he
+        // compromises and the one that records him ARE THE SAME AREA.
+        //
+        // The recorder does not break down: it politely answers "tape busy", and
+        // nobody was listening to the answer.
+        const written = await DestinationJournal.recordUnclaimed(
+          [{ type: "PolicyReplaced", changedCount: policy.shortcuts().length, kinds: [] }],
+          policy.fingerprint(),
+          Date.now()
+        );
+        return written.ok;
       }
+      return true;
     }
-    if (events.length > 0) {
-      await DestinationJournal.record(events, 0, "UNKNOWN", Date.now());
-      await refreshBadge();
+    // THE SAME function as the door. One implementation, one corpus, and both
+    // paths of the trust model covered -- the door and the window.
+    const facts = PolicyDiff.between(previous, policy);
+    if (facts.length > 0) {
+      // The waterline is compared INSIDE the mutation, against the freshly
+      // re-read journal -- so a commit the door claimed while we were waking up
+      // is seen, and nothing is written. See recordDivergence.
+      const written = await DestinationJournal.recordUnclaimed(facts, policy.fingerprint(), Date.now());
+      return written.ok;
+    }
+    return true;
+  };
+
+  /** Whether the installed programme can actually fire: a redirect rule without
+   *  host access is inert. Its own failure reads as "granted", because the badge
+   *  must never print `off` on an ignorance -- `off` is the only one of the three
+   *  values that ASSERTS something. */
+  const hasEveryOrigin = async () => {
+    try {
+      const loaded = await PolicyRepository.load();
+      if (!loaded.ok) return true;
+      const policy = loaded.stored.policy();
+      const origins = OriginRequirements.requiredOrigins(policy, SearchEngineCatalog.forPolicy(policy));
+      return await Platform.grantedOrigins(origins);
+    } catch {
+      return true;
     }
   };
 
+  /**
+   * The badge reads the INSTALLED REALITY, not the intention.
+   *
+   * Deriving it from policy.armed() is what let an emergency stop print `off`
+   * over rules that were still live.
+   *
+   * IT NOW ASKS rather than reading a shared mutable. That one change removes at
+   * once: lastReport as the badge's source, the implicit ordering
+   * sync() -> refreshBadge() that nothing wrote down, and the two refreshBadge()
+   * calls INSIDE reconcile that flashed `off` on a cold worker -- at the exact
+   * moment the badge was detecting a compromise.
+   *
+   * THE WHOLE BODY IS GUARDED. DestinationJournal.read() used to sit OUTSIDE the
+   * try, with only setBadgeText swallowed -- and a throw from inside a finally
+   * ERASES the in-flight exception while never reaching setBadgeText.
+   *
+   * The fallbacks carry their DIRECTION: an unreadable journal means NOT
+   * acknowledged; an UNKNOWN count NEVER means `off`, because `off` is the only
+   * one of the three values that ASSERTS something.
+   */
   const refreshBadge = async () => {
-    const journal = await DestinationJournal.read();
-    const loaded = await PolicyRepository.load();
-    const armed = loaded.ok && loaded.stored.policy().armed();
-    const text = !armed ? "off" : journal.acknowledged ? "" : "!";
+    // `!` stays a symbol on purpose -- it is punctuation, not a word -- but `off`
+    // was an ENGLISH WORD shown to every reader, with no key of its own. And the
+    // badge carried neither colour nor tooltip: the only permanently visible
+    // surface of this extension said "!" with no way to learn what it meant.
+    let text = "!";
+    try {
+      let journal = { acknowledged: false };
+      try {
+        journal = await DestinationJournal.read();
+      } catch {
+        /* the proof is unreadable: NOT acknowledged, never the reassuring branch */
+      }
+      const applied = await RuleInstaller.installedRuleCount();
+      // RULES WITHOUT ACCESS FIRE NOTHING, and the badge said nothing about it.
+      // Revoking a host relaunches sync(), which correctly REINSTALLS the rules --
+      // a DNR redirect without host access simply never fires, and becomes live
+      // again on its own the moment permission returns. But the badge counted
+      // those rules and printed the reassuring empty text, so the one surface
+      // that is always visible claimed everything was fine while not a single
+      // jump could happen.
+      const granted = await hasEveryOrigin();
+      text = applied === 0 || !granted ? Platform.t("badgeOff", "off") : journal.acknowledged ? "" : "!";
+    } catch {
+      /* the count is unknown: `text` keeps its initial "!" */
+    }
     try {
       await api.action.setBadgeText({ text });
+      // The tooltip is what makes the badge readable at all, and the colour is a
+      // second signal beside it -- never the only one, since the text says it too.
+      if (api.action.setTitle) {
+        await api.action.setTitle({
+          title: text === ""
+            ? Platform.t("badgeReady", "Quick Jump for Jira: shortcuts are active.")
+            : text === "!"
+              ? Platform.t("badgeUnseen", "Quick Jump for Jira: a destination changed. Open the options to check it.")
+              : Platform.t("badgeOffTitle", "Quick Jump for Jira: nothing is redirecting right now."),
+        });
+      }
+      if (api.action.setBadgeBackgroundColor) {
+        await api.action.setBadgeBackgroundColor({ color: BADGE_COLOUR[text] || BADGE_COLOUR.off });
+      }
     } catch {
       /* no action in some contexts */
     }
   };
 
-  api.runtime.onInstalled.addListener(async (details) => {
+  /**
+   * ONE listener protocol, THE KILL SWITCH INCLUDED.
+   *
+   * The INNER try is indispensable: without it a body that rejects prevents
+   * sync() -- the exact fault sync() fixes, redone one level up. Real case:
+   * onInstalled with reason === "update" does a storage.local.set that rejects on
+   * a full quota, and the update then INSTALLS NOTHING, RECONCILES NOTHING,
+   * JOURNALS NOTHING.
+   *
+   * commands.onCommand comes IN, with a guard: its body returns false when the
+   * command is not disarm-all. Leaving it OUT would make THE KILL SWITCH THE ONLY
+   * LISTENER WITHOUT THE PROTOCOL -- a throw from sync() would skip the badge, the
+   * old rules would stay alive (a DNR rejection is atomic), and the screen would
+   * keep its previous text, possibly empty, i.e. "all is well". The user presses
+   * the emergency stop, the redirects keep departing, and nothing says so.
+   *
+   * The throw from sync() is NOT caught, and that is deliberate: loud.
+   */
+  const onEvent = (body) => async (...args) => {
+    try {
+      let proceed = true;
+      try {
+        proceed = (await body(...args)) !== false;
+      } catch {
+        /* the body is INCIDENTAL: syncing matters more than what triggered it */
+      }
+      if (proceed) await sync();
+    } finally {
+      await refreshBadge();
+    }
+  };
+
+  // An update writes NOTHING here. It used to set `updatedBanner: true`, an entry
+  // with no reader anywhere in the project -- and the try inside onEvent was
+  // justified, in writing, by the risk of THAT write being rejected. A storage
+  // entry nobody reads is a claim nobody can check; the sync() that onEvent runs
+  // afterwards is what an update actually needs.
+  api.runtime.onInstalled.addListener(onEvent(async (details) => {
     if (details.reason === "install") api.runtime.openOptionsPage();
-    if (details.reason === "update") await api.storage.local.set({ updatedBanner: true });
-    await sync();
-    await refreshBadge();
-  });
+  }));
 
-  api.runtime.onStartup.addListener(async () => {
-    await sync();
-    await refreshBadge();
-  });
+  api.runtime.onStartup.addListener(onEvent(async () => {}));
 
-  PolicyRepository.onPolicyChanged(async () => {
-    await sync();
-    await refreshBadge();
-  });
+  PolicyRepository.onPolicyChanged(onEvent(async () => {}));
 
   // A genuine domain event from the platform: without it, granting access from
   // the options page would install no rule and the extension would look broken
   // until the browser restarts.
-  api.permissions.onAdded.addListener(() => sync());
-  api.permissions.onRemoved.addListener(() => sync());
+  api.permissions.onAdded.addListener(onEvent(async () => {}));
+  api.permissions.onRemoved.addListener(onEvent(async () => {}));
 
   if (api.commands) {
-    api.commands.onCommand.addListener(async (command) => {
-      if (command !== "disarm-all") return;
-      await PolicyRepository.apply((stored) => {
-        const policy = stored.policy();
-        return global.MutationResult.ok(stored.withPolicy(policy.armed() ? policy.disarm() : policy.arm()));
-      });
-      await sync();
-      await refreshBadge();
-    });
+    api.commands.onCommand.addListener(onEvent(async (command) => {
+      // `return false` SAYS what the bare return meant. And the badge is refreshed
+      // either way, which is correct: after a refused disarm-all nothing changed;
+      // after a disarm-all whose sync() threw, it MUST change.
+      if (command !== "disarm-all") return false;
+      /**
+       * IT DISARMS. IT DOES NOT TOGGLE.
+       *
+       * This body used to read `policy.armed() ? policy.disarm() : policy.arm()`
+       * -- under a command named `disarm-all`, in a file that calls it THE KILL
+       * SWITCH five times. Two presses of Alt+Shift+J therefore re-armed
+       * everything, the catch-all included.
+       *
+       * No acknowledgement was ever bypassed (_isLive still excludes a shortcut
+       * whose warnings are unacknowledged, and activeBindings filters before any
+       * rule exists), so this was never a hole. It was worse in a different way: a
+       * gesture whose repetition CANCELS the emergency, on the one control a user
+       * reaches when they have decided something is wrong and do not have time to
+       * read a screen. A hand that presses twice because nothing seemed to happen
+       * is the normal way to use an emergency stop.
+       *
+       * Re-arming is a decision that belongs to the interface, where the
+       * destinations are on screen and the badge says what state one is leaving.
+       *
+       * ABSOLUTE, HENCE IDEMPOTENT -- which is also what the compare-and-set
+       * requires: VersionedEntry replays this intention up to three times, and
+       * `disarm()` replayed is still disarmed where a toggle replayed comes back
+       * armed. The previous form was a latent lost-update bug as well as a bad
+       * affordance.
+       */
+      await PolicyRepository.apply((stored) =>
+        global.MutationResult.ok(stored.withPolicy(stored.policy().disarm())));
+      return true;
+    }));
   }
 
   global.JiraQuickJumpBackground = { sync, reconcile, refreshBadge };

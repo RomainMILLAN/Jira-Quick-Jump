@@ -15,10 +15,112 @@
 
   // How an engine builds its search URL. Adding a shape is a decision made here,
   // never by whoever types a domain into the options page.
-  const SHAPES = {
-    "search-q": { pathPattern: "/search", queryParam: "q" },
-    "root-q": { pathPattern: "/", queryParam: "q" },
+  /**
+   * THE PARAMETER WE READ MUST BE THE ONE THE ENGINE READS -- the first of its
+   * name, not any of its name.
+   *
+   * `\\?(?:.*&)?q=` stood here, and `.*&` happily swallowed `q=hello&` in
+   * `?q=hello&q=ABC-1`: the rule matched the SECOND `q`, which every search
+   * engine ignores. A third-party page could therefore navigate a visitor to
+   * `<their Jira>/browse/ABC-1` -- with a catch-all armed, to `/browse/ANYTHING`
+   * -- without a search ever happening, and without the address bar being used.
+   * The redirect is the extension's, so the flow is the extension's to close.
+   *
+   * RE2 has no lookaround, so "no earlier parameter of this name" is spelled by
+   * enumerating what a DIFFERENT name looks like: one that diverges at the first
+   * character, or one that starts with it and runs longer. The trailing `?`
+   * admits the nameless `?=v&` that browsers tolerate.
+   *
+   * THE COST IS ONE ALTERNATION OF TWO, and it is paid out of the eleven units
+   * re2-budget.js calls "a dated bet" against the unmeasured envelope. If Chrome
+   * ever refuses a rule over this, the fix is re2-budget's documented one -- drop
+   * MAX_ALTERNATION_COST to 50 -- and never widening this back, which would
+   * reopen the flow above.
+   *
+   * Single-character names only, which is what both shapes use. A longer name
+   * would need one alternative per position, and that IS a budget question rather
+   * than a free one -- so it fails loudly here instead of silently there.
+   *
+   * A PERCENT SIGN CANNOT OPEN A PRECEDING PARAMETER NAME, and that one character
+   * closes the encoded form of the very hole this function exists for.
+   *
+   * The first alternative only ever required a first character other than `q`, so
+   * `%71` satisfied it -- and `%71` IS `q` once decoded. On an engine that decodes
+   * parameter NAMES, `?%71=hello&q=ABC-1` therefore had the rule fire on the
+   * second `q` while the engine reads the first: exactly the divergence the strict
+   * prefix was written to forbid, under a spelling no reviewer reads.
+   *
+   * Excluding `%` from that first position is what refuses it, and the direction
+   * of failure is safe: a name that cannot be consumed makes the whole prefix
+   * fail, so the rule does not match and no redirect happens. What it costs a
+   * legitimate URL is nothing -- no search engine names a parameter with a `%`
+   * (Google ships `sca_esv`, `sxsrf`, `oq`, `gs_lp`, `sourceid`, `ie`), and a
+   * browser's address bar never percent-encodes a name it writes itself.
+   *
+   * ONE CHARACTER OF BUDGET, and it is spent on the redirect form only: the
+   * guards ship `exactParameter: false`, so this branch never enters an envelope
+   * that is cut into runs. re2-budget.js says "never WIDEN the query pattern
+   * back"; this NARROWS it, which is the direction that paragraph protects.
+   *
+   * `q[^=&]+` stays as it is: a name starting with `q` and continuing decodes to
+   * something other than `q` whatever the continuation, so it is genuinely
+   * another parameter.
+   */
+  const noEarlier = (queryParam) => {
+    if (queryParam.length !== 1) {
+      // A NAMED REFUSAL, absorbed by rule-factory's per-engine catch, so one
+      // costly engine loses its catch-all instead of the whole programme being
+      // purged under the anonymous cause UNKNOWN. A bare Error here was the last
+      // mute path of this file.
+      //
+      // `global.Re2Budget` IS RESOLVED AT CALL TIME, and it has to be: this file
+      // is loaded BEFORE interception/re2-budget.js in all five lists. What makes
+      // that safe is that `build()` only ATTACHES searchUrlPattern and
+      // guardEnvelopeCost -- it never calls them -- so no resolution happens while
+      // the module is loading. Call either one at load time and this line becomes
+      // a TypeError at service-worker startup. Verified, and written down because
+      // the safety rests on a non-invocation rather than on the order.
+      throw global.Re2Budget.refusal("QUERY_PARAM_TOO_LONG", { word: queryParam });
+    }
+    return `(?:(?:[^=&%${queryParam}][^=&]*|${queryParam}[^=&]+)?=[^&]*&)*`;
   };
+
+  /**
+   * A MAP, AND THE PROTOTYPE CHAIN IS THE REASON.
+   *
+   * This was an object literal, read as `SHAPES[shape]` with a `shape` that comes
+   * from the configuration -- storage.sync included -- and validated only as
+   * `/^[a-z-]{1,32}$/`. `constructor` matches that pattern and lives on
+   * Object.prototype, so `SHAPES["constructor"]` answered the Object function:
+   * TRUTHY. The guard three lines down (`if (!form) return undefined`), whose
+   * whole job is "an unknown shape is filtered here, exactly as an unknown engine
+   * id is", let it through.
+   *
+   * MEASURED, on this build, from a document that passes every admission bound:
+   *
+   *   CustomEngine.parse({ host: "intra.example.org", shape: "constructor" }) -> ok
+   *   catalogue entry present            -> true      (the filter did not filter)
+   *   entry.pathPattern / queryParam     -> undefined
+   *   entry.exampleUrl                   -> "https://intra.example.orgundefined?undefined=ABC-1234"
+   *   entry.searchUrlPattern("X")        -> TypeError (noEarlier reads .length)
+   *
+   * That TypeError leaves buildRules from inside the binding loop, where nothing
+   * catches it -- so rule-installer's outer catch fires, the whole programme is
+   * purged, and NOTHING is installed: not the catch-all, not one named shortcut,
+   * on every device the synchronisation reaches. A one-field denial of service,
+   * reported as INSTALL_FAILED with the cause UNKNOWN, because a TypeError is not
+   * a Re2Budget.Refusal and cannot be named.
+   *
+   * A Map has no prototype chain to walk, so `get` answers `undefined` for
+   * `constructor` and the existing filter does what it always claimed to do. The
+   * core cannot hold this list (it must not learn what shapes exist), so the
+   * soundness of THIS lookup is the whole of the control -- which is why it is a
+   * Map and not a hardened object literal.
+   */
+  const SHAPES = new Map([
+    ["search-q", { pathPattern: "/search", queryParam: "q" }],
+    ["root-q", { pathPattern: "/", queryParam: "q" }],
+  ]);
 
   const BUILT_IN = [
     { id: "google.com", label: "Google.com", domain: "google.com", shape: "search-q" },
@@ -29,15 +131,12 @@
 
   // Selections written before engines were split per domain. Without this, an
   // existing configuration silently loses every engine and stops jumping.
-  const LEGACY_IDS = {
-    google: "google.com",
-    bing: "bing.com",
-    duckduckgo: "duckduckgo.com",
-  };
-
   const build = ({ id, label, domain, shape }) => {
-    const form = SHAPES[shape];
-    if (!form) return null;
+    const form = SHAPES.get(shape);
+    // `undefined`, like find() two lines down. This file had BOTH spellings of
+    // absence, and the caller wrote `if (!entry) continue` to cover the pair --
+    // a presence test that exists only because the vocabulary was double.
+    if (!form) return undefined;
     const hostPattern = "(?:www\\.)?" + domain.replace(/\./g, "\\.");
     return {
       id,
@@ -47,11 +146,39 @@
       hostPattern,
       pathPattern: form.pathPattern,
       queryParam: form.queryParam,
-      // Explicit https, and derived from the very domain the pattern matches:
-      // Chrome refuses a request that falls outside the manifest's optional
-      // patterns, and a rule matching a host we never asked for installs and then
-      // never fires.
-      permissionOrigins: [`https://*.${domain}/*`],
+      /**
+       * EXACTLY THE TWO HOSTS THE RULE CAN MATCH, and not one subdomain more.
+       *
+       * Explicit https, and derived from the very domain the pattern matches:
+       * Chrome refuses a request that falls outside the manifest's optional
+       * patterns, and a rule matching a host we never asked for installs and then
+       * never fires.
+       *
+       * IT WAS `https://*.${domain}/*`, AND THAT WAS TOO WIDE. hostPattern above
+       * is `(?:www\\.)?<domain>` followed IMMEDIATELY by the path, so a rule can
+       * only ever fire on `<domain>` and `www.<domain>`. The wildcard asked for
+       * accounts.google.com, mail.google.com and every other subdomain -- for an
+       * extension whose whole argument is that it never requests broad access,
+       * and on the one screen where the browser names what it is granting.
+       *
+       * The old test only checked SUFFICIENCY (rule inside permission). It is now
+       * an assertion of MINIMALITY as well, because the direction that matters is
+       * the other one.
+       *
+       * WHAT IT DOES NOT UNDO, said plainly: a permission already granted is not
+       * revoked by an update. A profile that accepted `https://*.google.com/*`
+       * under an earlier build keeps it, and permissions.contains() goes on
+       * answering yes for every subdomain until the user revokes it by hand. That
+       * is why this is a before-publication fix and not an after: SECURITY.md
+       * carries the sentence for the users who are already there.
+       *
+       * DO NOT DERIVE THIS FROM hostPattern, or hostPattern from this. They are
+       * two independent spellings of one fact on purpose: made to descend from a
+       * single list, the minimality test compares the union to the union and goes
+       * green on day one and forever -- the tautology rule-set.js spends a
+       * paragraph refusing about assertGuardsCover.
+       */
+      permissionOrigins: [`https://${domain}/*`, `https://www.${domain}/*`],
       exampleUrl: `https://${domain}${form.pathPattern === "/" ? "/" : form.pathPattern}?${form.queryParam}=ABC-1234`,
 
       /**
@@ -62,13 +189,74 @@
        * (?:&|$) is what turns "the regex stops here" into "the typed text must be
        * EXACTLY an issue reference, nothing more" — the decision that bounds false
        * positives.
+       *
+       * The URL this engine would build for that text. The engine's FORMAT must
+       * not have two homes, so the preview asks rather than assembling.
+       *
+       * THE FORM A BROWSER ACTUALLY EMITS.
+       *
+       * encodeURIComponent turns a space into %20, and a browser's address bar
+       * emits `+`. The rule matches both, so the preview still said "matched" --
+       * BUT THROUGH THE OTHER BRANCH OF THE ALTERNATION than the one reality
+       * takes. A screen that claims to simulate the delivered programme was
+       * validating a path no navigation ever walks, and the day one of the two
+       * forms is dropped the regression net would stay green.
        */
-      searchUrlPattern(typedTextFragment) {
+      searchUrlFor(text) {
+        return (
+          "https://" + domain + (form.pathPattern === "/" ? "/" : form.pathPattern) +
+          "?" + form.queryParam + "=" + encodeURIComponent(text).replace(/%20/g, "+")
+        );
+      },
+
+      /**
+       * WHAT THIS ENGINE'S GUARD WRAPPER COSTS, in the units re2-budget spends.
+       *
+       * The engine owns it because the engine owns searchUrlPattern -- and it is
+       * DERIVED by calling that very function with an empty fragment, never
+       * restated as a number. The two therefore cannot drift: add a segment to the
+       * emitted pattern and this grows by itself.
+       *
+       * THE GUARD FORM, not the redirect form. Only the guards are cut into runs
+       * against an alternation budget, so only their envelope competes with one.
+       * `exactParameter: false` is what the guards actually ship (see
+       * searchUrlPattern below), and the difference is not cosmetic: the strict
+       * prefix costs some thirty characters more.
+       *
+       * The fixed overhead ReferencePattern adds around the alternation --
+       * `(?:`, `)`, the separator, `\d+` -- is NOT counted here. It is identical
+       * for every engine, so it is already inside the calibrated budget; counting
+       * it would charge every engine twice for the same characters.
+       */
+      guardEnvelopeCost() {
+        return this.searchUrlPattern("", { exactParameter: false }).length;
+      },
+
+      /**
+       * `exactParameter` DECIDES HOW STRICT THE QUERY PREFIX IS, and the two
+       * answers are not a matter of taste -- they are the two directions of failure.
+       *
+       *   REDIRECT rules  -> strict. The rule must fire on the parameter the engine
+       *                      READS, i.e. the FIRST of its name. Firing on a later
+       *                      one lets any page navigate a visitor to their Jira.
+       *                      Matching too WIDE here is a real outbound flow.
+       *   ALLOW guards    -> wide. A guard exists to STOP a redirect. Matching too
+       *                      wide only ever stops more, which is the safe direction;
+       *                      matching too NARROW is what would let ISO-9001 leave.
+       *
+       * And the width is what pays for itself: the strict prefix costs thirty-odd
+       * characters on EVERY rule, and it was those characters -- multiplied by four
+       * engines and five guard runs -- that pushed the reserved-prefix guards past
+       * what Chrome accepts, so the browser refused them and the catch-all fell with
+       * its unit. Spending them only where they buy something is not an optimisation.
+       */
+      searchUrlPattern(typedTextFragment, { exactParameter = true } = {}) {
         return (
           "^https://" +
           hostPattern +
           form.pathPattern +
-          "\\?(?:.*&)?" +
+          "\\?" +
+          (exactParameter ? noEarlier(form.queryParam) : "(?:.*&)?") +
           form.queryParam +
           "=" +
           typedTextFragment +
@@ -90,12 +278,65 @@
   const SearchEngineCatalog = {
     ...view(builtIn),
 
-    SHAPES: Object.keys(SHAPES),
+    // The shape NAMES, never the table -- and FROZEN, like its two neighbours in
+    // core/. The options page reads `SHAPES[0]` as its default and builds one chip
+    // per entry, so a name pushed from another file would offer a shape this
+    // catalogue cannot resolve. Harmless today (the Map filters it and the engine
+    // resolves to nothing), which is when the guard costs nothing.
+    SHAPES: Object.freeze([...SHAPES.keys()]),
+    /** Through the Map, like build() above: this label reaches a chip in the
+     *  options page, and `constructor` used to render "undefined?undefined=". */
     shapeLabel(shape) {
-      return SHAPES[shape] ? `${SHAPES[shape].pathPattern}?${SHAPES[shape].queryParam}=` : shape;
+      const form = SHAPES.get(shape);
+      return form ? `${form.pathPattern}?${form.queryParam}=` : shape;
     },
 
-    /** Built-ins plus this policy's own domains — the lookup every caller needs. */
+    /**
+     * Built-ins plus this policy's own domains — the lookup every caller needs.
+     *
+     * EVERY TICKED ID KEEPS ITS OWN ENTRY, AND THE DEDUPLICATION HAS MOVED TO THE
+     * FORGE. What stood here was a two-step dance and both steps were wrong in the
+     * same place.
+     *
+     * The history, because the second fix undid half of the first. A custom domain
+     * duplicating a built-in one (`custom:google.fr` beside `google.fr`) was first
+     * DROPPED, to avoid emitting two rules with the same regexFilter, priority and
+     * action -- DNR's unspecified tie-break. But the id stayed ticked in the
+     * policy, so `find()` answered nothing and every binding on it read
+     * UNKNOWN_ENGINE, the catch-all's included. The repair ALIASED it instead: the
+     * built-in's entry was registered under BOTH ids.
+     *
+     * WHICH MADE `all()` HAND BACK THE SAME OBJECT TWICE, UNDER ONE id. Measured,
+     * on this build, from a configuration a user can create by hand:
+     *
+     *   ticked                [ 'google.fr', 'custom:google.fr' ]
+     *   catalog.all() ids     [ …, 'google.fr', …, 'google.fr' ]   <- the alias
+     *   the user unticks Google.fr
+     *   ticked                [ 'custom:google.fr' ]
+     *   chips on screen       every one of them unpressed
+     *   rule actually live    ^https://(?:www\.)?google\.fr/search\?…q=ABC…
+     *
+     * Two consequences, and the first is the serious one. `engines.js` reads
+     * `selected.has(engine.id)` to paint a chip, so BOTH chips answered for
+     * `google.fr` and NEITHER for `custom:google.fr`: the section that says where
+     * searches are intercepted showed an intercepted engine as switched off. And
+     * `custom.has(engine.id)` was false for both, so the remove button was never
+     * rendered -- the domain could not be taken back out except by exporting the
+     * configuration, editing the file and importing it.
+     *
+     * That is the one thing this project's options page may not do. SECURITY.md
+     * spends a chapter on what the page can and cannot tell you, and transfer.js
+     * calls the interception surface a form of consent one step ahead of the
+     * permission. A surface that under-reports itself is the direction neither of
+     * them allows.
+     *
+     * SO THE CATALOGUE STOPS ARBITRATING. An identity is what the user ticked and
+     * what the interface can show and remove; "these two intercept the same URLs"
+     * is a property of the emitted rules, and it is now decided where the rules are
+     * emitted (see rule-factory.js, `interceptionOf`). One question, one owner --
+     * and the caller that needed identities stops paying for a decision it never
+     * asked for.
+     */
     forPolicy(policy) {
       const entries = new Map(builtIn);
       for (const custom of policy.customEngines()) {
@@ -104,14 +345,19 @@
         });
         // An unknown shape is filtered here, exactly as an unknown engine id is:
         // translate AND filter is the airlock's job.
-        if (entry) entries.set(entry.id, entry);
+        if (entry === undefined) continue;
+        entries.set(entry.id, entry);
       }
       return view(entries);
     },
 
-    /** Maps an id written before engines were split per domain. */
+    /** Kept as a convenience for callers already holding the catalogue; the
+     *  identity itself is owned by core/engine-id.js, because the storage door
+     *  needs it and the storage door is core. An id this build cannot read at all
+     *  resolves to itself, and the lookup then simply finds nothing. */
     migrateId(id) {
-      return LEGACY_IDS[id] || id;
+      const parsed = global.EngineId.parse(id);
+      return parsed.ok ? parsed.value.toString() : String(id);
     },
   };
 

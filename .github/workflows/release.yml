@@ -24,11 +24,59 @@ jobs:
       - name: Watch what the job talks to
         uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
         with:
-          # audit, not block, and deliberately: an allowlist guessed instead of
-          # observed fails the build at the worst moment, and blocks a release
-          # rather than an attack. One clean run publishes the real endpoint
-          # list; the switch to block is a one-line change afterwards.
-          egress-policy: audit
+          # BLOCK. Nothing outside the list below leaves this job.
+          #
+          # HOW THIS LIST WAS BUILT, because it decides whether a release runs.
+          # harden-runner allows NOTHING by default in block mode: a missing
+          # endpoint is a denied connection, and a denied connection here is a
+          # failed release. So the list is not guessed -- every entry is traceable
+          # to a step of THIS job, and the reason is written beside it.
+          #
+          # WHAT IS STILL ASSUMED, said plainly: this list is DERIVED from the
+          # steps and from the shipped code of the tools they run, not OBSERVED
+          # from a StepSecurity insights page. That is the one thing the previous
+          # note asked for and the one thing a desk cannot produce. If a release
+          # ever fails here, harden-runner names the blocked endpoint in the run
+          # summary: add it, with its reason, rather than widening a neighbour or
+          # reverting to audit.
+          #
+          # WHAT BLOCK MODE IS WORTH, and it is not a wall. Domain filtering is
+          # bypassable by tunnelling -- a DNS-over-HTTPS bypass of the community
+          # tier was fixed in v2.16.0, and this action is pinned to v2.21.0, so
+          # that one is closed. It stays a control against an UNWITTING
+          # exfiltration -- a compromised dependency phoning a host nobody
+          # declared -- never against code that is already running and trying.
+          # `--ignore-scripts` is what keeps most of that code from running at all.
+          #
+          # ci.yml stays on audit on purpose: a guessed list there breaks pull
+          # requests while protecting nothing that ships.
+          egress-policy: block
+          allowed-endpoints: >
+            api.github.com:443
+            github.com:443
+            codeload.github.com:443
+            objects.githubusercontent.com:443
+            release-assets.githubusercontent.com:443
+            raw.githubusercontent.com:443
+            nodejs.org:443
+            registry.npmjs.org:443
+            fulcio.sigstore.dev:443
+            rekor.sigstore.dev:443
+            tuf-repo-cdn.sigstore.dev:443
+          # api.github.com, github.com, codeload, objects, release-assets, raw:
+          #   checkout, the action tarballs themselves, and the attestation API.
+          # nodejs.org:        setup-node fetching Node 22.
+          # registry.npmjs.org: `npm ci`. It is ALSO what web-ext's update-notifier
+          #   dependency calls on startup -- a version check, non-fatal, but it
+          #   would otherwise show up as a blocked endpoint on every build.
+          # fulcio / rekor / tuf-repo-cdn.sigstore.dev: attest-build-provenance.
+          #   This repository is PUBLIC, so the attestation goes to the public-good
+          #   Sigstore instance. A private repository would use GitHub's own
+          #   instance and need different hosts here.
+          # DELIBERATELY ABSENT: the artifact endpoints. upload-artifact talks to
+          #   the Actions control plane, which is the runner's own channel and not
+          #   filtered by this action -- verified against a working block-mode
+          #   release using the same action versions.
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -79,11 +127,62 @@ jobs:
       - name: Watch what the job talks to
         uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
         with:
-          # audit, not block, and deliberately: an allowlist guessed instead of
-          # observed fails the build at the worst moment, and blocks a release
-          # rather than an attack. One clean run publishes the real endpoint
-          # list; the switch to block is a one-line change afterwards.
-          egress-policy: audit
+          # BLOCK. Nothing outside the list below leaves this job.
+          #
+          # HOW THIS LIST WAS BUILT, because it decides whether a release runs.
+          # harden-runner allows NOTHING by default in block mode: a missing
+          # endpoint is a denied connection, and a denied connection here is a
+          # failed release. So the list is not guessed -- every entry is traceable
+          # to a step of THIS job, and the reason is written beside it.
+          #
+          # WHAT IS STILL ASSUMED, said plainly: this list is DERIVED from the
+          # steps and from the shipped code of the tools they run, not OBSERVED
+          # from a StepSecurity insights page. That is the one thing the previous
+          # note asked for and the one thing a desk cannot produce. If a release
+          # ever fails here, harden-runner names the blocked endpoint in the run
+          # summary: add it, with its reason, rather than widening a neighbour or
+          # reverting to audit.
+          #
+          # WHAT BLOCK MODE IS WORTH, and it is not a wall. Domain filtering is
+          # bypassable by tunnelling -- a DNS-over-HTTPS bypass of the community
+          # tier was fixed in v2.16.0, and this action is pinned to v2.21.0, so
+          # that one is closed. It stays a control against an UNWITTING
+          # exfiltration -- a compromised dependency phoning a host nobody
+          # declared -- never against code that is already running and trying.
+          # `--ignore-scripts` is what keeps most of that code from running at all.
+          #
+          # ci.yml stays on audit on purpose: a guessed list there breaks pull
+          # requests while protecting nothing that ships.
+          egress-policy: block
+          allowed-endpoints: >
+            api.github.com:443
+            github.com:443
+            codeload.github.com:443
+            objects.githubusercontent.com:443
+            release-assets.githubusercontent.com:443
+            raw.githubusercontent.com:443
+            uploads.github.com:443
+            nodejs.org:443
+            registry.npmjs.org:443
+            addons.mozilla.org:443
+            addons.cdn.mozilla.net:443
+            chromewebstore.googleapis.com:443
+            www.googleapis.com:443
+          # A DIFFERENT LIST FROM build's, and that is the point of having two:
+          # this job talks to the STORES, and it must not be able to reach
+          # Sigstore, just as build must not be able to reach the stores.
+          #
+          # uploads.github.com:  action-gh-release attaching the zip and the xpi.
+          # addons.mozilla.org:  web-ext sign, against the AMO API v5, and the
+          #   download of the signed xpi it returns.
+          # addons.cdn.mozilla.net: Mozilla's own add-on CDN, in case that
+          #   download redirects to it. Narrow, and it costs nothing; a missing
+          #   redirect target would cost the release.
+          # chromewebstore.googleapis.com: the Chrome Web Store API that
+          #   chrome-webstore-upload actually calls.
+          # www.googleapis.com:  the OAuth token refresh that precedes it
+          #   (/oauth2/v4/token). Read from the shipped package, not assumed.
+          # nodejs.org / registry.npmjs.org: setup-node and `npm ci`, as in build.
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -98,7 +197,51 @@ jobs:
           # setup-node v7 caches by default; dropping `cache: npm` is not enough.
           package-manager-cache: false
       - run: npm ci --ignore-scripts
-      - run: npm run build:chrome && npm run build:firefox
+
+      # THIS JOB DOES NOT COMPILE, AND THAT IS THE WHOLE POINT.
+      #
+      # It used to run `npm run build:chrome && npm run build:firefox` and publish
+      # ITS OWN zips, while the attestation above covered the ones `build` had
+      # produced -- which nobody ever downloaded. The two are not the same bytes:
+      # `unzip -l` on a shipped package shows every entry carrying the COMPILATION
+      # timestamp, not the content's, so a second build has other digests. The
+      # consequence was measured on the published asset:
+      # `gh attestation verify <zip>` fails, and the only end-to-end integrity
+      # control of the distribution chain -- the one SECURITY.md invites users to
+      # run -- covered nothing anyone could download.
+      #
+      # An attestation cannot be retrofitted. What ships without it stays
+      # unverifiable for ever, which is why this is the artefact that travels.
+      #
+      # The artifact endpoints are DELIBERATELY absent from the allow-list above:
+      # download-artifact talks to the Actions control plane, which is the
+      # runner's own channel and not filtered by harden-runner -- same note as
+      # upload-artifact in the build job.
+      - name: Take the attested packages, do not rebuild them
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: packages
+          path: web-ext-artifacts
+
+      # AND THE XPI IS SIGNED FROM THE ATTESTED ZIP, not from a third build.
+      #
+      # `npm run sign:firefox` chains build:firefox-src before web-ext sign, so it
+      # would recompile here and hand AMO bytes nobody attested. Unpacking the
+      # attested archive and signing THAT keeps the chain unbroken: zip attested ->
+      # unpacked -> signed. `sign:firefox-packaged` is the script that signs
+      # without rebuilding.
+      #
+      # Why not sign in the `build` job instead: the AMO credentials live behind
+      # the protected `release` environment with a human reviewer. Moving the
+      # signature up would move the secret out of that gate, which costs more than
+      # it buys.
+      - name: Unpack the attested Firefox package
+        if: ${{ env.HAS_AMO_CREDENTIALS == 'true' }}
+        run: |
+          set -euo pipefail
+          rm -rf build/firefox
+          mkdir -p build/firefox
+          unzip -q -o web-ext-artifacts/jira-quick-jump-firefox-*.zip -d build/firefox
 
       # Secrets live on the STEP that needs them, never on the job: at job level
       # they would also be in scope for checkout, setup-node and every
@@ -110,14 +253,26 @@ jobs:
         env:
           WEB_EXT_API_KEY: ${{ secrets.WEB_EXT_API_KEY }}
           WEB_EXT_API_SECRET: ${{ secrets.WEB_EXT_API_SECRET }}
-        run: npm run sign:firefox
+        run: npm run sign:firefox-packaged
+
+      # The sums came down with the packages, computed by `build` over the zips it
+      # attested. The xpi is minted here, after them, so it is appended rather than
+      # left out of a file that claims to cover the release.
+      - name: Add the signed xpi to the sums
+        if: ${{ env.HAS_AMO_CREDENTIALS == 'true' }}
+        run: sha256sum web-ext-artifacts/*.xpi >> web-ext-artifacts/SHA256SUMS
 
       - name: Create the GitHub release
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
+          # SHA256SUMS IS ATTACHED, and it was not. It was written by `build`
+          # (`sha256sum … | tee`) and uploaded as a RUN artifact -- limited
+          # retention, access tied to the run -- so it never reached the Release,
+          # while SECURITY.md said "Releases … publish SHA-256 sums".
           files: |
             web-ext-artifacts/*.zip
             web-ext-artifacts/*.xpi
+            web-ext-artifacts/SHA256SUMS
           generate_release_notes: true
 
       # No --auto-publish: a compromised CI produces a draft, not a release to

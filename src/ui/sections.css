@@ -101,6 +101,11 @@ code {
 }
 .section:first-child {
   border-top: none;
+  /* Status is always the first section, and its border is removed, so the only
+     breathing room above "Jumping is armed" was .sections' 6px plus this padding.
+     The padding-top goes IN this rule rather than in a second one on the same
+     selector. */
+  padding-top: 26px;
 }
 .lbl {
   font-size: 12px;
@@ -158,10 +163,18 @@ code {
   color: var(--muted);
 }
 
-/* A 40x24 hit area: WCAG 2.2 AA asks for 24x24 minimum. */
+/* A 40x24 hit area: WCAG 2.2 AA asks for 24x24 minimum.
+
+   FOUR NUMBERS THAT HAD TO AGREE -- width, the knob's left, its size and the
+   translate -- and nothing tied them: changing the track width moved the knob
+   off the end in silence. They are derived from two now. */
 .sw {
-  width: 40px;
-  height: 24px;
+  --sw-w: 40px;
+  --sw-h: 24px;
+  --sw-pad: 3px;
+  --sw-knob: calc(var(--sw-h) - 2 * var(--sw-pad));
+  width: var(--sw-w);
+  height: var(--sw-h);
   border-radius: 999px;
   background: var(--teal);
   border: none;
@@ -173,19 +186,21 @@ code {
 .sw::after {
   content: "";
   position: absolute;
-  top: 3px;
-  left: 19px;
-  width: 18px;
-  height: 18px;
+  top: var(--sw-pad);
+  left: calc(var(--sw-w) - var(--sw-pad) - var(--sw-knob));
+  width: var(--sw-knob);
+  height: var(--sw-knob);
   border-radius: 50%;
-  background: #fff;
+  background: var(--card);
   transition: transform 0.14s;
 }
+/* --line-strong, not a hexadecimal nobody can find again: the off state is a
+   neutral of the palette like everything else. */
 .sw[aria-checked="false"] {
-  background: #cfcdc5;
+  background: var(--line-strong);
 }
 .sw[aria-checked="false"]::after {
-  transform: translateX(-16px);
+  transform: translateX(calc(-1 * (var(--sw-w) - var(--sw-h))));
 }
 .sw:disabled {
   opacity: 0.4;
@@ -203,10 +218,15 @@ code {
   flex-direction: column;
   gap: 7px;
 }
+ol.rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
 .row {
   display: grid;
-  grid-template-columns: 7rem 1fr auto auto;
-  grid-template-areas: "key url arm del";
+  grid-template-columns: auto auto 7rem 1fr auto auto;
+  grid-template-areas: "grip ord key url arm del";
   align-items: center;
   gap: 11px;
   border: 1px solid var(--line);
@@ -219,6 +239,109 @@ code {
 }
 .row.is-pending {
   border-color: var(--amber-line);
+}
+/* A dashed border and NO opacity: dimming the row would push its text under the
+   4.5:1 contrast floor. The text chip and the written reason carry the state, so
+   colour is never the only signal. */
+.row.is-shadowed {
+  border-style: dashed;
+  border-color: var(--amber-line);
+}
+/* The catch-all key is text, not a field: readonly is not in the DOM whitelist,
+   and a read-only input is focusable and useless. */
+.f.is-static {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  color: var(--muted);
+}
+.f.is-static code {
+  font-family: var(--mono, monospace);
+}
+.preview-why {
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+/* Announced but not shown. Not display:none, which is not announced either. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+/* THE INVARIANT, at its real scope: ANY CELL THAT CAN BE EMPTY HAS A FIXED WIDTH,
+   because a row is an isolated grid (.rows is display:flex, so nothing aligns
+   columns across rows) and an empty track collapses to 0. That is what keeps the
+   catch-all and the draft rows -- both of which render these cells empty -- lined
+   up with the saved ones. .f-arm and .f-del are `auto` and stay so: they are never
+   empty, which is how they fall outside the invariant by its definition rather
+   than by an excuse. */
+.f-grip-cell {
+  grid-area: grip;
+  width: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.f-ord {
+  grid-area: ord;
+  width: 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+/* The SECOND way to reorder, never the only one: pointer-only by nature, so it is
+   aria-hidden and the move buttons beside it carry the keyboard path (WCAG 2.5.7).
+   28x28 matches .btn.move rather than sitting on the 24x24 floor of 2.5.8 -- the
+   house standard, and there is width to spare. */
+.f-grip {
+  width: 28px;
+  min-height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--faint);
+  cursor: grab;
+  user-select: none;
+}
+.f-grip:active {
+  cursor: grabbing;
+}
+/* THREE STATES, THREE DIFFERENT CSS PROPERTIES. A dashed border already belongs to
+   .row.is-shadowed, so borrowing it here would make a healthy row being dragged
+   look like a row that never fires -- on the very gesture whose subject is crossing
+   the catch-all. A signal belongs to one state only. No transition anywhere, so
+   prefers-reduced-motion has nothing new to ask for. */
+.row.is-dragging {
+  box-shadow: 0 0 0 2px var(--teal);
+}
+.row.is-drop-before {
+  box-shadow: inset 0 3px 0 0 var(--teal);
+}
+.row.is-drop-after {
+  box-shadow: inset 0 -3px 0 0 var(--teal);
+}
+/* 28x28, above the 24x24 minimum of WCAG 2.2 rule 2.5.8. */
+.btn.move {
+  width: 28px;
+  min-height: 28px;
+  padding: 0;
+}
+/* aria-disabled, never disabled: a disabled button is not focusable, so moving a
+   row to the top would drop focus to <body>.
+
+   NOT COLOUR ALONE, and not at 1.15:1. `--line` on white is invisible rather
+   than muted, so an arrow at the end of the list simply vanished -- and WCAG
+   1.4.1 asks for a second signal whatever the ratio. Opacity keeps the glyph
+   legible, the cursor says it is inert, and aria-disabled says it out loud. */
+.btn[aria-disabled="true"] {
+  color: var(--muted);
+  opacity: .45;
+  cursor: default;
 }
 .f-key {
   grid-area: key;
@@ -273,6 +396,54 @@ input.f[aria-invalid="true"] {
   border-color: var(--red);
 }
 
+/* A HOST NAME IS NEVER REORDERED BY THE TEXT AROUND IT.
+
+   NOT A SECURITY CONTROL, AND IT USED TO CLAIM TO BE ONE. This comment read "a
+   security control, not a typographic nicety: an RTL override inside a host name
+   makes the displayed destination read backwards" -- and `unicode-bidi` cannot
+   deliver that. It decides how a sequence relates to its NEIGHBOURS; the
+   explicit formatting characters INSIDE the sequence still apply. Measured in
+   Chromium on the stored string `"https://jira." + U+202E + "moc.live/"`, by
+   reading glyph positions back with Range.getBoundingClientRect:
+
+     no rule at all         ->  https://jira./evil.com
+     isolate (what shipped) ->  https://jira./evil.com
+     bidi-override          ->  https://jira./evil.com
+     the character removed  ->  https://jira.<U+FFFD>moc.live/
+
+   So the control is Dom.visibleText, which REMOVES those characters, and it is
+   applied on the one surface that displays a string the parsers refused (the
+   quarantine rows). Everywhere else the value on screen has already survived
+   JiraInstance.parse, hence /^[\x21-\x7e]+$/, and cannot contain an override at
+   all.
+
+   WHAT THIS RULE IS STILL FOR, honestly: keeping a host name from being
+   reordered by the LABELS and sentences around it, in an RTL interface. That is
+   worth having, it is what `isolate` actually does, and it is why the rule stays
+   -- demoted to typography, with its five selectors unchanged. Do not re-promote
+   it in a comment, and do not widen it to every field on the grounds that it
+   protects them. */
+.ltr-isolate,
+.mono-token,
+.dest,
+.origin,
+.preview,
+.signature-domain {
+  unicode-bidi: isolate;
+  direction: ltr;
+}
+
+/* A MONOSPACED TOKEN THAT IS NOT A DESTINATION: a key, or a phrase standing in
+   for one. `.dest` used to paint all three, so a rule written for "where the
+   traffic goes" silently governed the word next to it -- and the class name lied
+   on two screens out of three. Same look, honest name. */
+.mono-token {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  color: var(--text);
+  word-break: break-all;
+}
+
 .dest {
   font-family: var(--mono);
   font-size: 12.5px;
@@ -280,8 +451,6 @@ input.f[aria-invalid="true"] {
   text-overflow: ellipsis;
   white-space: nowrap;
   /* Isolated so a right-to-left character cannot reorder a host name on screen. */
-  unicode-bidi: isolate;
-  direction: ltr;
 }
 .dest .host {
   font-weight: 600;
@@ -330,7 +499,9 @@ input.f[aria-invalid="true"] {
 .btn.primary {
   background: var(--teal);
   border-color: var(--teal);
-  color: #fff;
+  /* --on-teal, not #fff: on the dark palette the teal lightens, and white text
+     on it drops below the AA floor. The token moves with the ground. */
+  color: var(--on-teal);
 }
 .btn.plain {
   color: var(--muted);
@@ -386,8 +557,10 @@ input.f[aria-invalid="true"] {
   background: var(--teal);
   flex-shrink: 0;
 }
+/* The palette's amber, not a second one. `#c9a227` sat here while --amber served
+   the .row-msg.pending a few rules away: one state, two colours. */
 .dot.pending {
-  background: #c9a227;
+  background: var(--amber);
 }
 .origins {
   margin-top: 9px;
@@ -401,8 +574,6 @@ input.f[aria-invalid="true"] {
   font-family: var(--mono);
   font-size: 11.5px;
   color: var(--faint);
-  unicode-bidi: isolate;
-  direction: ltr;
 }
 
 .alert {
@@ -410,6 +581,11 @@ input.f[aria-invalid="true"] {
   background: var(--red-wash);
   border-radius: 12px;
   padding: 13px 15px;
+}
+/* .alert carries no margin of its own, so a visible Status banner used to sit
+   flush against the status line. */
+.alert:not([hidden]) + .status {
+  margin-top: 13px;
 }
 .alert-t {
   font-weight: 600;
@@ -422,6 +598,17 @@ input.f[aria-invalid="true"] {
   margin-top: 3px;
   line-height: 1.55;
 }
+/* A DESTINATION INSIDE A BANNER SENTENCE is one size down: the sentence around it
+   is 12.5px, and a monospaced host at the same size reads as the sentence rather
+   than as a value to be checked.
+
+   IT WAS SCOPED TO NOTHING, and that is what this line repairs. A copy of the
+   `.mono-token` block above had been pasted between `.alert-s` and its own
+   declarations, so the selector read `.alert-s .mono-token` -- harmless, since the
+   block was identical to the global one twelve lines up -- and THIS rule lost its
+   `.alert-s` prefix entirely. `.dest` was therefore reduced to 11.5px EVERYWHERE:
+   in the shortcut rows, in the import diff, in the Access list. On the surface
+   whose whole job is to show where the traffic goes. */
 .alert-s .dest {
   font-size: 11.5px;
 }
@@ -432,8 +619,6 @@ input.f[aria-invalid="true"] {
   border-left: 2px solid var(--teal);
   font-family: var(--mono);
   font-size: 12.5px;
-  unicode-bidi: isolate;
-  direction: ltr;
 }
 .preview .host {
   font-weight: 600;
@@ -483,12 +668,19 @@ input.f[aria-invalid="true"] {
   font-family: var(--mono);
   font-size: 10.5px;
   color: var(--faint);
-  unicode-bidi: isolate;
-  direction: ltr;
 }
+/* THROUGH THE CONTAINER WE OWN, never through the vendored component's internals.
+   This used to name `.rm-tag-logo-circle`, a private class: an upstream resync
+   renames it and the motion preference stops being honoured WITHOUT ANYTHING GOING
+   RED. The component publishes --rm-tag-* variables but none for animation, so the
+   honest anchor is `.signature`, which is ours. */
 @media (prefers-reduced-motion: reduce) {
-  .signature .rm-tag-logo:hover .rm-tag-logo-circle {
-    animation: none;
+  .signature,
+  .signature *,
+  .signature *::before,
+  .signature *::after {
+    animation: none !important;
+    transition: none !important;
   }
 }
 
@@ -521,16 +713,23 @@ input.f[aria-invalid="true"] {
 .is-compact .sections {
   padding: 0 16px 14px;
   overflow-y: auto;
-  max-height: 470px;
+  /* The popup's own ceiling minus its header, rather than a number chosen by eye.
+     Chrome caps an extension popup at 600px; --popup-chrome is what the heading
+     and padding take above this scroller. Change either and the other follows. */
+  max-height: calc(var(--popup-max, 600px) - var(--popup-chrome, 130px));
 }
 .is-compact .section {
   padding: 15px 0;
 }
+.is-compact .section:first-child {
+  /* .is-compact .sections has no top padding at all, so the popup needs its own. */
+  padding-top: 20px;
+}
 .is-compact .row {
-  grid-template-columns: 1fr auto auto;
+  grid-template-columns: auto auto 1fr auto auto;
   grid-template-areas:
-    "key arm del"
-    "url url url";
+    "grip ord key arm del"
+    "url  url url url url";
   gap: 9px 10px;
 }
 .is-compact .field-label {
@@ -546,10 +745,24 @@ input.f[aria-invalid="true"] {
 .section .row.is-pending > .tag {
   flex-shrink: 0;
 }
-.rows .row:has(> .tag) {
+/* Import and quarantine rows are content, not form -- they are div.row WITHOUT a
+   data-id. The :not() matters: savedRow appends a span.tag to a SHADOWED shortcut
+   row too, and that row is the only one whose whole job is to explain that it never
+   fires. Flattened to flex, its .row-msg -- which relies on grid-column 1 / -1 for
+   a row of its own -- compressed onto the controls line and the controls could
+   leave the frame, on a row that promises "every control stays operable". A
+   shortcut the user believes is armed, that never fires, and that they cannot
+   repair, is a failure of signal integrity. */
+.rows .row:has(> .tag):not([data-id]) {
   display: flex;
   align-items: center;
   gap: 11px;
+}
+/* The chip placed explicitly, like its two neighbours .row-msg and .acks which
+   already carry this -- .tag was the only direct child of .row that forgot it. */
+.row > .tag {
+  grid-column: 1 / -1;
+  justify-self: start;
 }
 .dest.was {
   color: var(--faint);
@@ -574,8 +787,22 @@ input.f[aria-invalid="true"] {
 .popup-foot .ver {
   flex-grow: 1;
 }
-.rows-spaced {
-  margin-bottom: 11px;
+/* The space between the shortcut list and its two buttons.
+
+   It used to live on .rows-spaced, as a bottom margin on the list, and it was
+   SILENTLY DEAD: `ol.rows { margin: 0 }` -- added when the list became an <ol> to
+   drop a list's default margin -- has specificity 0-1-1, which outranks a bare
+   class at 0-1-0 whatever the source order. So the buttons sat flush against the
+   last card, and raising the dead rule from 11px to 18px changed nothing at all.
+   A class that looks like it spaces something and does not is a trap, so it is
+   gone rather than repaired.
+   
+   On the button row now, which is where it reads and where .row-actions already
+   puts it for the Access section -- a little wider than that 11px, because this
+   row follows a stack of cards rather than a run of text. No element-qualified
+   selector competes with it. */
+.shortcuts-actions {
+  margin-top: 18px;
 }
 .row-actions {
   margin-top: 11px;
@@ -589,4 +816,15 @@ input.f[aria-invalid="true"] {
 }
 .add-domain .hint {
   margin: 0;
+}
+
+/* The reasons behind a verdict, listed under it. They only appear when the
+   receipt carries causes, so the empty case costs no space at all. */
+.causes {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }

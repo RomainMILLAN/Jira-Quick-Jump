@@ -1,0 +1,370 @@
+/**
+ * The stand-in for the browser, for the ONE test file that exercises
+ * background.js as a running service worker rather than as a set of functions.
+ *
+ * WHY IT IS INSTALLED ONCE, BEFORE THE FIRST IMPORT, AND NEVER SWAPPED
+ *
+ * Two files capture their handle to the browser AT LOAD TIME: platform.js does
+ * `const api = global.browser ?? global.chrome`, and background.js does
+ * `const api = Platform.api`. Both keep the VALUE, and neither ever re-reads the
+ * property. So journal.test.js's `withPlatform`, which swaps `Platform.api` for
+ * the duration of a body, cannot work here -- the worker would keep writing to
+ * the object it captured while the test inspected a different one.
+ *
+ * The often-cited reason -- "background.js registers its listeners once" -- is
+ * true but secondary: it explains why listeners must survive a reset, not why a
+ * swap fails. The capture is the real constraint.
+ *
+ * Hence: ONE fake per file, posed on globalThis.chrome before anything imports,
+ * with STABLE OBJECT IDENTITY for every node a captured binding can reach, and
+ * reset() clearing CONTENT rather than replacing containers.
+ *
+ * Verified in execution: posing the fake before the first import is enough, with
+ * ZERO production lines changed. Without it, importing background.js throws
+ * "Cannot read properties of undefined (reading 'runtime')".
+ */
+
+/** The switches. Mutable, because the fake object identity must never change. */
+export const dnrFaults = {
+  // updateDynamicRules is ATOMIC: on a rejection nothing changes and the
+  // previous rules stay alive.
+  rejectUpdate: false,
+  // The real RE2 behaviour the bare call hid: capturing and case-insensitivity
+  // both cost memory, so an expression can be supported as asked about and
+  // refused as installed.
+  refuseCapturing: false,
+  // MODELS THE FOREIGN SYSTEM. Every other option keeps readback == write, so
+  // "rules come from a foreign system" was modelled nowhere. A shipped v1.0.0
+  // rule, or any store written by an earlier version, is exactly a readback out
+  // of step with what we last wrote.
+  stripPriority: false,
+  // The 9bis path: reading back what is installed can fail on its own.
+  rejectGet: false,
+  /**
+   * REFUSE WHAT IS TOO BIG, WHICH IS THE ONLY FAULT THAT MODELS THE MEASURED ONE.
+   *
+   * `refuseCapturing` refuses EVERY capturing rule, so it cannot express the case
+   * measured on Chrome 152.0.7977.82 (2026-09-07): a custom domain of 29 or more
+   * characters has its CATCH-ALL redirect refused with memoryLimitExceeded, while
+   * its named redirects and every guard are accepted. One engine loses one
+   * feature; the rest of the programme installs.
+   *
+   * A LENGTH THRESHOLD IS A MODEL, AND SAYING SO IS THE POINT. RE2 charges PROGRAM
+   * size, not characters -- measured, a guard of 154 characters is accepted while
+   * that catch-all's 137 is refused. So this switch cannot reproduce the real
+   * ordering, and it is not asked to: what the tests need is a fault that hits ONE
+   * rule of a unit and leaves its neighbours, which is the shape of the failure,
+   * and the shape is what the reporting has to survive. The measured NUMBERS live
+   * in interception.test.js as a changelock, where nothing pretends to execute RE2.
+   *
+   * 0 disables it.
+   */
+  refuseLongerThan: 0,
+};
+
+/** Granted by default: the tests that care flip it. */
+export const permissionState = { granted: true, asked: [] };
+
+/** Opt-in translations. Empty by default, so existing fixtures keep the English
+ *  fallback; a test that wants to walk a translated path fills it. */
+export const i18nCatalogue = {};
+
+const local = new Map();
+/**
+ * THE SYNC AREA, and it did not exist.
+ *
+ * The fake modelled a browser WITHOUT storage.sync, so `Platform.storageAreaFor`
+ * fell back to local, `storageAreaName()` could never answer "sync", and NO TEST
+ * COULD REACH the sync path at all -- not migrateTo, not the area filter on
+ * onPolicyChanged, not the door that decides whether a saved acknowledgement is
+ * believable. Three controls whose whole subject is "which area is this?" were
+ * unreachable by construction, in the file that exists to make the worker's
+ * claims falsifiable.
+ */
+const synced = new Map();
+const badge = { text: undefined, calls: 0, reject: false };
+let installedRules = [];
+const asked = [];
+
+/**
+ * Listener buckets. They are NOT cleared by reset(): background.js registers
+ * once, at import, and those listeners ARE the subject under test.
+ */
+const buckets = {
+  onInstalled: [],
+  onStartup: [],
+  onAdded: [],
+  onRemoved: [],
+  onCommand: [],
+  onChanged: [],
+};
+
+const hub = (bucket) => ({
+  addListener: (fn) => bucket.push(fn),
+  removeListener: (fn) => {
+    const at = bucket.indexOf(fn);
+    if (at >= 0) bucket.splice(at, 1);
+  },
+});
+
+/**
+ * Firing AWAITS every listener.
+ *
+ * The production code registers async listeners and the platform does not await
+ * them; a test that did the same would assert on a half-run worker and pass or
+ * fail by timing. So the fake gives the test what the browser cannot: a point
+ * where the wake-up is over.
+ */
+/** THE LAST LISTENER'S ANSWER TRAVELS BACK. It was discarded, so a test could not
+ *  assert what a listener RETURNS -- and the command protocol's whole `return
+ *  false` contract was unobservable. */
+const fireAll = async (bucket, ...args) => {
+  let answer;
+  for (const fn of [...bucket]) answer = await fn(...args);
+  return answer;
+};
+
+export const fire = {
+  installed: (details) => fireAll(buckets.onInstalled, details),
+  startup: () => fireAll(buckets.onStartup),
+  permissionAdded: (permissions) => fireAll(buckets.onAdded, permissions),
+  permissionRemoved: (permissions) => fireAll(buckets.onRemoved, permissions),
+  command: (name) => fireAll(buckets.onCommand, name),
+  /** What a compromised sync, or a malicious editor, does: it writes DIRECTLY. */
+  storageChanged: (changes, areaName = "local") => fireAll(buckets.onChanged, changes, areaName),
+};
+
+/**
+ * A ONE-SHOT GATE on one entry, so a test can INTERLEAVE two sync() calls.
+ *
+ * "Single-writer" describes a SITE, not a serialisation: sync() is re-entrant,
+ * and the receipt's generation guard exists precisely for the case where a
+ * delayed run writes after a later one. Without a way to suspend a run mid-flight
+ * that guard can only be argued about, never measured -- and it is the guard whose
+ * naive symmetric form was shown to FABRICATE a fail-open.
+ *
+ * One-shot and keyed on the entry name: the FIRST matching access blocks, every
+ * later one goes straight through, so the second sync() is free to overtake.
+ */
+let gate = null;
+
+/** Suspends the first read of `name`. Returns the release. */
+export const holdRead = (name) => {
+  let release;
+  const promise = new Promise((r) => { release = r; });
+  gate = { name, on: "get", promise };
+  return () => {
+    gate = null;
+    release();
+    return promise;
+  };
+};
+
+/** Suspends the first write of `name`. Returns the release. */
+export const holdWrite = (name) => {
+  let release;
+  const promise = new Promise((r) => { release = r; });
+  gate = { name, on: "set", promise };
+  return () => {
+    gate = null;
+    release();
+    return promise;
+  };
+};
+
+const passGate = async (on, name) => {
+  if (gate && gate.on === on && gate.name === name) {
+    const waiting = gate.promise;
+    gate = null;
+    await waiting;
+  }
+};
+
+/**
+ * The three calls VersionedEntry actually makes, behind a Map.
+ *
+ * A FACTORY NOW, because there are two areas -- and both objects are built ONCE
+ * at module level, so the stable object identity the header of this file demands
+ * is unchanged. reset() clears the CONTENT of each map, never the containers.
+ *
+ * The injected fault flags stay per-area: `store.failWrites()` is about
+ * storage.local, which is where every entry this project protects actually
+ * lives, and a fault switch that silently governed both areas would make a test
+ * about one of them pass for the other's reason.
+ */
+const areaOver = (bucketMap, areaName) => ({
+  async get(name) {
+    await passGate("get", name);
+    if (bucketMap.get("__rejectGet") === true) throw new Error(`storage.${areaName}.get rejected`);
+    return bucketMap.has(name) ? { [name]: bucketMap.get(name) } : {};
+  },
+  async set(entry) {
+    for (const name of Object.keys(entry)) await passGate("set", name);
+    if (bucketMap.get("__rejectSet") === true) throw new Error("QUOTA_BYTES quota exceeded");
+    // TARGETED, because the browser's quota is not all-or-nothing: a large entry
+    // can be refused where a small one still fits. A fake that only fails
+    // wholesale cannot express "the projection was refused but the journal was
+    // written", which is the case worth testing -- the projection is the big one.
+    const only = bucketMap.get("__rejectSetFor");
+    if (only && Object.keys(entry).includes(only)) throw new Error("QUOTA_BYTES quota exceeded");
+    const changes = {};
+    for (const [k, v] of Object.entries(entry)) {
+      // THE BYTES DECIDE, as they do in the browser: storage.onChanged fires only
+      // when the stored value actually differs. Nothing fired at all here, so
+      // every test that cared about the notification had to RING THE BELL ITSELF
+      // -- simulating the one link worth proving.
+      const before = JSON.stringify(bucketMap.get(k));
+      bucketMap.set(k, v);
+      if (JSON.stringify(v) !== before) changes[k] = { newValue: v };
+    }
+    // THE AREA IT REALLY CAME FROM. Hard-coded "local" here would have made the
+    // area filter untestable in the one direction that matters.
+    if (Object.keys(changes).length > 0) await fireAll(buckets.onChanged, changes, areaName);
+  },
+  async remove(name) {
+    // A REMOVE CAN FAIL. It could not, so InstallOutcome.forget()'s try/catch --
+    // whose whole contract is "it never throws" -- was never entered, and the test
+    // that claimed to prove it passed because nothing could throw.
+    if (bucketMap.get("__rejectRemove")) throw new Error("remove rejected");
+    bucketMap.delete(name);
+  },
+});
+
+const area = areaOver(local, "local");
+const syncArea = areaOver(synced, "sync");
+
+const chrome = {
+  runtime: {
+    onInstalled: hub(buckets.onInstalled),
+    onStartup: hub(buckets.onStartup),
+    openOptionsPage() {
+      chrome._openedOptions += 1;
+    },
+  },
+  _openedOptions: 0,
+  storage: {
+    local: area,
+    sync: syncArea,
+    onChanged: hub(buckets.onChanged),
+  },
+  permissions: {
+    onAdded: hub(buckets.onAdded),
+    onRemoved: hub(buckets.onRemoved),
+    // Answering here rather than replacing Platform.grantedOrigins keeps the
+    // real façade in the path: the test exercises the code that ships.
+    //
+    // THE ARGUMENT IS RECORDED, and it was ignored. Both calls threw away
+    // `origins`, so nothing could ever detect that the extension asks for the
+    // WRONG origin, a TOO BROAD one, or the origin of an instance the user never
+    // configured -- the whole Access section was unverifiable by construction.
+    async contains({ origins } = {}) {
+      permissionState.asked.push({ call: "contains", origins: [...(origins ?? [])] });
+      return permissionState.granted;
+    },
+    async request({ origins } = {}) {
+      permissionState.asked.push({ call: "request", origins: [...(origins ?? [])] });
+      return permissionState.granted;
+    },
+  },
+  commands: {
+    onCommand: hub(buckets.onCommand),
+  },
+  action: {
+    async setBadgeText({ text }) {
+      badge.calls += 1;
+      if (badge.reject) throw new Error("no action in this context");
+      badge.text = text;
+    },
+  },
+  i18n: {
+    // NOT ALWAYS EMPTY. Returning "" made every t() fall back to its English
+    // literal, so no test ever walked a translated path and the French build was
+    // validated by nothing executable -- only by comparing key SETS. The catalogue
+    // is opt-in per test, and empty by default so existing fixtures are unchanged.
+    getMessage: (key) => i18nCatalogue[key] ?? "",
+  },
+  declarativeNetRequest: {
+    async isRegexSupported(options) {
+      asked.push(options);
+      if (dnrFaults.refuseCapturing && options.requireCapturing) return { isSupported: false };
+      if (dnrFaults.refuseLongerThan > 0 && options.regex.length > dnrFaults.refuseLongerThan) {
+        // The reason Chrome actually gives, so a test can assert on it rather than
+        // on a boolean.
+        return { isSupported: false, reason: "memoryLimitExceeded" };
+      }
+      return { isSupported: true };
+    },
+    async getDynamicRules() {
+      if (dnrFaults.rejectGet) throw new Error("getDynamicRules rejected");
+      if (!dnrFaults.stripPriority) return installedRules;
+      return installedRules.map(({ priority, ...rule }) => rule);
+    },
+    async updateDynamicRules({ removeRuleIds = [], addRules = [] } = {}) {
+      if (dnrFaults.rejectUpdate) throw new Error("MAX_NUMBER_OF_UNSAFE_DYNAMIC_RULES");
+      const removed = new Set(removeRuleIds);
+      installedRules = [...installedRules.filter((r) => !removed.has(r.id)), ...addRules];
+    },
+  },
+};
+
+/**
+ * Call BEFORE the first import of anything under src/.
+ *
+ * Returns nothing worth holding: everything the test needs is exported by name
+ * from this module, so no caller has to thread a handle through.
+ */
+export function installPlatform() {
+  globalThis.chrome = chrome;
+}
+
+/** Content only. Identities and listener buckets survive, by design. */
+export function reset() {
+  gate = null;
+  local.clear();
+  synced.clear();
+  installedRules = [];
+  asked.length = 0;
+  badge.text = undefined;
+  badge.calls = 0;
+  badge.reject = false;
+  chrome._openedOptions = 0;
+  dnrFaults.rejectUpdate = false;
+  dnrFaults.refuseCapturing = false;
+  dnrFaults.stripPriority = false;
+  dnrFaults.rejectGet = false;
+  dnrFaults.refuseLongerThan = 0;
+  permissionState.granted = true;
+  permissionState.asked.length = 0;
+  for (const key of Object.keys(i18nCatalogue)) delete i18nCatalogue[key];
+}
+
+export const store = {
+  /** What the platform believes is installed, priorities included. */
+  rules: () => installedRules,
+  /** The OTHER area, for the three controls whose subject is "which area?". */
+  sync: {
+    raw: synced,
+    entry: (name) => synced.get(name),
+    put: (name, value) => synced.set(name, value),
+  },
+  /** Puts storage.sync in charge, the way SectionStorage's chip does -- through
+   *  the entry the facade reads, never by reaching past it. */
+  inCharge: (areaName) => local.set("storageArea", areaName),
+  /** Raw entries, to forge one or to read one back. */
+  raw: local,
+  entry: (name) => local.get(name),
+  put: (name, value) => local.set(name, value),
+  regexQuestions: () => asked,
+  badge: () => badge.text,
+  badgeCalls: () => badge.calls,
+  failBadge: (yes = true) => {
+    badge.reject = yes;
+  },
+  /** storage.local itself dying, which is not the same as a quota refusal. */
+  failReads: (yes = true) => local.set("__rejectGet", yes),
+  failWrites: (yes = true) => local.set("__rejectSet", yes),
+  /** Refuse writes to ONE entry, leaving the rest of the store working. */
+  failWritesTo: (name) => local.set("__rejectSetFor", name),
+  failRemoves: (yes = true) => local.set("__rejectRemove", yes),
+  openedOptions: () => chrome._openedOptions,
+};

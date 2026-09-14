@@ -1,35 +1,99 @@
 /**
  * The lifecycle both surfaces share.
  *
- * This is not a loop over sections -- it owns six things that must exist exactly
- * once: the debounce and its queue, the flush on page hide, the change
- * subscription AND its teardown, the rule that a re-render must not tread on the
- * field being typed in, the single write path, and the banner shown when a
- * configuration cannot be read back. Duplicating a lifecycle guarantees one of
- * the two copies forgets to close the tap, and it is always the copy the tests
- * do not visit.
+ * This is not a loop over sections -- it owns seven things that must exist
+ * exactly once: the debounce and its queue, the flush on page hide, the change
+ * subscription AND its teardown, the rule that a re-render must not tread on WHAT
+ * THE USER IS MANIPULATING (the field being typed in, the row being dragged), the
+ * single write path, the refusal of a file dropped anywhere on the document, and
+ * the banner shown when a configuration cannot be read back. Duplicating a
+ * lifecycle guarantees one of the two copies forgets to close the tap, and it is
+ * always the copy the tests do not visit.
  */
 (function (global) {
   "use strict";
 
-  const { Platform, PolicyRepository, DestinationJournal, RuleInstaller } = global;
+  const { WriteQueue, HoldWatch, Platform, PolicyRepository, DestinationJournal, RuleInstaller, InstallOutcome, MutationResult, Dom, RefusalPresentation } = global;
 
   const DEBOUNCE_MS = 500;
 
   const SectionHost = {
-    async start({ root, sections }) {
-      const pending = new Map();
-      let stored = null;
+    async start({ root, sections: declared }) {
+      /**
+       * WRAPPED ONCE, HERE. Everything below talks to Section objects, never to the
+       * raw section: `root` and `dirty` used to be grafted onto them from this file
+       * and read back from it -- public mutable fields shared across two modules --
+       * and the two neutral lifecycle members had to be declared by all eight
+       * sections, six of them empty, word for word. See ui/section.js.
+       */
+      const sections = declared.map((section) => new global.Section(section));
+      /**
+       * THE QUEUE IS AN OBJECT NOW. It was a Map plus three inner functions inside
+       * a 442-line closure -- unbuildable twice, unreachable from outside,
+       * untestable. See ui/write-queue.js.
+       */
+      const writes = new WriteQueue((intention) => commit(intention), DEBOUNCE_MS);
+      const apply = (intention, coalesceKey) => writes.apply(intention, coalesceKey);
+      const cancel = (coalesceKey) => writes.cancel(coalesceKey);
+      const flush = () => writes.flush();
+      /**
+       * WHAT THE LAST READ PRODUCED -- ONE memory, not two.
+       *
+       * `PolicyRepository.load` answers a folder AND what it could not make sense
+       * of: document-scoped facts, one per field the admission door could not read
+       * (an arming state that was not a boolean, a ticked engine id that is not an
+       * identity, a selection longer than anything selectable). admission.js called
+       * their absent reader "named debt, not an oversight", and it stayed absent
+       * while the producers grew to three -- a signal about the integrity of the
+       * saved configuration, computed and then thrown away.
+       *
+       * THEY WERE TWO `let`s, and that was the defect worth naming. Both are
+       * written at the same two sites, on adjacent lines, and read together: two
+       * assignments that must stay in agreement are an invariant with no owner. Two
+       * clocks tell the time until one of them runs slow.
+       *
+       * One value, one assignment, and the invariant stops existing. It belongs to
+       * the READ rather than to the folder, which is why it lives here and not on
+       * StoredPolicy: a section asks the host what the last load could not read,
+       * exactly as it asks for the folder itself.
+       */
+      let read = { stored: null, unreadable: [] };
       let disposed = false;
 
       const ctx = {
-        stored: () => stored,
+        stored: () => read.stored,
         apply,
-        report: () => RuleInstaller.report(stored.policy(), [], stored.quarantinedCount()),
+        /**
+         * The ten-times-copied idiom, named once. It also removes the chance of
+         * forgetting next.events -- which used to be what fed the trust banner,
+         * and is now computed by PolicyDiff at the commit instead.
+         */
+        applyToPolicy: (mutate, coalesceKey) =>
+          apply((s) => {
+            const next = mutate(s.policy());
+            return next.ok ? MutationResult.ok(s.withPolicy(next.value)) : next;
+          }, coalesceKey),
+        cancel,
+        report: () => report(),
         journal: DestinationJournal,
         // For the rare write that lands OUTSIDE the policy — a journal entry, an
         // acknowledgement of it — since only a policy write triggers a redraw.
         refresh: () => render(),
+        /**
+         * "Stop painting." A section asks this ONE LINE AFTER EVERY await THAT
+         * REPAINTS, because a render suspended mid-flight resumes and finishes its
+         * gesture over what blank() has just painted.
+         *
+         * It keeps this host ignorant of content: it does not say WHAT to paint, it
+         * says DO NOT PAINT ANY MORE. The rendering/again latch protects render
+         * against render; it protects nothing against blank(), which is called from
+         * reload(), OUTSIDE the latch.
+         */
+        condemned: () => condemned,
+        /** Document-scoped facts from the last read. Always an array, never
+         *  absent: a field that shows up only sometimes is the meaningful absence
+         *  mutation-result.js bans. */
+        unreadable: () => read.unreadable,
       };
 
       /**
@@ -39,59 +103,139 @@
        * toggle would come back armed.
        */
       async function commit(intention) {
+        // CLAIMED BEFORE THE COMMIT. The policy write is what wakes the worker, so
+        // claiming afterwards left a race the journal itself called "the likelier
+        // order": the window reconciled first and reported the user's own edit
+        // under the code reserved for compromise. Claiming the content we are
+        // about to write means the window can never see a state whose claim is not
+        // already on tape.
+        // `stored`, NOT `stored()`. In this scope it is the captured VALUE -- the
+        // function is ctx.stored, which sections call. Written the other way it
+        // threw "stored is not a function" on the first commit, which is to say on
+        // the first gesture the user made: an error no unit test reached, because
+        // no test ever ran SectionHost.start itself.
+        const proposed = intention(read.stored);
+        if (proposed.ok) await DestinationJournal.claimAhead(proposed.value.policy().fingerprint());
         const result = await PolicyRepository.apply(intention);
-        if (result.ok && result.events && result.events.length > 0) {
+        // `result.events` without a presence test: every result carries it. The
+        // two `?? []` / `&& …` that used to sit here and in versioned-entry.js were
+        // the exact tests mutation-result.js forbids -- present because the
+        // invariant was false, not because the rule was wrong.
+        if (result.ok && result.events.length > 0) {
           // Written AFTER the commit and never inside the mutator: the retry would
           // otherwise log the same change up to three times.
-          await DestinationJournal.record(result.events, result.rev, "MANUAL", Date.now());
+          // THE COMMITTED STATE, not the speculative one. claimAhead spoke first
+          // on our stale snapshot, which is its job; this claims what the
+          // compare-and-set actually wrote, so a replay on a fresher base leaves
+          // both on the ring.
+          await DestinationJournal.recordClaimed(
+            result.events,
+            result.committed.policy().fingerprint(),
+            Date.now()
+          );
         }
         if (!result.ok) {
           // A refused mutation changed nothing, so there is nothing to redraw —
           // and redrawing would throw away the correction the user is in the
           // middle of typing, which is the one thing they must not lose after
           // being told their input was refused.
-          showFailure(result);
+          //
+          // ORDER_STALE is the exception: the section is holding an optimistic
+          // order the storage does not have, and showFailure alone would leave
+          // that wrong order on screen indefinitely.
+          // ORDER_STALE: the reload comes FIRST. Announcing then reloading erased
+          // the message in the SAME turn, deterministically -- the user's order
+          // write thrown away without being told. And the doorbell this batch adds
+          // DOUBLES how often those reloads happen.
+          if (result.code === "ORDER_STALE") await reload();
+          showFailure(result, "mutation");
           return result;
         }
         await reload();
         return result;
       }
 
-      function apply(intention, coalesceKey) {
-        if (!coalesceKey) return commit(intention);
-        const existing = pending.get(coalesceKey);
-        if (existing) clearTimeout(existing.timer);
-        // Coalescing by field: a keystroke replaces the previous keystroke in the
-        // SAME field, and never the toggle next to it.
-        pending.set(coalesceKey, {
-          intention,
-          timer: setTimeout(() => {
-            pending.delete(coalesceKey);
-            commit(intention);
-          }, DEBOUNCE_MS),
-        });
-        return Promise.resolve({ ok: true, events: [] });
-      }
+      /**
+       * WHO IS HOLDING THE SCREEN. Five inner functions, a captured variable and
+       * six listeners used to sit here, tangled among the render loop -- so the
+       * rule "never repaint under someone's fingers" could not be read in one
+       * place. See ui/hold-watch.js.
+       */
+      const holds = new HoldWatch(sections, () => {
+        if (sections.some((s) => s.isDirty())) render();
+      });
+      const isHeldByUser = (section) => holds.holding(section);
 
-      function flush() {
-        const queued = [...pending.values()];
-        pending.clear();
-        for (const entry of queued) {
-          clearTimeout(entry.timer);
-          // The same verified path: on a conflict this keystroke is lost rather
-          // than overwriting what the other surface just saved.
-          commit(entry.intention);
+      let lastReport = null;
+      async function report() {
+        if (!lastReport) {
+          // NAMED, so a missing field is visible here rather than silently
+          // defaulted. Called positionally with three arguments, `reality` fell
+          // back to {} and report() re-fabricated `installed: true` -- the page
+          // owned two labels it could STRUCTURALLY never display.
+          //
+          // THE CAUSES COME IN `reality`, and there is no second door. This call
+          // used to pass `skipped: []` beside it, which report() then returned --
+          // so the page rendered zero causes while the receipt held six. The
+          // parameter is gone; the receipt is the only source on this surface.
+          lastReport = await RuleInstaller.report({
+            policy: read.stored.policy(),
+            quarantinedCount: read.stored.quarantinedCount(),
+            reality: await InstallOutcome.read(),
+            source: "PAGE",
+          });
         }
+        return lastReport;
       }
 
+      /**
+       * The flag is CLEARED AT THE HEAD, before load().
+       *
+       * Set once and never reset, it would be DEFINITIVE -- and this file promises
+       * that a repaired wake-up renders for good. Repaired policy => reload() =>
+       * load() ok => render() => the first await falls back on `condemned` =>
+       * return: THE PAGE WOULD NEVER HEAL. The direction stayed safe (a persistent
+       * alarming over-signal, never the green), but the promise was false.
+       */
       async function reload() {
-        const loaded = await PolicyRepository.load();
+        condemned = false;
+        // GUARDED FOR THE SAME REASON AS THE FIRST READ, and this one is reached
+        // from three floating callers -- onPolicyChanged, the InstallOutcome
+        // doorbell and commit() -- so a throw here has nowhere at all to surface.
+        let loaded;
+        try {
+          loaded = await PolicyRepository.load();
+        } catch (error) {
+          loaded = { ok: false, code: "POLICY_UNREADABLE", message: String(error && error.message) };
+        }
         if (!loaded.ok) {
-          showFailure(loaded);
+          showFailure(loaded, "load");
+          condemn();
           return;
         }
-        stored = loaded.stored;
-        render();
+        read = { stored: loaded.stored, unreadable: loaded.unreadable ?? [] };
+        lastReport = null;
+        // A SUCCESSFUL reload hides the banner -- but ONLY the one whose cause is a
+        // READ. Nothing ever set banner.hidden back to true, so a stale failure
+        // banner survived above freshly repainted green sections, for the life of
+        // the page.
+        hideFailure("load");
+        await render();
+      }
+
+      /**
+       * CONDEMNS the page: every section paints an alarming state, and none of them
+       * paints again.
+       *
+       * The `.tag` node belongs to Status, and this host claims in its own header to
+       * know nothing about what a section contains -- so this is a member of the
+       * SECTION PROTOCOL, declared by all eight, not a document.querySelector(".tag")
+       * from here, which would break that claim AND erase an arbitrary tag.
+       */
+      let condemned = false;
+      function condemn() {
+        condemned = true;
+        for (const section of sections) section.blank();
       }
 
       /**
@@ -115,15 +259,30 @@
           return;
         }
         rendering = true;
-        do {
+        try {
+          do {
+            again = false;
+            await renderOnce();
+          } while (again);
+        } finally {
+          // `again` INSIDE the finally: a throw escaping the loop would otherwise
+          // leave it true forever, and the next render would loop once for nothing.
           again = false;
-          await renderOnce();
-        } while (again);
-        rendering = false;
+          rendering = false;
+        }
       }
 
       async function renderOnce() {
         for (const section of sections) {
+          // A SECTION THAT THROWS MUST NOT ABANDON THE ONES THAT FOLLOW. Status is
+          // the FIRST of eight, so a throw there left the seven others unpainted --
+          // and since the latch hands control back without redrawing anything more,
+          // EVERY pass would die at the same place.
+          //
+          // It covers reconcile AND render: the natural implementation wraps only
+          // the await, and a throw inside reconcile would then abandon the rest,
+          // which is what this nail exists to prevent.
+          try {
           // Never re-render the subtree holding the field being TYPED IN: doing so
           // replaces the value and sends the caret back to the start. Replayed on
           // blur instead.
@@ -133,65 +292,214 @@
           // control keeps showing the old state until the user happens to click
           // elsewhere — which reads as "the button does nothing". A button has no
           // typed-in value to protect.
-          if (section.root && isEditing(section.root)) {
-            section.dirty = true;
+          // The write state reconciles even when the read view is frozen. This is
+          // the CQRS line of this file: a section's pending command leaves by a
+          // timer, not by the render, so a deferred render must not be able to
+          // strand it. reconcile never redraws; it may speak.
+          section.reconcile(read.stored, ctx);
+          if (isHeldByUser(section)) {
+            section.hold();
             continue;
           }
-          section.dirty = false;
-          await section.render(stored, ctx);
+          await section.render(read.stored, ctx);
+          } catch (error) {
+            // The section paints its own alarming state (see Status.render). Here we
+            // only make sure the loop continues and the section is not left dirty,
+            // which would make the next pass replay the same throw.
+            section.fail(error);
+          }
         }
       }
 
-      function isEditing(root) {
-        const active = document.activeElement;
-        if (!active || !root.contains(active)) return false;
-        const tag = active.tagName;
-        return tag === "INPUT" || tag === "TEXTAREA" || active.isContentEditable;
-      }
+      /**
+       * The banner carries a CAUSE, and only its own cause closes it.
+       *
+       * showFailure is called from two NATURES of place: a failed READ and a refused
+       * MUTATION. Hiding it indiscriminately on a successful reload would erase
+       * "The order changed elsewhere. Try again." in the same turn, every time.
+       *
+       * Not to be confused with Status.banner, the JOURNAL's banner, which already
+       * re-hides itself: there are THREE banners on this page.
+       */
+      let bannerCause = null;
 
-      function showFailure(result) {
+      function showFailure(result, cause) {
         const banner = document.getElementById("host-banner");
         if (!banner) return;
+        bannerCause = cause;
         banner.hidden = false;
-        banner.textContent = result.message || String(result.code || "");
+        // THROUGH THE PRESENTATION. It printed the domain's own sentence, which is
+        // hard-coded English -- so the French build showed English on every
+        // refusal, at the one moment the user is being told something went wrong.
+        banner.textContent = RefusalPresentation.sentence(result);
       }
 
-      const loaded = await PolicyRepository.load();
-      if (!loaded.ok) {
-        showFailure(loaded);
-        return { stop() {} };
+      function hideFailure(cause) {
+        const banner = document.getElementById("host-banner");
+        if (!banner || bannerCause !== cause) return;
+        banner.hidden = true;
+        bannerCause = null;
       }
-      stored = loaded.stored;
 
+      /**
+       * THE MOUNT LOOP COMES BEFORE THE FAIL-CLOSED TEST, and the gesture is FREE:
+       * measured, the EIGHT mount(root, ctx) never take `stored`, so mounting does
+       * not depend on the policy.
+       *
+       * Subscribing was NOT enough. The fail-closed exit used to sit BEFORE this
+       * loop, so a repaired-policy wake-up found a page where section.root,
+       * this.node and this.banner were all undefined, and BOTH branches THREW:
+       * Dom.clear(undefined) on the repaired path, blank() on an unmounted section
+       * on the still-broken one. A guard rail whose message lies -- promising a
+       * wake-up and delivering a TypeError.
+       *
+       * It also makes "mount() only" a CONSEQUENCE of the reordering rather than an
+       * isolated instruction: the first paint goes through render(), where the
+       * serialisation lives.
+       */
       for (const section of sections) {
         const node = document.createElement("div");
         node.className = "section";
         root.appendChild(node);
-        section.root = node;
         section.mount(node, ctx);
-        section.render(stored, ctx);
       }
 
+      /**
+       * AND THE TWO SUBSCRIPTIONS RISE WITH IT. They lived AFTER the fail-closed
+       * return, so a page opened WHILE the policy was unreadable had NO LISTENER AT
+       * ALL: dead for good, never waking when the user repaired it from the popup.
+       */
       const onChanged = () => reload();
-      PolicyRepository.onPolicyChanged(onChanged);
+      // THE UNSUBSCRIPTIONS ARE HELD, because stop() promises a teardown. They
+      // were dropped on the floor: a host that had declared itself disposed went
+      // on being woken by both, calling reload() and render() on a page nobody
+      // was looking at. See PolicyRepository.onPolicyChanged.
+      const stopWatching = [PolicyRepository.onPolicyChanged(onChanged)];
+      /**
+       * The doorbell. Without it, reload() is only triggered by onPolicyChanged and
+       * by commit() -- that is, by a gesture of the user ON THIS PAGE, never by a
+       * fact coming from the worker. So permissions.onAdded (the very screen where
+       * the permission is granted) and the race where the page reads before the
+       * worker has installed would refresh nothing.
+       *
+       * Subscribed ONCE, here, and its listener CALLS reload(): placed inside
+       * reload() it would stack one listener per reload. It fires at every worker
+       * wake-up, which hands a local attacker a second render trigger -- and the
+       * only rampart is the rendering/again coalescing, which is what makes that
+       * try/finally LOAD-BEARING rather than cosmetic.
+       */
+      stopWatching.push(InstallOutcome.onRecorded(() => reload()));
 
-      const onBlur = () => {
-        if (sections.some((s) => s.dirty)) render();
-      };
-      root.addEventListener("focusout", onBlur);
+      /**
+       * Three states that cannot overlap: FREE, HELD BY THE POINTER (a few
+       * milliseconds, from pointerdown to pointerup), HELD BY A DRAG (from
+       * dragstart to dragend).
+       *
+       * pointerdown ACQUIRES rather than releases, and that ordering is the whole
+       * fix: it lands before the focus change that mousedown causes, so the
+       * focusout below finds the latch already set and leaves the node under the
+       * pointer alone.
+       *
+       * And during an HTML5 drag no pointerup is delivered at all -- the browser
+       * emits pointercancel -- so the second state cannot release from under the
+       * third, and dragend is its only releaser.
+       *
+       * Reassigning beats accumulating: a pointerup released outside the window,
+       * or a press on another section, leaves or moves the latch, and the next
+       * press heals it. Strictly shorter than the isEditing freeze already in
+       * production, which lasts as long as a caret sleeps in a field.
+       */
+      // focusin covers the keyboard user, who emits no pointer event and would
+      // otherwise have no floor at all if a dragend went missing. It also fires
+      // when a field is clicked, in which case renderOnce simply skips that
+      // section again through isEditing and leaves it dirty -- harmless.
+      // Replaces the former onBlur, and must respect the latch: a debounced write
+      // very often leaves the section dirty, so an unconditional replay here is
+      // what used to destroy the row under the pointer.
+
+
+      // The one refusal of a navigating drop, per surface. Not in the HTML: an
+      // inline script there is killed by script-src 'self', in silence, so the
+      // guard would exist in the repository and not in the browser.
+      const stopRefusingFileDrops = Dom.refuseFileDrops(document);
 
       const onHide = () => {
         if (document.visibilityState === "hidden") flush();
       };
       document.addEventListener("visibilitychange", onHide);
       window.addEventListener("pagehide", flush);
+      // ARMED BEFORE THE FIRST PAINT, and for the reason below: mount() attaches
+      // its handlers already, so a pointerdown during the first load must find the
+      // latch listening, or the drag hold is never set.
+      holds.watch(root);
+
+      /**
+       * THE READ AND THE FIRST PAINT COME LAST, after the host's listeners.
+       *
+       * mount() attaches its onClick handlers before any paint, so a click during
+       * this await would launch a CONCURRENT pass -- and pointerdown/dragstart must
+       * be armed before it too, or the window in which heldSection is structurally
+       * null grows from zero to the length of a full render, and a dragstart inside
+       * it would not arm the drag latch.
+       *
+       * AND THE READ IS GUARDED, which it was not.
+       *
+       * Every failure on this path is meant to be a VALUE -- load() returns
+       * { ok: false, code } -- so the else branch below is the whole recovery: a
+       * banner, and eight sections painted in an alarming state. A THROW skipped
+       * both: SectionHost.start's promise rejected, the sections stayed mounted
+       * from the loop above and were never painted once, `condemned` stayed false,
+       * and nothing was written to the banner. A blank, mute page whose two
+       * subscriptions were live but whose first paint never happened -- and the
+       * only way back was for the user to guess.
+       *
+       * Measured, on this project's own code: a temporal dead zone in
+       * admission.js's readDocument turned one unreadable engine id into a
+       * ReferenceError out of JumpPolicy.restore. That particular jet is fixed at
+       * its source; this catch is what makes the NEXT one land on the recovery
+       * that was already written.
+       *
+       * A throw is treated as the ignorance it is -- INSTALL_STATE_UNKNOWN's
+       * direction, never the reassuring branch -- and it carries a code so
+       * RefusalPresentation has something to say instead of an empty banner.
+       */
+      let loaded;
+      try {
+        loaded = await PolicyRepository.load();
+      } catch (error) {
+        loaded = { ok: false, code: "POLICY_UNREADABLE", message: String(error && error.message) };
+      }
+      if (loaded.ok) {
+        read = { stored: loaded.stored, unreadable: loaded.unreadable ?? [] };
+        await render();
+      } else {
+        showFailure(loaded, "load");
+        condemn();
+      }
 
       return {
-        stop() {
+        /**
+         * ASYNC, and it returns the flush.
+         *
+         * It called flush() and threw the work away, which was the same silent
+         * loss as the debounce's fabricated ok: a caller that tears the host down
+         * had no way to wait for the last keystroke to land. `pagehide` still
+         * cannot wait -- that is the browser's rule, not ours -- but this caller
+         * can, and now may.
+         */
+        async stop() {
           if (disposed) return;
           disposed = true;
-          flush();
-          root.removeEventListener("focusout", onBlur);
+          const flushed = flush();
+          holds.stop();
+          await flushed;
+          stopRefusingFileDrops();
+          // The two storage subscriptions come back too. Guarded, because a
+          // platform that hands back nothing is a platform where this teardown is
+          // simply not available -- and stop() may not fail over a listener.
+          for (const unwatch of stopWatching) {
+            if (typeof unwatch === "function") unwatch();
+          }
           document.removeEventListener("visibilitychange", onHide);
           window.removeEventListener("pagehide", flush);
         },

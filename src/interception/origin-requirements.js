@@ -21,7 +21,7 @@
         if (engine) for (const origin of engine.permissionOrigins) origins.add(origin);
       }
       for (const shortcut of policy.shortcuts()) {
-        origins.add(shortcut.instance().permissionOrigin());
+        origins.add(shortcut.permissionOrigin());
       }
       return [...origins];
     },

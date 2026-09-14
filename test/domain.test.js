@@ -1,9 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { loadCore } from "./load-core.js";
+import * as IDENTITIES from "./fixtures/identities.js";
+import { installedAndCovered, without } from "./fixtures/facts.js";
 
 const g = await loadCore();
-const ID = "11111111-1111-4111-8111-111111111111";
+// The identifiers live in one file now: the same UUID was spelled in five,
+// and the catch-all builder in three, with bodies that had already drifted.
+const { ID } = IDENTITIES;
 const key = (k) => g.ProjectKey.parse(k).value;
 const instance = (u) => g.JiraInstance.parse(u).value;
 
@@ -44,16 +48,16 @@ test("arming and disarming are absolute, so replaying them is safe", () => {
   // both surfaces would RE-ARM it after the conflict replay.
   let policy = armedPolicy();
   for (let i = 0; i < 3; i += 1) policy = policy.disarmShortcut(ID).value;
-  assert.equal(policy.registry().find(ID).armed(), false);
+  assert.equal(policy.shortcutFor(ID).armed(), false);
   for (let i = 0; i < 3; i += 1) policy = policy.armShortcut(ID).value;
-  assert.equal(policy.registry().find(ID).armed(), true);
+  assert.equal(policy.shortcutFor(ID).armed(), true);
 });
 
 test("a consent is given to a destination: changing it forgets the acknowledgements", () => {
   const policy = armedPolicy();
   const moved = policy.withBaseUrlFor(ID, instance("http://jira:8080")).value;
   assert.deepEqual(
-    moved.registry().find(ID).unacknowledgedWarnings().map((w) => w.kind),
+    moved.shortcutFor(ID).unacknowledgedWarnings().map((w) => w.kind),
     ["INSECURE_SCHEME", "INTERNAL_HOST"]
   );
 });
@@ -61,7 +65,7 @@ test("a consent is given to a destination: changing it forgets the acknowledgeme
 test("a shortcut with pending warnings leaves activeBindings even while armed", () => {
   // arm() guards the front door; withBaseUrlFor changes the state from inside.
   const policy = armedPolicy().withBaseUrlFor(ID, instance("http://jira:8080")).value;
-  assert.equal(policy.registry().find(ID).armed(), true);
+  assert.equal(policy.shortcutFor(ID).armed(), true);
   assert.equal(policy.activeBindings().length, 0);
   assert.equal(policy.armShortcut(ID).code, "UNACKNOWLEDGED_WARNING");
 });
@@ -77,18 +81,22 @@ test("an unknown warning kind is refused rather than silently ignored", () => {
   assert.equal(armedPolicy().acknowledge(ID, "NOPE").code, "UNKNOWN_WARNING_KIND");
 });
 
-test("changing a destination emits one event, and re-setting the same value emits none", () => {
+test("a mutator emits nothing: the diff between two states is the single producer", () => {
+  // Two producers put the same change twice into a journal capped at twenty
+  // entries, so withBaseUrlFor stopped building the fact itself.
   const policy = armedPolicy();
   const moved = policy.withBaseUrlFor(ID, instance("https://other.example.org"));
-  assert.equal(moved.events.length, 1);
-  assert.deepEqual(moved.events[0], {
+  assert.deepEqual(moved.events, [], "a mutator no longer emits");
+
+  assert.deepEqual(g.PolicyDiff.between(policy, moved.value), [{
+    type: "DestinationChanged",
     shortcutId: ID,
     key: "ABC",
     oldBaseUrl: "https://example.atlassian.net",
     newBaseUrl: "https://other.example.org",
-  });
-  // A replay must not fabricate an event where old === new.
-  assert.deepEqual(moved.value.withBaseUrlFor(ID, instance("https://other.example.org")).events, []);
+  }]);
+  // A replay must not fabricate a fact where old === new.
+  assert.deepEqual(g.PolicyDiff.between(moved.value, moved.value), []);
 });
 
 test("the global kill switch is not the per-shortcut one", () => {
@@ -98,7 +106,10 @@ test("the global kill switch is not the per-shortcut one", () => {
 });
 
 test("diagnose says why nothing works, in a fixed order of priority", () => {
-  const granted = { originsGranted: true };
+  // THE TWO FACTS OF INSTALLED REALITY ARE DECLARED, never defaulted: diagnose() no
+  // longer supplies them, because an absent fact is not a true one. This literal
+  // serves FIVE assertions -- correcting it here repairs five sites.
+  const granted = installedAndCovered();
   assert.equal(g.JumpPolicy.empty().disarm().diagnose(granted), "DISARMED");
   assert.equal(g.JumpPolicy.empty().diagnose(granted), "NO_SHORTCUTS");
   let policy = g.JumpPolicy.empty().register(ID, key("ABC"), instance("https://example.atlassian.net")).value;
@@ -106,9 +117,125 @@ test("diagnose says why nothing works, in a fixed order of priority", () => {
   policy = policy.withEngines(["google.com"]).value;
   assert.equal(policy.diagnose(granted), "ALL_SHORTCUTS_DISARMED");
   policy = policy.armShortcut(ID).value;
-  assert.equal(policy.diagnose({ originsGranted: true, quarantinedCount: 2 }), "PARTIAL_POLICY");
-  assert.equal(policy.diagnose({ originsGranted: false }), "MISSING_ORIGINS");
+  // The rank-11 PARTIAL_POLICY, on a POPULATED policy. The other entry, conditioned on
+  // an empty registry, is the one admission.test.js interrogates -- two ranks, one code.
+  assert.equal(policy.diagnose(installedAndCovered({ quarantinedCount: 2 })), "PARTIAL_POLICY");
+  // The two reality facts, but originsGranted stays FALSE -- supplying it true here
+  // would test something else entirely.
+  assert.equal(policy.diagnose({ originsGranted: false, installed: true, coverageSatisfied: true }), "MISSING_ORIGINS");
   assert.equal(policy.diagnose(granted), "READY");
+});
+
+test("an ABSENT fact of installed reality is neither true nor a failure", () => {
+  // TWO LINKS IN SERIES, so TWO PAIRS of witnesses -- and each pair must pin the
+  // PARTITION, not just the alarm. `!== true` folded "it failed" and "I do not
+  // know" into one sentence: it named the wrong cause on a healthy profile whose
+  // receipt was merely absent. `=== false` ALONE would be the fail-open. So each
+  // fact now has two ranks, and a witness for each.
+  //
+  // THE FIXTURE MATTERS: these witnesses need a policy that CLEARS ranks 3 to 9.
+  // ordered() answers ALL_SHORTCUTS_DISARMED and ordered().disarm() answers
+  // DISARMED; this one is armed, acknowledged and engined, so it reaches READY when
+  // told the truth.
+  let p = g.JumpPolicy.empty().withEngines(["google.com"]).value;
+  p = p.register(ID, key("ABC"), instance("https://example.atlassian.net")).value;
+  p = p.armShortcut(ID).value;
+  assert.equal(p.diagnose({ originsGranted: true, quarantinedCount: 0, installed: true,
+                            coverageSatisfied: true }), "READY", "the fixture must reach READY");
+
+  // Link 1, both sides. "Bare facts" names two different things: one answers
+  // MISSING_ORIGINS today, the other answered READY.
+  assert.equal(p.diagnose({}), "INSTALL_STATE_UNKNOWN", "absent is IGNORANCE, not failure");
+  assert.equal(p.diagnose(without(installedAndCovered(), "installed", "coverageSatisfied")), "INSTALL_STATE_UNKNOWN");
+  assert.equal(p.diagnose({ originsGranted: true, installed: false }), "INSTALL_FAILED",
+               "and a LEARNED no still outranks everything");
+  // typeof, not === undefined: null, "false" and 0 would fall through to READY, and
+  // diagnose() is PUBLIC.
+  for (const forged of [null, "false", 0]) {
+    assert.equal(p.diagnose({ originsGranted: true, installed: forged }), "INSTALL_STATE_UNKNOWN",
+                 `a non-boolean is ignorance too: ${JSON.stringify(forged)}`);
+  }
+
+  // Link 2 needs a policy that WANTS a catch-all, and wanting it takes BOTH gestures:
+  // a freshly registered catch-all carries unacknowledgedWarnings ["CATCH_ALL"], which
+  // takes it out of activeBindings() -- and the waiting state is the one every
+  // catch-all passes through.
+  let star = g.JumpPolicy.empty().withEngines(["google.com"]).value;
+  star = star.registerCatchAll(STAR, instance("https://c.atlassian.net")).value;
+  star = star.acknowledge(STAR, "CATCH_ALL").value;
+  star = star.armShortcut(STAR).value;
+  assert.equal(star.wantsCatchAll(), true, "armed AND acknowledged, or the guard is mute");
+
+  assert.equal(star.diagnose({ originsGranted: true, quarantinedCount: 0, installed: true }),
+               "COVERAGE_STATE_UNKNOWN");
+  assert.equal(star.diagnose({ originsGranted: true, quarantinedCount: 0, installed: true,
+                               coverageSatisfied: false }), "CATCH_ALL_NOT_INSTALLED");
+
+  // AND THE SILENCE THE GUARD BUYS, which is the assertion that pins the DECISION
+  // rather than the accident: the named-only fixture never wanted a catch-all, so an
+  // absent coverage fact says NOTHING. Correct in substance -- rule-factory excludes
+  // the same binding, the contract comes out empty(), satisfiedBy is true by vacuity.
+  assert.equal(p.diagnose({ originsGranted: true, quarantinedCount: 0, installed: true }),
+               "READY", "no catch-all wanted means no coverage question to answer");
+
+  // THE THIRD LINK IS DELIBERATELY NOT HARDENED: `f.quarantinedCount > 0` is mute on
+  // undefined too. PARTIAL_POLICY is under-signalling at a BOUNDED cost -- the user
+  // sees an incomplete configuration without knowing it is -- whereas a masked
+  // INSTALL_FAILED lets them believe a jump departs when it does not. Written here so
+  // the next batch does not read it as a regression of this one.
+  assert.equal(p.diagnose({ originsGranted: true, installed: true, coverageSatisfied: true }),
+               "READY", "quarantinedCount stays undefined-tolerant, on purpose");
+});
+
+test("both UNKNOWN ranks are pinned, or the guards become ornaments", () => {
+  // Without these two, the fixtures that reach READY would pass with either entry
+  // placed ANYWHERE above READY -- and the natural gesture of whoever finds them too
+  // talkative is to slide them down, which empties both guards of their object
+  // WITHOUT MAKING ANYTHING RED.
+
+  // Rank 2: ABOVE DISARMED. Measured: armed()=false | activeBindings=0 | registry=1.
+  // Falling to DISARMED means saying "no jump will fire" without knowing whether the
+  // purge happened -- which is the kill switch's question.
+  let p = g.JumpPolicy.empty().withEngines(["google.com"]).value;
+  p = p.register(ID, key("ABC"), instance("https://example.atlassian.net")).value;
+  p = p.armShortcut(ID).value;
+  assert.equal(p.disarm().diagnose({ originsGranted: true, rulesInstalled: true }),
+               "INSTALL_STATE_UNKNOWN", "never DISARMED");
+
+  // The registry is INTENTION and quarantinedCount a FAILED READ: three ways of
+  // installing the void, all three covered. `registry > 0` alone was measured
+  // SUB-signalling: registry=0, quarantinedCount=2 gave PARTIAL_POLICY.
+  assert.equal(g.JumpPolicy.empty().diagnose({ originsGranted: true, quarantinedCount: 2 }),
+               "INSTALL_STATE_UNKNOWN", "never PARTIAL_POLICY");
+  assert.equal(g.JumpPolicy.empty().diagnose({ originsGranted: true, rulesInstalled: true }),
+               "INSTALL_STATE_UNKNOWN", "reality outranks an empty intention");
+
+  // AND THE SYMMETRIC ONE, which pins the DECISION: a blank profile stays SILENT.
+  // 0/0/0 with the fact absent must not shout on a browser that has never been
+  // configured.
+  assert.equal(g.JumpPolicy.empty().diagnose(without(installedAndCovered(), "installed", "coverageSatisfied")),
+               "NO_SHORTCUTS", "an untouched profile has nothing to lose");
+
+  // Rank 10: ABOVE MISSING_ORIGINS. Slid below it, the wantsCatchAll() guard becomes
+  // an ornament and this code masks nothing it was meant to yield to.
+  let star = g.JumpPolicy.empty().withEngines(["google.com"]).value;
+  star = star.registerCatchAll(STAR, instance("https://c.atlassian.net")).value;
+  star = star.acknowledge(STAR, "CATCH_ALL").value;
+  star = star.armShortcut(STAR).value;
+  assert.equal(star.diagnose({ originsGranted: false, quarantinedCount: 0, installed: true }),
+               "COVERAGE_STATE_UNKNOWN", "never MISSING_ORIGINS");
+
+  // The catalogue's size, pinned so a rank cannot be added or dropped unnoticed.
+  // NOTHING_TO_INSTALL joined it when ALL_SHORTCUTS_SHADOWED stopped doubling as
+  // the "otherwise" clause: a name that asserts a precise cause must be able to
+  // prove it, so the honest fallback got its own rank underneath.
+  // TWO LISTS, because they answer two questions. RANKS is the arbitration --
+  // fifteen rungs, PARTIAL_POLICY on two of them. CODES is the published
+  // vocabulary, and a vocabulary does not repeat itself: every reader used to have
+  // to dedupe it, or count wrong.
+  assert.equal(g.Diagnosis.RANKS.length, 15, "fifteen ranks");
+  assert.equal(g.JumpPolicy.DIAGNOSES.length, 14, "fourteen codes");
+  assert.equal(new Set(g.JumpPolicy.DIAGNOSES).size, 14, "each said once");
 });
 
 test("every mutation returns the same shape, with events always present", () => {
@@ -125,4 +252,1202 @@ test("every mutation returns the same shape, with events always present", () => 
   ]) {
     assert.ok(Array.isArray(result.events), "events must always be present, never sometimes");
   }
+});
+
+// ------------------------------------------- evaluation order and the catch-all
+
+const ORDER_A = "aaaaaaaa-1111-4111-8111-111111111111";
+const ORDER_B = "bbbbbbbb-2222-4222-8222-222222222222";
+const STAR = "cccccccc-3333-4333-8333-333333333333";
+
+const ordered = () => {
+  let p = g.JumpPolicy.empty().withEngines(["google.com"]).value;
+  p = p.register(ORDER_A, g.ProjectKey.parse("ECR").value, instance("https://a.atlassian.net")).value;
+  p = p.register(STAR, g.CatchAllKey.only(), instance("https://c.atlassian.net")).value;
+  p = p.register(ORDER_B, g.ProjectKey.parse("JUL").value, instance("https://b.atlassian.net")).value;
+  return p;
+};
+
+test("register appends, so the admission door never rewrites the persisted order", () => {
+  // A customs officer stamps or refuses; he does not rearrange the suitcases.
+  // restore replays register entry by entry, so a register that placed rows would
+  // silently change an effective destination on every read.
+  assert.deepEqual(ordered().orderedIds(), [ORDER_A, STAR, ORDER_B]);
+});
+
+test("the order round-trips through toJSON and restore, catch-all in first position included", () => {
+  const moved = ordered().withOrder([STAR, ORDER_A, ORDER_B]).value;
+  const restored = g.JumpPolicy.restore(moved.toJSON());
+  assert.equal(restored.ok, true);
+  assert.deepEqual(restored.policy.orderedIds(), [STAR, ORDER_A, ORDER_B]);
+});
+
+test("editing a destination does not move the row", () => {
+  // Map.set on an existing key preserves the position, which is what makes the
+  // round trip true BY CONSTRUCTION rather than by luck.
+  const edited = ordered().withBaseUrlFor(ORDER_A, instance("https://moved.example.org")).value;
+  assert.deepEqual(edited.orderedIds(), [ORDER_A, STAR, ORDER_B]);
+});
+
+test("withOrder is absolute, so replaying it three times lands in the same place", () => {
+  // VersionedEntry replays the intention on a value that may already contain its
+  // own effect: "move up by one" would move up by two.
+  const target = [ORDER_B, ORDER_A, STAR];
+  let p = ordered();
+  for (let i = 0; i < 3; i += 1) p = p.withOrder(target).value;
+  assert.deepEqual(p.orderedIds(), target);
+});
+
+test("withOrder written against a stale set is refused rather than applied to a different one", () => {
+  // Appending the unknown ids would silently drop a concurrently added shortcut
+  // BELOW the catch-all, which is to say kill it.
+  assert.equal(ordered().withOrder([ORDER_A, STAR]).code, "ORDER_STALE");
+  assert.equal(ordered().withOrder([ORDER_A, STAR, ORDER_A]).code, "ORDER_STALE");
+});
+
+test("a catch-all may sit anywhere, and everything after it is shadowed", () => {
+  const p = ordered();
+  assert.deepEqual(p.shadowedShortcuts().map((s) => s.keyText()), ["JUL"]);
+  const last = p.withOrder([ORDER_A, ORDER_B, STAR]).value;
+  assert.deepEqual(last.shadowedShortcuts(), []);
+  const first = p.withOrder([STAR, ORDER_A, ORDER_B]).value;
+  assert.deepEqual(first.shadowedShortcuts().map((s) => s.keyText()), ["ECR", "JUL"]);
+});
+
+test("a shadowed shortcut produces no binding at all, and comes back when the catch-all goes", () => {
+  let p = ordered().withOrder([STAR, ORDER_A, ORDER_B]).value;
+  p = p.acknowledge(STAR, "CATCH_ALL").value;
+  p = p.armShortcut(ORDER_A).value.armShortcut(ORDER_B).value.armShortcut(STAR).value;
+  assert.deepEqual(p.activeBindings().map((b) => b.describe()), ["the catch-all on google.com"]);
+  const without = p.remove(STAR).value;
+  assert.deepEqual(without.activeBindings().map((b) => b.describe()).sort(), ["ECR on google.com", "JUL on google.com"]);
+});
+
+test("there can be only one catch-all, and the second one is refused with its own code", () => {
+  // A dedicated code is a better MESSAGE than DUPLICATE_KEY, but not a second
+  // control: _holdsKey already refuses, and two controls end up disagreeing.
+  const refused = ordered().register("dddddddd-4444-4444-8444-444444444444", g.CatchAllKey.only(), instance("https://d.example.org"));
+  assert.equal(refused.code, "DUPLICATE_CATCH_ALL");
+});
+
+test("a catch-all cannot be renamed, and a shortcut cannot become a catch-all", () => {
+  // Otherwise an armed, acknowledged shortcut becomes a universal redirector
+  // WHILE KEEPING ITS CONSENT -- without ever showing the CATCH_ALL warning.
+  const p = ordered();
+  assert.equal(p.withKeyFor(STAR, g.ProjectKey.parse("ABC").value).code, "KEY_NATURE_IMMUTABLE");
+  assert.equal(p.withKeyFor(ORDER_A, g.CatchAllKey.only()).code, "KEY_NATURE_IMMUTABLE");
+  // And the entity refuses on its own, because guarding in the registry does not
+  // protect the entity.
+  assert.throws(() => p.shortcutFor(STAR).withKey(g.ProjectKey.parse("ABC").value));
+  // Renaming between two named keys stays legal.
+  assert.equal(p.withKeyFor(ORDER_A, g.ProjectKey.parse("XYZ").value).ok, true);
+});
+
+test("a new named shortcut is placed above the catch-all, so it is never born shadowed", () => {
+  // The convenience is an APPLICATION intention, and it lives inside the
+  // membrane -- restore never borrows this door.
+  const p = ordered().registerAboveCatchAll("eeeeeeee-5555-4555-8555-555555555555", g.ProjectKey.parse("NEW").value, instance("https://e.example.org")).value;
+  assert.deepEqual(p.orderedIds(), [ORDER_A, "eeeeeeee-5555-4555-8555-555555555555", STAR, ORDER_B]);
+  assert.equal(p.statusOf("eeeeeeee-5555-4555-8555-555555555555"), "DISARMED");
+});
+
+test("statusOf is the sole judge of a row, and shadowed beats disarmed", () => {
+  let p = ordered().withOrder([STAR, ORDER_A, ORDER_B]).value;
+  p = p.armShortcut(ORDER_A).value;
+  assert.equal(p.statusOf(ORDER_A), "SHADOWED", "an armed but shadowed row does not jump");
+  assert.equal(p.statusOf(STAR), "AWAITING_ACKNOWLEDGEMENT");
+  assert.equal(p.statusOf(ORDER_B), "SHADOWED");
+});
+
+test("diagnose distinguishes nothing armed, nothing acknowledged, and everything shadowed", () => {
+  const facts = { originsGranted: true, quarantinedCount: 0, installed: true, coverageSatisfied: true };
+  let p = ordered();
+  assert.equal(p.diagnose(facts), "ALL_SHORTCUTS_DISARMED");
+
+  let onlyStar = g.JumpPolicy.empty().withEngines(["google.com"]).value;
+  onlyStar = onlyStar.registerCatchAll(STAR, instance("https://c.atlassian.net")).value;
+  onlyStar = onlyStar.armShortcut(STAR).ok ? onlyStar.armShortcut(STAR).value : onlyStar;
+  assert.equal(onlyStar.diagnose(facts), "ALL_SHORTCUTS_DISARMED", "arming is refused until acknowledged");
+
+  // The reachable path: acknowledge, arm, then change the destination -- which
+  // clears the destination acknowledgements WITHOUT disarming. That is the state
+  // the previous diagnosis called "everything is disarmed", to someone who had
+  // just armed it.
+  let awaiting = g.JumpPolicy.empty().withEngines(["google.com"]).value;
+  awaiting = awaiting.register(ORDER_A, g.ProjectKey.parse("ECR").value, instance("http://intra.example.org")).value;
+  awaiting = awaiting.acknowledge(ORDER_A, "INSECURE_SCHEME").value;
+  awaiting = awaiting.acknowledge(ORDER_A, "INTERNAL_HOST").value;
+  awaiting = awaiting.armShortcut(ORDER_A).value;
+  assert.equal(awaiting.diagnose(facts), "READY");
+  awaiting = awaiting.withBaseUrlFor(ORDER_A, instance("http://other.internal")).value;
+  assert.equal(awaiting.diagnose(facts), "ALL_SHORTCUTS_AWAITING_ACKNOWLEDGEMENT");
+
+  let shadowed = ordered().withOrder([STAR, ORDER_A, ORDER_B]).value;
+  shadowed = shadowed.armShortcut(ORDER_A).value.armShortcut(ORDER_B).value;
+  assert.equal(shadowed.diagnose(facts), "ALL_SHORTCUTS_SHADOWED");
+});
+
+test("a failed install outranks everything, because the installed reality contradicts the screen", () => {
+  // DISARMED means "no jump" IN INTENTION; INSTALL_FAILED means the rules are
+  // still live. An emergency stop reporting "stopped" without stopping is worse
+  // than no emergency stop.
+  const p = ordered().disarm();
+  assert.equal(p.diagnose({ originsGranted: false, quarantinedCount: 9, installed: false }), "INSTALL_FAILED");
+});
+
+test("a configuration read back with nothing but quarantine says so, instead of no shortcut yet", () => {
+  const restored = g.JumpPolicy.restore({
+    schemaVersion: 1, armed: true, engines: ["google.com"],
+    shortcuts: [{ id: "ffffffff-6666-4666-8666-666666666666", key: "ABC", baseUrl: "javascript:alert(1)" }],
+  });
+  assert.equal(restored.policy.shortcuts().length, 0);
+  assert.equal(restored.quarantine.length, 1);
+  assert.equal(
+    restored.policy.diagnose({ originsGranted: true, quarantinedCount: restored.quarantine.length, installed: true, coverageSatisfied: true }),
+    "PARTIAL_POLICY",
+    "there are not NO shortcuts, there are unreadable ones"
+  );
+});
+
+test("a shortcut list longer than the cap is refused by the policy, not only at the storage door", () => {
+  // The cap used to live at the admission door only, on the length of the
+  // incoming array, so the UI could legally create three hundred.
+  let p = g.JumpPolicy.empty().withEngines(["google.com"]).value;
+  for (let i = 0; i < g.JumpPolicy.MAX_SHORTCUTS; i += 1) {
+    const id = `id-${String(i).padStart(4, "0")}`;
+    p = p.register(id, g.ProjectKey.parse("K" + String(i).padStart(3, "0")).value, instance("https://a.example.org")).value;
+  }
+  assert.equal(p.shortcuts().length, g.JumpPolicy.MAX_SHORTCUTS);
+  assert.equal(p.register("one-too-many", g.ProjectKey.parse("ZZZ").value, instance("https://a.example.org")).code, "SHORTCUT_LIMIT");
+});
+
+// ------------------------------------------------------------- the diff of facts
+
+test("the diff covers all three sets, so an appearing shortcut is never silent", () => {
+  // The previous design compared "every id present in both", which is
+  // structurally blind to the gesture most useful to an attacker.
+  const before = ordered();
+  const NEW_ID = "99999999-9999-4999-8999-999999999999";
+  // register APPENDS, so a plain registration behind a catch-all is born
+  // shadowed -- and the diff says both things rather than hiding the second.
+  // Which is precisely why the UI goes through registerAboveCatchAll.
+  const appended = before.register(NEW_ID, g.ProjectKey.parse("NEW").value, instance("https://new.example.org")).value;
+  assert.deepEqual(g.PolicyDiff.between(before, appended).map((f) => f.type), ["ShortcutAppeared", "ShadowingChanged"]);
+  assert.deepEqual(g.PolicyDiff.between(appended, before).map((f) => f.type), ["ShortcutRemoved"]);
+  assert.deepEqual(g.PolicyDiff.between(before, before.remove(STAR).value).map((f) => f.type), ["CatchAllRemoved"]);
+
+  // Through the named door, nothing is shadowed and only the appearance is a fact.
+  const above = before.registerAboveCatchAll(NEW_ID, g.ProjectKey.parse("NEW").value, instance("https://new.example.org")).value;
+  assert.deepEqual(g.PolicyDiff.between(before, above).map((f) => f.type), ["ShortcutAppeared"]);
+});
+
+test("moving the catch-all reports ONE fact that names the host, not one per shadowed row", () => {
+  // MAX_ENTRIES is twenty, and PRIVACY.md says so publicly. One ordinary gesture
+  // must not be able to flush the journal -- least of all an unacknowledged
+  // UNKNOWN left by an earlier compromise.
+  const facts = g.PolicyDiff.between(ordered(), ordered().withOrder([STAR, ORDER_A, ORDER_B]).value);
+  assert.equal(facts.length, 1);
+  assert.equal(facts[0].type, "ShadowingChanged");
+  assert.equal(facts[0].catchAllBaseUrl, "https://c.atlassian.net", "the journal must say WHERE the traffic goes");
+  assert.deepEqual(facts[0].affectedKeys, ["ECR"]);
+});
+
+test("a wholesale replacement collapses into a single fact rather than evicting the journal", () => {
+  let before = g.JumpPolicy.empty().withEngines(["google.com"]).value;
+  for (let i = 0; i < 8; i += 1) {
+    before = before.register(`id-${i}`, g.ProjectKey.parse("K" + i + "0").value, instance("https://a.example.org")).value;
+  }
+  let after = before;
+  for (let i = 0; i < 8; i += 1) {
+    after = after.withBaseUrlFor(`id-${i}`, instance("https://elsewhere.example.org")).value;
+  }
+  const facts = g.PolicyDiff.between(before, after);
+  assert.equal(facts.length, 1);
+  // THE KINDS SURVIVE THE COLLAPSE. Without them, making more noise made the alarm
+  // less specific -- so the adversary's optimal move was to be louder, and the
+  // control's gradient ran backwards. Fact types are a closed vocabulary this
+  // repository writes, so carrying them hands the attacker no word (which is
+  // exactly why the engine IDS stay out, two dozen lines up in policy-diff.js).
+  assert.deepEqual(facts[0], {
+    type: "PolicyReplaced",
+    changedCount: 8,
+    kinds: ["DestinationChanged"],
+  });
+});
+
+/**
+ * MOVING SIX DESTINATIONS MUST NOT BE QUIETER THAN MOVING ONE.
+ *
+ * The behavioural half of the changelock above: past MAX_FACTS_PER_COMMIT the diff
+ * collapses, and what the banner can still say must not fall to "8 things changed".
+ */
+test("a louder attack does not become a vaguer alarm", () => {
+  const instance = (url) => g.JiraInstance.parse(url).value;
+  let before = g.JumpPolicy.empty().withEngines(["google.com"]).value;
+  for (let i = 0; i < 8; i += 1) {
+    before = before.register(`id-${i}`, g.ProjectKey.parse("K" + i + "0").value, instance("https://jira.example.org")).value;
+  }
+
+  // One destination moved: the fact names the old and the new host.
+  const one = g.PolicyDiff.between(before, before.withBaseUrlFor("id-0", instance("https://elsewhere.example.org")).value);
+  assert.equal(one.length, 1);
+  assert.equal(one[0].type, "DestinationChanged");
+
+  // Six moved AND a key renamed: collapsed, but the KINDS are still there.
+  let noisy = before;
+  for (let i = 0; i < 6; i += 1) {
+    noisy = noisy.withBaseUrlFor(`id-${i}`, instance("https://elsewhere.example.org")).value;
+  }
+  noisy = noisy.withKeyFor("id-7", g.ProjectKey.parse("ZZZ").value).value;
+
+  const [collapsed] = g.PolicyDiff.between(before, noisy);
+  assert.equal(collapsed.type, "PolicyReplaced");
+  assert.deepEqual(collapsed.kinds, ["DestinationChanged", "KeyChanged"],
+    "the banner can still say WHICH kinds changed, sorted so it does not depend on diff order");
+});
+
+test("every mutation still returns the same shape, withOrder included, with events always present", () => {
+  const p = ordered();
+  const results = [
+    p.withOrder([ORDER_A, ORDER_B, STAR]),
+    p.registerCatchAll("gggggggg-7777-4777-8777-777777777777", instance("https://g.example.org")),
+    p.remove(ORDER_A),
+    p.withKeyFor(STAR, g.ProjectKey.parse("ABC").value),
+  ];
+  for (const result of results) {
+    assert.equal(typeof result.ok, "boolean");
+    assert.ok(Array.isArray(result.events), "events is always present");
+    // No producer fills it any more: PolicyDiff is the single producer.
+    assert.deepEqual(result.events, []);
+  }
+});
+
+// ------------------------------------------------- reordering around a catch-all
+
+const REACH = ["r-aaa", "r-star", "r-bbb", "r-ddd"];
+
+const withCatchAllInside = () => {
+  let p = g.JumpPolicy.empty().withEngines(["google.com"]).value;
+  p = p.register(REACH[0], g.ProjectKey.parse("AAA").value, instance("https://a.example.org")).value;
+  p = p.registerCatchAll(REACH[1], instance("https://c.example.org")).value;
+  p = p.register(REACH[2], g.ProjectKey.parse("BBB").value, instance("https://b.example.org")).value;
+  p = p.register(REACH[3], g.ProjectKey.parse("DDD").value, instance("https://d.example.org")).value;
+  return p;
+};
+
+test("the aggregate answers for the order and for one row, so nobody reaches past it", () => {
+  // Two delegations that close a pair: the aggregate accepts withOrder(ids), an
+  // absolute intention about the order, but could not tell you the current one.
+  // And it was reaching through its own registry to read it, in
+  // registerAboveCatchAll.
+  const p = withCatchAllInside();
+  assert.deepEqual(p.orderedIds(), REACH);
+  assert.equal(p.shortcutFor(REACH[1]).isCatchAll(), true);
+  assert.equal(p.shortcutFor("nope"), undefined);
+});
+
+test("every order is reachable without ever PICKING UP the catch-all", () => {
+  // This is what makes pinning it acceptable under WCAG 2.1.1, and it is only true
+  // because the step is constrained: withOrder is ABSOLUTE, so a single call
+  // reaches any permutation and a test "by a sequence of withOrder" would be a
+  // tautology. Each step here is an ADJACENT SWAP whose picked element is never the
+  // catch-all -- the exact model of the arrows.
+  //
+  // The mechanism, which is the part worth remembering: the catch-all IS moved,
+  // pushed by the others. It is never the one you pick up.
+  const swapPicking = (policy, index, delta) => {
+    const ids = [...policy.orderedIds()];
+    assert.notEqual(ids[index], REACH[1], "the catch-all is never the picked element");
+    const to = index + delta;
+    assert.ok(Math.abs(delta) === 1 && to >= 0 && to < ids.length, "adjacent swaps only");
+    ids.splice(to, 0, ...ids.splice(index, 1));
+    const moved = policy.withOrder(ids);
+    assert.equal(moved.ok, true);
+    return moved.value;
+  };
+
+  const targets = [
+    [REACH[1], REACH[0], REACH[2], REACH[3]],   // catch-all first: everything shadowed
+    [REACH[0], REACH[2], REACH[3], REACH[1]],   // catch-all last: nothing shadowed
+    [REACH[2], REACH[0], REACH[1], REACH[3]],   // a named key pulled to the top
+  ];
+
+  for (const target of targets) {
+    let policy = withCatchAllInside();
+    for (let guard = 0; guard < 24 && policy.orderedIds().join() !== target.join(); guard += 1) {
+      const ids = policy.orderedIds();
+      const wrong = ids.findIndex((id, i) => id !== target[i] && id !== REACH[1]);
+      assert.notEqual(wrong, -1, "a misplaced element that is not the catch-all always exists");
+      const want = target.indexOf(ids[wrong]);
+      policy = swapPicking(policy, wrong, want < wrong ? -1 : 1);
+    }
+    assert.deepEqual(policy.orderedIds(), target);
+  }
+});
+
+test("dropping a named key below the catch-all shadows it, and nothing above it", () => {
+  let p = withCatchAllInside().withOrder([REACH[0], REACH[1], REACH[2], REACH[3]]).value;
+  assert.deepEqual(p.shadowedShortcuts().map((s) => s.keyText()), ["BBB", "DDD"]);
+  assert.equal(p.statusOf(REACH[0]), "DISARMED", "the row above is untouched");
+  assert.equal(p.statusOf(REACH[2]), "SHADOWED");
+  // And it comes back when the catch-all goes.
+  assert.deepEqual(p.remove(REACH[1]).value.shadowedShortcuts(), []);
+});
+
+test("at a constant id set, the status after a reorder depends on nothing but the order", () => {
+  // The property that makes moveTo's prediction trustworthy: it consults the domain
+  // on the future, and what it asks about -- shadowing -- is a pure function of the
+  // order and of which row is the catch-all. Arming and acknowledgements cannot
+  // change it, and "being a catch-all" is invariant under set-preserving mutations
+  // because withKeyFor refuses KEY_NATURE_IMMUTABLE.
+  const target = [REACH[1], REACH[0], REACH[2], REACH[3]];
+  const plain = withCatchAllInside().withOrder(target).value;
+
+  let armedFirst = withCatchAllInside();
+  armedFirst = armedFirst.armShortcut(REACH[0]).value;
+  armedFirst = armedFirst.acknowledge(REACH[1], "CATCH_ALL").value.armShortcut(REACH[1]).value;
+  const reordered = armedFirst.withOrder(target).value;
+
+  for (const id of REACH) {
+    assert.equal(
+      plain.isShadowed(id),
+      reordered.isShadowed(id),
+      `${id}: shadowing must not depend on arming`
+    );
+  }
+  // And the status the UI reads agrees with it, because SHADOWED is the FIRST test
+  // of the chain -- which is what lets one call answer both questions.
+  assert.equal(reordered.statusOf(REACH[0]), "SHADOWED");
+  assert.equal(plain.statusOf(REACH[0]) === "SHADOWED", plain.isShadowed(REACH[0]));
+});
+
+test("which half of a row the pointer is in is three numbers, so it is tested like anything else", () => {
+  // The previous plan declared this untestable for want of a DOM harness. It was
+  // untestable of the DESIGN, not of the problem: extracting the collaborator left
+  // an arithmetic that needs no document at all.
+  assert.equal(g.RowReorder.dropsBefore(100, 40, 101), true, "just inside the top half");
+  assert.equal(g.RowReorder.dropsBefore(100, 40, 119), true, "still the top half");
+  assert.equal(g.RowReorder.dropsBefore(100, 40, 120), false, "the midpoint belongs below");
+  assert.equal(g.RowReorder.dropsBefore(100, 40, 139), false, "the bottom half");
+});
+
+// ---------------------------------------------- the changelocks of the bounded claim
+
+/**
+ * CHANGELOCKS, and the word matters: these cannot fail unless somebody edits a
+ * constant. They are NOT proofs, and they must not be counted among the green
+ * tests as if they were -- see the measured facts pinned in interception.test.js.
+ *
+ * THEIR HOME IS HERE AND NOT AT LOAD TIME. importScripts is synchronous at the top
+ * of the service worker (background.js), so a throw there aborts the whole script:
+ * no listener registered, sync() never called, nothing purged -- and the dynamic
+ * rules SURVIVE the restart, so the old ones keep firing under a mute badge. In
+ * options.html the same throw is a blank page. shortcut-key.js already writes the
+ * doctrine: "the service worker would die at startup".
+ *
+ * Three load-time assertions remain in the repo, deliberately, and they are named
+ * so that the doctrine does not read as contradicted by its own tree:
+ * project-shortcut.js (assertShapesCannotDrift), reference-pattern.js
+ * (assertSeparatorsCannotExtendAKey) and rule-ranking.js -- all three decided on
+ * literals of their own file, never on data.
+ */
+test("changelock: the emitted key class is the owner's, verified rather than copied", () => {
+  // The airlock does not recompose the character class -- "never a copy: it comes
+  // from its owner". This is the only value where both expressions must coincide.
+  assert.equal(
+    g.ProjectKey.caseInsensitiveShape(g.ProjectKey.MAX_LENGTH),
+    g.ProjectKey.CASE_INSENSITIVE_SHAPE
+  );
+  assert.equal(g.ProjectKey.MAX_LENGTH, 20, "the validator's bound, on a literal");
+  // The function carries its own rule: capping can only ever NARROW the matcher,
+  // and {1,0} matches nothing while RE2 would accept it without a word.
+  assert.equal(g.ProjectKey.caseInsensitiveShape(25), g.ProjectKey.CASE_INSENSITIVE_SHAPE);
+  // The MESSAGE is asserted, not merely "some Error": a predicate that accepts
+  // any Error passes on a typo, a ReferenceError, or the wrong guard firing.
+  assert.throws(() => g.ProjectKey.caseInsensitiveShape(1), /at least 2/);
+  assert.throws(() => g.ProjectKey.caseInsensitiveShape("3"), /integer/);
+});
+
+test("changelock: the claim stays inside the validator, and reaches every reserved prefix", () => {
+  const star = g.CatchAllKey.only();
+  assert.ok(star.claimsKeysUpTo() <= g.ProjectKey.MAX_LENGTH,
+    "the catch-all cannot claim more than a project key can be");
+  // Every reserved prefix must be REACHABLE, or its alternative in the guard would
+  // be dead code guarding nothing. IPHONE is exactly six -- the bound has no slack.
+  const longest = Math.max(...g.ReservedPrefix.ALL.map((w) => w.length));
+  assert.ok(star.claimsKeysUpTo() >= longest, `a reserved prefix is ${longest} long`);
+  // The list's shape became load-bearing the day the guard was cut into a
+  // partition: a duplicate would build two runs matching the same URL.
+  assert.equal(new Set(g.ReservedPrefix.ALL).size, g.ReservedPrefix.ALL.length);
+});
+
+test("changelock: the catch-all only ever accepts the hyphen", () => {
+  // separators() carries thirteen lines explaining why -- SALARY 2024, WINDOWS 11
+  // -- and, until now, no assertion. Widening it would make "PS 800" claimed while
+  // the guard only holds "PS-800": an outbound flow, not a nuisance.
+  assert.deepEqual(g.CatchAllKey.only().separators(), ["-"]);
+});
+
+test("changelock: the example the catch-all shows is one it actually claims", () => {
+  // "EXAMPLE" was seven characters: the row offered as an example a key its own
+  // rule no longer claimed. Asserted generically, so the recurrence is impossible
+  // rather than merely fixed once.
+  const star = g.CatchAllKey.only();
+  assert.ok(star.captures(star.exampleKey()));
+});
+
+test("the ShortcutKey protocol is checked against its implementations, at last", () => {
+  // shortcut-key.js:6 promises "the two implementations are checked against it by
+  // test" and :52 says MEMBERS is "named once so the conformance test cannot drift
+  // from it". Grep found NO reader: both promises were dead from the start. This
+  // test will be GREEN on day one -- saying so, so nobody hunts for the red.
+  assert.ok(g.ShortcutKey.MEMBERS.length > 0);
+  for (const key of [g.ProjectKey.parse("ABC").value, g.CatchAllKey.only()]) {
+    for (const member of g.ShortcutKey.MEMBERS) {
+      assert.equal(typeof key[member], "function", `${member} is missing`);
+    }
+  }
+  // And the member OUTSIDE the protocol, verified without entering it. It is now
+  // CatchAllKey's private business -- fragmentFor is its only caller -- so no
+  // polymorphic site can ask a ProjectKey a question it cannot answer honestly.
+  assert.equal(typeof g.CatchAllKey.only().claimsKeysUpTo, "function");
+  assert.equal(typeof g.ProjectKey.parse("ABC").value.claimsKeysUpTo, "undefined",
+    "a named key must not be asked its ceiling: the honest answer is a different contract");
+  assert.equal(g.ShortcutKey.MEMBERS.includes("claimsKeysUpTo"), false,
+    "it is deliberately outside the protocol: on a ProjectKey the honest answer differs");
+});
+
+test("a long named key below the catch-all stays shadowed, and that is deliberate", () => {
+  // THE OVERAPPROXIMATION, pinned. Shadowing is POSITIONAL: everything after the
+  // catch-all is switched off, including what the catch-all no longer claims. That
+  // was already true for ISO -- captures("ISO") is false and it is still shadowed
+  // -- so the bound widens the overapproximation, it does not create it. It is
+  // CHOSEN for predictability over a shadowing that would depend on key length,
+  // where two neighbouring rows behave differently with no way to explain it.
+  const LONG = "dddddddd-4444-4444-8444-444444444444";
+  let p = g.JumpPolicy.empty().withEngines(["google.com"]).value;
+  p = p.registerCatchAll(STAR, instance("https://catchall.atlassian.net")).value;
+  p = p.acknowledge(STAR, "CATCH_ALL").value;
+  p = p.armShortcut(STAR).value;
+  p = p.register(LONG, g.ProjectKey.parse("PROJECTX1").value, instance("https://x.atlassian.net")).value;
+  p = p.armShortcut(LONG).value;
+
+  assert.equal(p.statusOf(LONG), "SHADOWED");
+  assert.equal(p.isShadowed(LONG), true);
+  // …and the catch-all does NOT claim it. The three assertions together ARE the
+  // statement "deliberate overapproximation".
+  assert.equal(
+    g.CatchAllKey.only().captures(g.ProjectKey.parse("PROJECTX1").value),
+    false
+  );
+  // The announced way out works: registerAboveCatchAll.
+  const above = g.JumpPolicy.empty().withEngines(["google.com"]).value;
+  assert.ok(above.registerCatchAll(STAR, instance("https://catchall.atlassian.net")).ok);
+});
+
+test("the detector sees a key repointed at constant identity", () => {
+  // ABC -> ABD changes WHAT IS INTERCEPTED while the base URL stays put, so the
+  // diff saw nothing and the banner said nothing. A key silently repointed sends
+  // a different set of references to the same host: the same promise broken from
+  // the other side.
+  const id = "11111111-1111-4111-8111-111111111111";
+  const instance = g.JiraInstance.parse("https://example.atlassian.net").value;
+  const before = g.JumpPolicy.empty().register(id, g.ProjectKey.parse("ABC").value, instance).value;
+  const after = before.withKeyFor(id, g.ProjectKey.parse("ABD").value).value;
+
+  const facts = g.PolicyDiff.between(before, after);
+  const fact = facts.find((f) => f.type === "KeyChanged");
+  assert.ok(fact, "renaming a key must be a fact");
+  assert.equal(fact.oldKey, "ABC");
+  assert.equal(fact.newKey, "ABD");
+});
+
+test("the detector sees a shortcut being switched on, and stays quiet when it is switched off", () => {
+  // local-acknowledgements.js describes the whole attack -- a sync account writing
+  // armed: true against a host already granted -- and the diff was blind to that
+  // exact transition. The reverse must stay silent: reporting a disarm would make
+  // the kill switch raise the alarm it exists to silence.
+  const id = "11111111-1111-4111-8111-111111111111";
+  const instance = g.JiraInstance.parse("https://example.atlassian.net").value;
+  const disarmed = g.JumpPolicy.empty().register(id, g.ProjectKey.parse("ABC").value, instance).value;
+  const armed = disarmed.armShortcut(id).value;
+
+  const on = g.PolicyDiff.between(disarmed, armed);
+  assert.ok(on.some((f) => f.type === "ShortcutArmed"), "arming is a fact");
+
+  const off = g.PolicyDiff.between(armed, disarmed);
+  assert.equal(off.some((f) => f.type === "ShortcutArmed"), false, "disarming is not an alarm");
+});
+
+test("the detector sees the interception surface grow", () => {
+  // Adding an engine means a whole new set of navigations starts being rewritten.
+  // No baseUrl moves, no shortcut appears -- and the detector saw nothing, though
+  // the reach of every rule just grew.
+  const before = g.JumpPolicy.empty().withEngines(["google.com"]).value;
+  const after = before.withEngines(["google.com", "bing.com"]).value;
+
+  const facts = g.PolicyDiff.between(before, after);
+  const fact = facts.find((f) => f.type === "EnginesAdded");
+  assert.ok(fact, "a wider interception surface is a fact");
+  // The COUNT, never the ids: for a custom domain the id is text chosen by
+  // whoever wrote the policy, and the alarm sentence must not be co-written by
+  // the attacker.
+  assert.equal(fact.engineCount, 1);
+  assert.equal("engineIds" in fact, false);
+
+  // One fact for the gesture, never one per engine: an ordinary change must not
+  // be able to flush a twenty-entry journal.
+  const many = g.PolicyDiff.between(before, before.withEngines(["google.com", "bing.com", "duckduckgo.com"]).value);
+  assert.equal(many.filter((f) => f.type === "EnginesAdded").length, 1);
+});
+
+test("the detector sees the kill switch being switched back on", () => {
+  // `armed` names TWO scopes -- the policy and the shortcut -- and only the
+  // shortcut was compared. So: the user presses the emergency stop, a compromised
+  // sync writes `armed: true` back, EVERY rule returns, and the diff emitted
+  // nothing at all. It is the cheapest variant of the attack ShortcutArmed was
+  // added to catch.
+  const id = "11111111-1111-4111-8111-111111111111";
+  const instance = g.JiraInstance.parse("https://example.atlassian.net").value;
+  const armed = g.JumpPolicy.empty()
+    .register(id, g.ProjectKey.parse("ABC").value, instance).value
+    .armShortcut(id).value;
+  const stopped = armed.disarm();
+
+  const back = g.PolicyDiff.between(stopped, stopped.arm());
+  const fact = back.find((f) => f.type === "PolicyArmed");
+  assert.ok(fact, "re-arming the whole extension must be a fact");
+  assert.equal(fact.shortcutCount, 1);
+
+  // And pressing the emergency stop is not itself an alarm.
+  assert.equal(
+    g.PolicyDiff.between(armed, stopped).some((f) => f.type === "PolicyArmed"),
+    false,
+    "the kill switch must not raise the alarm it exists to silence"
+  );
+});
+
+test("a key answers what kind it is, so a label is never a ternary", () => {
+  // Five sites spelled `isCatchAll() ? "catch-all" : "named"` -- the
+  // acknowledgement row key, a rule label, two fact types, a badge. Each is a
+  // dispatch wearing a ternary, and each would need editing to admit a third
+  // nature of key.
+  assert.equal(g.ProjectKey.parse("ABC").value.nature(), "named");
+  assert.equal(g.CatchAllKey.only().nature(), "catch-all");
+  // And the predicate SURVIVES, because the registry legitimately asks "is there
+  // a catch-all already" -- that question is a predicate, not a label.
+  assert.equal(g.CatchAllKey.only().isCatchAll(), true);
+});
+
+test("each key says what it CLAIMS, in domain words, and never a regex", () => {
+  // Two mistakes bracket this. reference-pattern.js carried SHAPES plus
+  // shapeOf(key) -- the branch on the type its own header claimed to have removed.
+  // The first fix over-corrected: it put the regex fragment, its capture arity and
+  // its backreferences into the key protocol, so the DOMAIN emitted RE2 and
+  // CatchAllKey called into interception/ -- the project's only live core ->
+  // airlock dependency, created by the batch that removed the other one.
+  const named = g.ProjectKey.parse("ABC").value;
+  assert.deepEqual(named.claim(), { literal: "ABC" });
+
+  const star = g.CatchAllKey.only();
+  assert.deepEqual(star.claim(), { anyKeyUpTo: star.claimsKeysUpTo() });
+
+  // And nothing in a claim looks like a pattern: no group, no backreference.
+  for (const claim of [named.claim(), star.claim()]) {
+    assert.equal(JSON.stringify(claim).includes("\\\\"), false, "a claim carries no notation");
+  }
+
+  // The whole protocol answers on both, which is what makes a third nature of key
+  // a new class rather than an edit in five files.
+  for (const key of [named, star]) {
+    for (const member of g.ShortcutKey.MEMBERS) {
+      assert.equal(typeof key[member], "function", `${member} missing on ${key.nature()}`);
+    }
+  }
+});
+
+test("a name that asserts a cause must be able to prove it", () => {
+  // ALL_SHORTCUTS_SHADOWED was the catalogue's "otherwise" clause --
+  // `activeBindings().length === 0` with NO condition on shadowing -- under a name
+  // stating a precise reason. Any future filter excluding every shortcut would
+  // have surfaced under this label and sent the user hunting for a catch-all that
+  // does not exist.
+  const instance = g.JiraInstance.parse("https://example.atlassian.net").value;
+  const facts = { originsGranted: true, installed: true, coverageSatisfied: true, quarantinedCount: 0 };
+
+  // Nothing live, and nothing shadowed either: the honest answer is the fallback.
+  let p = g.JumpPolicy.empty().withEngines(["google.com"]).value;
+  p = p.register(ID, key("ABC"), instance).value;
+  assert.equal(p.diagnose(facts), "ALL_SHORTCUTS_DISARMED", "a disarmed row has its own name");
+
+  // Genuinely shadowed: the precise name, and it can prove it.
+  let shadowed = g.JumpPolicy.empty().withEngines(["google.com"]).value;
+  shadowed = shadowed.registerCatchAll("star", instance).value;
+  shadowed = shadowed.acknowledge("star", "CATCH_ALL").value.armShortcut("star").value;
+  shadowed = shadowed.register(ID, key("ABC"), instance).value.armShortcut(ID).value;
+  assert.ok(shadowed.shadowedShortcuts().length > 0, "the fixture really shadows something");
+});
+
+test("a document cannot claim the same acknowledgement twice, whatever its scope", () => {
+  // The `continue` for key-scoped kinds sat ABOVE `seen.add`, so those never
+  // entered the set and three CATCH_ALLs passed without a word -- the control was
+  // dead on the one scope that arms a universal redirector.
+  const twice = g.Consent.parse({ armed: false, acknowledged: ["CATCH_ALL", "CATCH_ALL"] });
+  assert.equal(twice.ok, false);
+  assert.equal(twice.code, "DUPLICATE_ACKNOWLEDGEMENT");
+
+  const alsoTwice = g.Consent.parse({ armed: false, acknowledged: ["INSECURE_SCHEME", "INSECURE_SCHEME"] });
+  assert.equal(alsoTwice.code, "DUPLICATE_ACKNOWLEDGEMENT");
+
+  // And a legitimate pair still passes -- the guard must not cost the honest case.
+  const fine = g.Consent.parse({ armed: false, acknowledged: ["INSECURE_SCHEME", "INTERNAL_HOST"] });
+  assert.equal(fine.ok, true);
+});
+
+test("null is not a second spelling of absence at the consent door", () => {
+  // It was accepted as one, in a project that bans null and whose admission door
+  // refuses it for every other field.
+  assert.equal(g.Consent.parse(undefined).ok, true, "absent is fresh consent");
+  assert.equal(g.Consent.parse(null).ok, false, "null is a value, and not a valid one");
+});
+
+test("every refusal carries events, including the ones that come from a parse", () => {
+  // The invariant was FALSE and the presence tests it forbids were in the code:
+  // parses return `{ok:false, code, message}` with no events, and mutators handed
+  // those back verbatim -- so versioned-entry.js wrote `result.events ?? []` and
+  // section-host.js wrote `result.events && …`.
+  const instance = g.JiraInstance.parse("https://example.atlassian.net").value;
+  const refusals = [
+    g.JumpPolicy.empty().register("bad id!", key("ABC"), instance),
+    g.JumpPolicy.empty().armShortcut("nope"),
+    g.JumpPolicy.empty().acknowledge("nope", "CATCH_ALL"),
+    new g.StoredPolicy(g.JumpPolicy.empty(), []).dropQuarantined("nothing"),
+    new g.StoredPolicy(g.JumpPolicy.empty(), [{ id: "x", key: "!", baseUrl: "https://a.example.org" }])
+      .readmit(new g.StoredPolicy(g.JumpPolicy.empty(),
+        [{ id: "x", key: "!", baseUrl: "https://a.example.org" }]).quarantined()[0].fingerprint,
+        instance, crypto.randomUUID()),
+  ];
+  for (const refusal of refusals) {
+    assert.equal(refusal.ok, false, `expected a refusal, got ${JSON.stringify(refusal)}`);
+    assert.deepEqual(refusal.events, [], `${refusal.code} must carry events`);
+  }
+});
+
+test("the entity and the registry refuse a change of nature TOGETHER", () => {
+  // One domain rule, two mechanisms: ProjectShortcut.withKey THROWS, and
+  // ShortcutRegistry.withKeyFor REFUSES with a sentence. The comment argues the
+  // throw is the post-condition and the refusal the message -- which is right,
+  // and which is exactly why the two must be pinned together: the day one moves
+  // without the other, a catch-all renames itself while keeping its consent, and
+  // a universal redirector arms without the CATCH_ALL warning ever being seen.
+  const instance = g.JiraInstance.parse("https://example.atlassian.net").value;
+  let policy = g.JumpPolicy.empty().registerCatchAll("star", instance).value;
+
+  // The registry: a sentence the user can read.
+  const refused = policy.withKeyFor("star", g.ProjectKey.parse("ABC").value);
+  assert.equal(refused.ok, false);
+  assert.equal(refused.code, "KEY_NATURE_IMMUTABLE");
+
+  // The entity: a programming error, because no caller may legitimately ask.
+  const shortcut = policy.shortcutFor("star");
+  assert.throws(() => shortcut.withKey(g.ProjectKey.parse("ABC").value),
+    /nature/, "the entity itself refuses, whatever the registry does");
+
+  // And the other direction, which is the dangerous one.
+  let named = g.JumpPolicy.empty()
+    .register(ID, g.ProjectKey.parse("ABC").value, instance).value;
+  const promoted = named.withKeyFor(ID, g.CatchAllKey.only());
+  assert.equal(promoted.code, "KEY_NATURE_IMMUTABLE");
+  assert.throws(() => named.shortcutFor(ID).withKey(g.CatchAllKey.only()), /nature/);
+});
+
+test("absence has one spelling", () => {
+  // The project bans null in writing and wrote it in eight places, including the
+  // module that carries the kill switch. Two spellings force every caller into a
+  // `if (!x)` that covers the pair -- a presence test that exists only because the
+  // vocabulary was double.
+  const absent = [
+    g.SearchEngineCatalog.find("nope"),
+    g.JumpPolicy.empty().shortcutFor("nope"),
+    g.JumpPolicy.empty().statusOf("nope"),
+    g.JumpPolicy.empty().catchAllShortcut(),
+  ];
+  for (const value of absent) {
+    assert.equal(value, undefined, "absence is undefined, never null");
+    assert.notEqual(value, null === undefined ? 1 : null, "and never null");
+  }
+});
+
+test("the storage door reads an old engine spelling without leaving the core", () => {
+  // admission.js called SearchEngineCatalog.migrateId, so `core/` depended on
+  // `interception/` -- the exact inversion rule-factory.js forbids in the other
+  // direction ("the core only holds opaque engine ids"), invisible because both
+  // modules meet on globalThis.
+  // A VALUE, not a string: it migrates an old spelling, refuses what cannot be an
+  // engine identity at all, and owns the `custom:` prefix that CustomEngine used
+  // to spell and the catalogue used to read back by hand.
+  assert.equal(g.EngineId.parse("google").value.toString(), "google.com");
+  const custom = g.EngineId.parse("custom:intra.example.org").value;
+  assert.equal(custom.isCustom(), true);
+  assert.equal(custom.host(), "intra.example.org", "the prefix has ONE owner");
+  assert.equal(g.EngineId.parse("google.com").value.equals(g.EngineId.parse("google").value), true,
+    "an old spelling and its current form are the same engine");
+
+  // What cannot be an identity is refused -- a bare string accepted anything.
+  for (const hostile of [null, "", "NOPE", "a b", "https://google.com/", "../etc"]) {
+    assert.equal(g.EngineId.parse(hostile).ok, false, `${JSON.stringify(hostile)} is not an engine id`);
+  }
+
+  const restored = g.JumpPolicy.restore({
+    schemaVersion: 1,
+    engines: ["google", "bing"],
+    shortcuts: [],
+  });
+  assert.deepEqual(restored.policy.engineIds(), ["google.com", "bing.com"]);
+});
+
+test("an engine identity is bounded in SIZE too, and the bound is derived", () => {
+  /**
+   * THE ONE STRING THIS PROJECT ADMITTED WITH NO BOUND AT ALL.
+   *
+   * SHAPE is narrow and was mute about length. Measured before this:
+   *
+   *   EngineId.parse("a".repeat(20000) + ".com")      -> ok
+   *   restore({ engines: [<that>, "google.com"] })    -> both kept
+   *   octets re-persisted at every commit             -> 20 098
+   *
+   * Its neighbours all bound their text -- 256 in the quarantine door, 256 in the
+   * journal, 200 in the receipt, 40 for a custom host -- and the rule those files
+   * state ("a field with NO BOUND") had this exception left.
+   *
+   * THE BOUND IS DERIVED, and that is what this test pins: the longest identity
+   * this build can legitimately mint is `custom:` plus the longest host
+   * CustomEngine.parse admits. Restating the number here would make the
+   * assertion vacuous the day either side moves.
+   */
+  /**
+   * THE CHANGELOCK, and it is the whole reason the bound may be a literal.
+   *
+   * `core/custom-engine.js` loads AFTER `core/engine-id.js` in all five lists, so
+   * the ceiling cannot be read at load time -- and reading it lazily would cost
+   * either a duplicated fallback for an unreachable branch or a TypeError
+   * escaping a door whose every other failure is a VALUE. Same arrangement as
+   * Re2Budget.CALIBRATION_ENVELOPE_COST: spelled where it is used, compared here
+   * to what actually produces it. Lower MAX_HOST_LENGTH and this goes red.
+   */
+  const ceiling = g.EngineId.CUSTOM_PREFIX.length + g.CustomEngine.MAX_HOST_LENGTH;
+  assert.equal(g.EngineId.MAX_WRITTEN, ceiling,
+    "the spelled bound must be the prefix plus the longest host the parser admits");
+  const hostOfLength = (n) => "a".repeat(n - 4) + ".com";
+
+  // The longest legitimate custom identity passes, exactly.
+  const longest = "custom:" + hostOfLength(g.CustomEngine.MAX_HOST_LENGTH);
+  assert.equal(longest.length, ceiling, "the fixture must sit ON the bound, not near it");
+  assert.equal(g.EngineId.parse(longest).ok, true, "a legitimate identity must survive whole");
+
+  // One character more cannot resolve to any engine, in any catalogue.
+  assert.equal(g.EngineId.parse(longest + "x").ok, false, "one past the ceiling is refused");
+  assert.equal(g.EngineId.parse("a".repeat(20000) + ".com").code, "ENGINE_ID_SHAPE");
+
+  // AND IT DEGRADES VISIBLY RATHER THAN BEING FATAL, which is this door's own
+  // rule: a refused id is dropped, the rest of the configuration lives, and the
+  // user is told through a code that already has a translated sentence.
+  const restored = g.JumpPolicy.restore({
+    schemaVersion: 1,
+    engines: ["a".repeat(20000) + ".com", "google.com"],
+    shortcuts: [],
+  });
+  assert.equal(restored.ok, true, "one oversized id must not cost the configuration");
+  assert.deepEqual(restored.policy.engineIds(), ["google.com"]);
+  assert.ok(
+    restored.unreadable.some((fact) => fact.code === "ENGINE_ID_SHAPE"),
+    "and the drop is said, not silent",
+  );
+  assert.ok(
+    JSON.stringify(restored.policy.toJSON()).length < 1024,
+    "nothing oversized is re-persisted",
+  );
+});
+
+test("a bound that protects the import lives with the other bounds, not on the surface", () => {
+  // It was `file.size > 64 * 1024`, written inside the options page: a security
+  // bound living on the surface it protects, with no relation to the limits beside
+  // it in the admission door and nothing testing it.
+  assert.equal(typeof g.ShortcutAdmission.MAX_TRANSFER_BYTES, "number");
+  assert.ok(g.ShortcutAdmission.MAX_TRANSFER_BYTES > 0);
+  // And it sits with its neighbours, which is the point.
+  for (const bound of ["MAX_QUARANTINE", "MAX_CUSTOM_ENGINES", "MAX_ENGINES", "MAX_TRANSFER_BYTES"]) {
+    assert.equal(typeof g.ShortcutAdmission[bound], "number", `${bound} belongs to the door`);
+  }
+});
+
+/**
+ * WHY THE THREE ERROR PATHS MAY KEEP WRITING `coverageSatisfied: false`.
+ *
+ * An audit point held that background.js and rule-installer.js coerce an UNKNOWN
+ * coverage into `false`, short-circuiting COVERAGE_STATE_UNKNOWN. Measured, that is
+ * not what happens, and this test pins the three reasons so the point is not
+ * reopened and "fixed" into something worse:
+ *
+ *   1. Both background.js paths write `installed: false` alongside it, and
+ *      INSTALL_FAILED outranks every coverage verdict -- the field is never read.
+ *   2. rule-installer.js's catch purges before resolving, so nothing IS installed:
+ *      `false` there is a FACT, not a coercion.
+ *   3. The only path that reports `installed: true` computes the real value from
+ *      the rule set, so it never omits the field either.
+ *
+ * COVERAGE_STATE_UNKNOWN is therefore alive and reachable exactly where it should
+ * be: an absent or older receipt, which is the case its guard was written for.
+ */
+test("an unknown coverage is only reachable where the receipt is silent", () => {
+  const ID = "aaaaaaaa-1111-4111-8111-111111111111";
+  let p = g.JumpPolicy.empty().withEngines(["google.com"]).value;
+  p = p.register(ID, g.CatchAllKey.only(), g.JiraInstance.parse("https://j.example.org").value).value;
+  p = p.acknowledge(ID, "CATCH_ALL").value.armShortcut(ID).value.arm();
+  const granted = without(installedAndCovered(), "installed", "coverageSatisfied");
+
+  // 1. A failed install hides the coverage question entirely, either way.
+  assert.equal(p.diagnose({ ...granted, installed: false, coverageSatisfied: false }),
+    "INSTALL_FAILED", "the coverage field is not read when the install failed");
+  assert.equal(p.diagnose({ ...granted, installed: false }), "INSTALL_FAILED",
+    "and omitting it changes nothing on that path");
+
+  // 2 & 3. Once installed, the three states are three distinct sentences.
+  assert.equal(p.diagnose({ ...granted, installed: true, coverageSatisfied: true }), "READY");
+  assert.equal(p.diagnose({ ...granted, installed: true, coverageSatisfied: false }),
+    "CATCH_ALL_NOT_INSTALLED", "a measured no");
+  assert.equal(p.diagnose({ ...granted, installed: true }), "COVERAGE_STATE_UNKNOWN",
+    "an absent field is the third term, and it is NOT the same sentence as a no");
+});
+
+/**
+ * SWAPPING AN ENGINE PRODUCES TWO FACTS, NOT ONE.
+ *
+ * A removal shrinks the interception surface, so its direction is reassuring and it
+ * used to produce nothing at all. But the surface is part of the destination -- this
+ * repository says so at the top of policy-diff.js -- and an adversary who removes
+ * the engine you watch and adds another performed TWO gestures while the journal
+ * recorded one.
+ */
+test("removing a search engine is a fact of its own", () => {
+  const before = g.JumpPolicy.empty().withEngines(["google.com", "bing.com"]).value;
+
+  const removed = g.PolicyDiff.between(before, before.withEngines(["google.com"]).value);
+  assert.deepEqual(removed, [{ type: "EnginesRemoved", engineCount: 1 }]);
+
+  // The swap: one out, one in. Two gestures, two facts.
+  const swapped = g.PolicyDiff.between(before, before.withEngines(["google.com", "duckduckgo.com"]).value);
+  assert.deepEqual(swapped.map((f) => f.type).sort(), ["EnginesAdded", "EnginesRemoved"],
+    "a swap that reported only the addition told half the story");
+
+  assert.deepEqual(g.PolicyDiff.between(before, before), [], "and an unchanged set says nothing");
+});
+
+/**
+ * A WARNING KIND IS THE PUBLISHED LANGUAGE OF A CONTEXT BOUNDARY.
+ *
+ * It is persisted -- one third of the row key an attestation is filed under -- and
+ * it crosses into the key-scoped consent context, where both sides agree on it
+ * through scopeOf. Two files used to validate it with a boolean and carry on with a
+ * bare string; an unknown kind then vanished inside a filter at the consent airlock.
+ *
+ * parse() gives it the repository's refusable shape, so the refusal has a CODE.
+ */
+test("an unknown warning kind is refused with a code, not filtered away", () => {
+  const known = g.ShortcutWarning.parse("CATCH_ALL");
+  assert.equal(known.ok, true);
+  assert.equal(known.value, "CATCH_ALL");
+  assert.equal(known.scope, "key", "and it says which side of the boundary it belongs to");
+
+  assert.equal(g.ShortcutWarning.parse("INSECURE_SCHEME").scope, "destination");
+
+  const future = g.ShortcutWarning.parse("A_KIND_FROM_A_LATER_BUILD");
+  assert.equal(future.ok, false);
+  assert.equal(future.code, "UNKNOWN_KIND");
+
+  assert.equal(g.ShortcutWarning.parse(undefined).code, "KIND_NOT_A_STRING");
+  assert.equal(g.ShortcutWarning.parse(42).code, "KIND_NOT_A_STRING");
+
+  // Every shipped kind parses -- otherwise the door refuses our own vocabulary.
+  for (const kind of g.ShortcutWarning.KINDS) {
+    assert.equal(g.ShortcutWarning.parse(kind).ok, true, `${kind} is shipped but unparseable`);
+  }
+});
+
+/**
+ * THE EMPREINTE COVERS EVERYTHING THE DIFF CAN REPORT.
+ *
+ * It is the claim token: recordUnclaimed stays SILENT when the journal already
+ * covers the fingerprint. `customEngines` was absent from it, so two policies
+ * differing only by their added domains shared one -- and a claim posted by a
+ * legitimate edit covered a domain somebody else had added. The rule this pins is
+ * the general one, not the field: anything PolicyDiff can produce a fact about
+ * must move the empreinte, or the detector can be silenced by an unrelated edit.
+ */
+test("the empreinte moves for every change the diff can report", () => {
+  const base = () => {
+    let p = g.JumpPolicy.empty().withEngines(["google.com"]).value;
+    p = p.register("a", g.ProjectKey.parse("ABC").value,
+      g.JiraInstance.parse("https://example.atlassian.net").value).value;
+    return p;
+  };
+  const engine = (host) => g.CustomEngine.parse({ host, shape: "search-q" }).value;
+
+  const before = base();
+  const reshaped = (host, shape) => g.CustomEngine.parse({ host, shape }).value;
+  const mutations = [
+    ["a domain added", (p) => p.withCustomEngine(engine("intra.example.org")).value],
+    /**
+     * THE MUTATION THIS TEST DID NOT CONTAIN, and that is the point worth keeping.
+     *
+     * `CustomEngine.id()` is `custom:<host>` -- the shape is NOT in the identity --
+     * so a policy whose domain changed shape shared a fingerprint with the policy
+     * before it, and produced no fact. A live rule moved onto another path of a
+     * host whose permission was already granted, in silence.
+     *
+     * The test was green because it enumerated the mutations its author had
+     * imagined. An enumeration covers an imagination, not a space.
+     */
+    ["a domain reshaped", (p) => {
+      const withSearch = p.withCustomEngine(reshaped("intra.example.org", "search-q")).value;
+      // Same host, same id, other shape: rebuilt rather than mutated, because the
+      // aggregate refuses a duplicate id -- which is exactly why only an outside
+      // writer can produce this state.
+      return g.JumpPolicy.restore({
+        ...withSearch.toJSON(),
+        customEngines: [{ host: "intra.example.org", shape: "root-q" }],
+      }).policy;
+    }],
+    ["a destination changed", (p) => p.withBaseUrlFor("a",
+      g.JiraInstance.parse("https://other.atlassian.net").value).value],
+    ["a key changed", (p) => p.withKeyFor("a", g.ProjectKey.parse("XYZ").value).value],
+    ["an engine ticked", (p) => p.withEngines(["google.com", "bing.com"]).value],
+    ["a shortcut armed", (p) => p.armShortcut("a").value],
+    ["the policy disarmed", (p) => p.disarm()],
+    ["a shortcut removed", (p) => p.remove("a").value],
+  ];
+  for (const [what, mutate] of mutations) {
+    assert.notEqual(
+      mutate(base()).fingerprint(),
+      before.fingerprint(),
+      `${what} leaves the empreinte unchanged, so a stale claim can silence it`,
+    );
+  }
+
+  // The reshaping is compared against the SAME base, through the same door, so the
+  // difference measured is the shape and nothing else.
+  const asDocument = (shape) => g.JumpPolicy.restore({
+    ...base().toJSON(),
+    customEngines: [{ host: "intra.example.org", shape }],
+  }).policy;
+  assert.notEqual(
+    asDocument("search-q").fingerprint(),
+    asDocument("root-q").fingerprint(),
+    "two domains that do not intercept the same URLs must not share a fingerprint",
+  );
+
+  /**
+   * THE COMPOSED PARTS ARE SERIALISED, NOT CONCATENATED.
+   *
+   * A domain's entry was `${e.id()}|${e.shape()}` -- a joined key, the shape
+   * local-acknowledgements.js refuses in eight lines ("the parts are pasted with a
+   * separator that a part could contain"). Latent, because neither part can hold a
+   * `|`; and latent is exactly the status this repository decided not to live with
+   * for the twin table.
+   *
+   * Pinned STRUCTURALLY, because no input can exhibit the collision: the parse
+   * refuses a `|` in both parts, so a behavioural test would be vacuous.
+   */
+  const domainsOf = (policy) => JSON.parse(policy.fingerprint())[2];
+  const oneDomain = base().withCustomEngine(engine("intra.example.org")).value;
+  assert.deepEqual(domainsOf(oneDomain), [["custom:intra.example.org", "search-q"]],
+    "a domain's entry must be a PAIR, not a string with a separator in it");
+  for (const entry of domainsOf(oneDomain)) {
+    assert.ok(Array.isArray(entry), "a composed key is serialised, never joined");
+  }
+
+  // AND THE ORDER OF THAT LIST DECIDES NOTHING. The default comparator would
+  // coerce each pair to "id,shape" -- a joined string one axis over -- and a
+  // collision under that coercion would order by input position, so the
+  // fingerprint would depend on the order of a list nothing orders.
+  const pair = (a, b) => base()
+    .withCustomEngine(engine(a)).value
+    .withCustomEngine(engine(b)).value.fingerprint();
+  assert.equal(
+    pair("a.example.org", "b.example.org"),
+    pair("b.example.org", "a.example.org"),
+    "the order of the added domains must not move the fingerprint",
+  );
+
+  // And it does NOT move for what changes nothing: an empreinte that shifts on its
+  // own is a false alarm, which is the other way this detector can fail.
+  assert.equal(base().fingerprint(), before.fingerprint(), "the same policy, twice");
+  const twoDomains = (first, second) =>
+    base().withCustomEngine(engine(first)).value.withCustomEngine(engine(second)).value.fingerprint();
+  assert.equal(
+    twoDomains("a.example.org", "b.example.org"),
+    twoDomains("b.example.org", "a.example.org"),
+    "the ORDER of the added domains decides nothing, so it must not move the empreinte",
+  );
+});
+
+/**
+ * A DOMAIN ADDED IS A FACT, AND IT NAMES THE DOMAIN.
+ *
+ * PolicyDiff compared the ticked SELECTION and ignored the CATALOGUE it draws
+ * from, so a domain added without being ticked produced no fact at all --
+ * `facts.length === 0`, reconcile wrote nothing, and the entry that prepares an
+ * interception was invisible.
+ *
+ * The one that matters is the domain DUPLICATING an engine already granted:
+ * `google.com` under the other shape is not deduplicated (the catalogue keys on
+ * hostPattern + shape), so it ships a second rule, on a path the built-in entry
+ * never matched, against a host permission already in place.
+ */
+test("an added or removed search domain is reported, by name", () => {
+  const engine = (host, shape = "search-q") => g.CustomEngine.parse({ host, shape }).value;
+  const before = g.JumpPolicy.empty().withEngines(["google.com"]).value;
+
+  const added = before.withCustomEngine(engine("intra.example.org")).value;
+  const facts = g.PolicyDiff.between(before, added);
+  assert.equal(facts.length, 1, "adding a domain must produce exactly one fact");
+  assert.equal(facts[0].type, "DomainsAdded");
+  // `affectedHosts`, NOT `affectedKeys`: one field carries project keys, the
+  // other host names, and the journal's published language is a contract with
+  // entries already on disk.
+  assert.deepEqual(facts[0].affectedHosts, ["intra.example.org"]);
+  assert.equal(facts[0].affectedKeys, undefined, "a host must not travel as a key");
+
+  // Removed too: a change the user did not make is worth saying even when it is
+  // not the dangerous direction.
+  const removedFacts = g.PolicyDiff.between(added, before);
+  assert.equal(removedFacts.length, 1);
+  assert.equal(removedFacts[0].type, "DomainsRemoved");
+  assert.deepEqual(removedFacts[0].affectedHosts, ["intra.example.org"]);
+
+  // THE MEASURED CASE: a domain that duplicates a granted engine under the other
+  // shape. It is reported, and it really does ship a second rule.
+  const twin = before.withCustomEngine(engine("google.com", "root-q")).value;
+  const twinFacts = g.PolicyDiff.between(before, twin);
+  assert.deepEqual(twinFacts.map((f) => f.type), ["DomainsAdded"]);
+  assert.deepEqual(twinFacts[0].affectedHosts, ["google.com"]);
+
+  let live = twin.withEngines(["google.com", "custom:google.com"]).value;
+  live = live.register("a", g.ProjectKey.parse("ABC").value,
+    g.JiraInstance.parse("https://example.atlassian.net").value).value;
+  live = live.armShortcut("a").value;
+  const rules = g.RuleFactory.buildRules(
+    live,
+    g.SearchEngineCatalog.forPolicy(live),
+    (e) => g.Re2Budget.forEnvelope(e.guardEnvelopeCost()),
+  ).rules();
+  assert.equal(rules.length, 2, "the twin shape is a second interception path, not a duplicate");
+  assert.notEqual(rules[0].condition.regexFilter, rules[1].condition.regexFilter);
+});
+
+test("a search domain that changes how it intercepts is reported by name", () => {
+  /**
+   * AT CONSTANT IDENTITY, THE SHAPE IS A DESTINATION -- for everything the domain
+   * captures. `search-q` intercepts `/search?q=…`, `root-q` intercepts `/?q=…`, on
+   * the same host, under the same id, against a permission ALREADY GRANTED.
+   */
+  const document = (shape) => ({
+    schemaVersion: 1, armed: true, shortcuts: [],
+    engines: ["custom:intra.example.org"],
+    customEngines: [{ host: "intra.example.org", shape }],
+  });
+  const before = g.JumpPolicy.restore(document("search-q")).policy;
+  const after = g.JumpPolicy.restore(document("root-q")).policy;
+
+  const facts = g.PolicyDiff.between(before, after);
+  assert.deepEqual(facts.map((f) => f.type), ["DomainsReshaped"]);
+  assert.deepEqual(facts[0].affectedHosts, ["intra.example.org"]);
+  // NOT reported as an addition or a removal: the domain is still there, and
+  // saying "added" about a host the user already had would be a false specific.
+  assert.equal(facts.some((f) => f.type === "DomainsAdded"), false);
+  assert.equal(facts.some((f) => f.type === "DomainsRemoved"), false);
+
+  // AND IT REALLY IS ANOTHER INTERCEPTION PATH, or the fact reports nothing.
+  const pathOf = (policy) =>
+    g.SearchEngineCatalog.forPolicy(policy).find("custom:intra.example.org").pathPattern;
+  assert.notEqual(pathOf(before), pathOf(after));
+
+  // A domain added and one reshaped in the same commit are two facts, not one.
+  const both = g.JumpPolicy.restore({
+    ...document("root-q"),
+    customEngines: [{ host: "intra.example.org", shape: "root-q" }, { host: "other.example.org", shape: "search-q" }],
+  }).policy;
+  assert.deepEqual(
+    g.PolicyDiff.between(before, both).map((f) => f.type).sort(),
+    ["DomainsAdded", "DomainsReshaped"],
+  );
+});
+
+test("the engine cap is what its own sentence says it is", () => {
+  // It was the literal 64 under a comment reading "the number of engines that can
+  // exist: the built-in catalogue plus the custom domains, themselves capped" --
+  // which is 24. activeBindings() counts a ticked id that resolves to no engine
+  // (it cannot consult the catalogue: the core holds opaque identities), so the
+  // gap let a synced document push 5 x 64 past MAX_BINDINGS and quarantine every
+  // shortcut after the fourth, on every device.
+  // THE CEILING BELONGS TO THE AGGREGATE, and the door reads it from there: it
+  // bounds what a policy may HOLD, whatever door it came through. The door's own
+  // re-export must not drift from it.
+  assert.equal(g.ShortcutAdmission.MAX_ENGINES, g.JumpPolicy.MAX_ENGINES);
+  // AND THE AGGREGATE REFUSES, which is what makes it an invariant rather than a
+  // filter on documents. `withEngines` used to accept any number.
+  const tooMany = g.JumpPolicy.empty()
+    .withEngines(Array.from({ length: g.JumpPolicy.MAX_ENGINES + 1 }, (_, i) => `e${i}.example`));
+  assert.equal(tooMany.ok, false, "the aggregate must refuse a selection it cannot hold");
+  assert.equal(tooMany.code, "ENGINE_LIMIT");
+  // And it accepts exactly the ceiling, which is where an off-by-one would live.
+  assert.equal(
+    g.JumpPolicy.empty()
+      .withEngines(Array.from({ length: g.JumpPolicy.MAX_ENGINES }, (_, i) => `e${i}.example`)).ok,
+    true,
+  );
+  // AND THE ARITHMETIC IS THE POINT, so it is spelled rather than trusted.
+  //
+  // A ticked id that resolves to nothing still costs a binding, so the cap decides
+  // how few live shortcuts an adversary can leave a profile with. The old 64
+  // allowed FOUR before _guarded started refusing every register and quarantining
+  // the rest; the derived cap allows twelve, which is the DNR rule ceiling talking
+  // rather than an adversary -- exactly what a user ticking every engine this build
+  // can hold would get on their own.
+  const liveShortcutsUnder = (engines) => Math.floor(g.JumpPolicy.MAX_BINDINGS / engines);
+  assert.equal(liveShortcutsUnder(64), 4, "the cap that shipped left four");
+  assert.equal(liveShortcutsUnder(g.ShortcutAdmission.MAX_ENGINES), 12);
+  assert.ok(
+    liveShortcutsUnder(g.ShortcutAdmission.MAX_ENGINES) > liveShortcutsUnder(64),
+    "the derived cap must cost an adversary reach, not merely look tidier",
+  );
+});
+
+test("one engine per host, and the fingerprint's comparator depends on it", () => {
+  /**
+   * THE PROPERTY UNDER THE SORT, pinned where it is decided.
+   *
+   * `fingerprint()` orders the added domains on their id alone, which is total
+   * ONLY because an id is unique within a policy. Nothing asserted that: the
+   * refusal existed in `withCustomEngine`, had a translated sentence, and zero
+   * test coverage. Were it to go, the comparator would answer 0 on a duplicate,
+   * the stable sort would fall back to input position, and the empreinte would
+   * depend on the order of a list nothing orders.
+   */
+  const engine = (shape) => g.CustomEngine.parse({ host: "intra.example.org", shape }).value;
+  const once = g.JumpPolicy.empty().withCustomEngine(engine("search-q"));
+  assert.equal(once.ok, true);
+
+  // THE SHAPE IS NOT IN THE IDENTITY, so both spellings collide -- including the
+  // one that intercepts a different path, which is why a reshaping can only come
+  // from an outside writer and never from this door.
+  for (const shape of ["search-q", "root-q"]) {
+    const again = once.value.withCustomEngine(engine(shape));
+    assert.equal(again.ok, false, `a second ${shape} on the same host was accepted`);
+    assert.equal(again.code, "DUPLICATE_ENGINE");
+  }
+
+  // And the invariant the comparator needs, stated directly.
+  const ids = once.value.customEngines().map((e) => e.id());
+  assert.equal(new Set(ids).size, ids.length, "ids must be unique within a policy");
 });

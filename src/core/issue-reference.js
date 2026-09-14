@@ -15,7 +15,18 @@
 
   // How humans write the gap between key and number. Domain knowledge, named
   // once, tested directly -- not buried in a regexFilter alternation.
-  const SEPARATORS = ["-", " ", "%20"];
+  //
+  // FROZEN, on the ground project-shortcut.js freezes its own constants on:
+  // every file of this project shares `globalThis`, and this array is PUBLISHED.
+  // A `SEPARATORS.push(".")` from any file loaded afterwards used to reach the
+  // emitted rule -- `IN_URL["."]` answers undefined, `join` writes it as an empty
+  // branch, and the separator becomes OPTIONAL, so `ABC1234` matches a rule
+  // written for `ABC-1234`. A matcher wider than the validator, which is the one
+  // failure direction this project refuses. The airlock now refuses a separator
+  // it cannot spell as well (interception/reference-pattern.js, formOf): the two
+  // are not redundant -- this one stops the mutation, that one stops the
+  // widening whatever its source.
+  const SEPARATORS = Object.freeze(["-", " ", "%20"]);
 
   // Any run of digits after the separator is an issue number. So ABC-2024 is an
   // issue, not a year. Undecidable, decided, and written as a domain decision
@@ -23,9 +34,10 @@
   const NUMBER = /^[0-9]+$/;
 
   class IssueReference {
-    constructor(key, number) {
+    constructor(key, number, separator) {
       this._key = key;
       this._number = number;
+      this._separator = separator;
     }
 
     toString() {
@@ -39,20 +51,48 @@
     number() {
       return this._number;
     }
+
+    /**
+     * The separator this reference was READ with -- carried because the domain
+     * now decides which separators a key accepts (a catch-all takes the hyphen
+     * only), and the information used to be lost at the door.
+     */
+    separator() {
+      return this._separator;
+    }
+
+    /**
+     * The reference AS THE USER TYPED IT, separator included.
+     *
+     * render() always emits "-" and must keep doing so: that is the canonical
+     * form Jira wants. Without this second member the first implementer would put
+     * the raw match text into a preview result and the KEY<sep>N format would
+     * have two homes.
+     */
+    asTyped() {
+      return `${this._key.toString()}${this._separator}${this._number}`;
+    }
   }
 
   IssueReference.SEPARATORS = SEPARATORS;
 
-  /** The format, with a single owner. */
-  IssueReference.render = function (key, token) {
-    return `${key.toString()}-${token}`;
+  /**
+   * The format, with a single owner.
+   *
+   * Both arguments are TOKENS: the airlock passes a backreference as the key
+   * token when it emits a catch-all substitution, so neither is guaranteed to be
+   * a domain object. The notation itself still lives in interception (see the
+   * header above); this function only owns the shape KEY-N.
+   */
+  IssueReference.render = function (keyToken, numberToken) {
+    return `${keyToken.toString()}-${numberToken}`;
   };
 
-  IssueReference.of = function (projectKey, number) {
+  IssueReference.of = function (projectKey, number, separator = "-") {
     if (!NUMBER.test(number)) {
       return { ok: false, code: "NOT_AN_ISSUE_NUMBER", message: `"${number}" is not an issue number.` };
     }
-    return { ok: true, value: new IssueReference(projectKey, number) };
+    return { ok: true, value: new IssueReference(projectKey, number, separator) };
   };
 
   IssueReference.parse = function (input, parseKey) {
@@ -67,7 +107,7 @@
       const number = trimmed.slice(at + separator.length);
       const key = parseKey(rawKey);
       if (!key.ok) continue;
-      const reference = IssueReference.of(key.value, number);
+      const reference = IssueReference.of(key.value, number, separator);
       if (reference.ok) return reference;
     }
     return {

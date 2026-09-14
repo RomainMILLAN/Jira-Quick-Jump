@@ -5,6 +5,9 @@
   "accessAll": {
     "message": "Toutes les origines dont cette configuration a besoin sont accordées."
   },
+  "accessDeclined": {
+    "message": "L'accès n'a pas été accordé, donc rien ne sera redirigé vers ces hôtes."
+  },
   "accessMissing": {
     "message": "Certaines origines ne sont pas encore accordées."
   },
@@ -17,20 +20,56 @@
   "add": {
     "message": "Ajouter"
   },
+  "addCatchAll": {
+    "message": "Ajouter un attrape-tout"
+  },
   "addDomain": {
     "message": "Ajouter un domaine"
   },
   "addDomainNote": {
     "message": "Le domaine seulement. La forme de son URL de recherche se choisit ci-dessous, elle ne se tape jamais."
   },
+  "addDomainShape": {
+    "message": "Comment ce moteur construit son adresse de recherche"
+  },
   "addShortcut": {
     "message": "Ajouter un raccourci"
+  },
+  "alreadyFirst": {
+    "message": "Déjà en première position."
+  },
+  "alreadyLast": {
+    "message": "Déjà en dernière position."
   },
   "armThis": {
     "message": "Armer ce raccourci"
   },
   "cancel": {
     "message": "Annuler"
+  },
+  "catchAllExists": {
+    "message": "Il ne peut y avoir qu’un seul attrape-tout."
+  },
+  "catchAllInsecure": {
+    "message": "Ensemble : toute recherche en forme de clé courte partira en clair."
+  },
+  "catchAllKey": {
+    "message": "N’importe quelle clé courte"
+  },
+  "catchAllNote": {
+    "message": "Toute clé de {min} à {max} caractères suivie d'un tiret et d'un nombre part vers cette destination, sur les moteurs que vous avez cochés. Une courte liste réservée est laissée de côté."
+  },
+  "badgeOff": {
+    "message": "off"
+  },
+  "badgeReady": {
+    "message": "Quick Jump for Jira : les raccourcis sont actifs."
+  },
+  "badgeUnseen": {
+    "message": "Quick Jump for Jira : une destination a changé. Ouvrez les options pour la vérifier."
+  },
+  "badgeOffTitle": {
+    "message": "Quick Jump for Jira : rien ne redirige pour l'instant."
   },
   "changedAck": {
     "message": "Je l’ai vérifié"
@@ -41,11 +80,14 @@
   "changedTitle": {
     "message": "Une destination a changé"
   },
+  "changedTitleMany": {
+    "message": "Des destinations ont changé"
+  },
   "changedWas": {
     "message": "Elle pointait vers"
   },
   "commandDisarmAll": {
-    "message": "Armer ou désarmer Quick Jump for Jira"
+    "message": "Désarmer Quick Jump for Jira"
   },
   "delete": {
     "message": "Supprimer"
@@ -53,11 +95,26 @@
   "destination": {
     "message": "Destination"
   },
+  "diagAllAwaitingAck": {
+    "message": "Chaque raccourci armé attend l’acceptation d’un avertissement."
+  },
   "diagAllOff": {
     "message": "Tous les raccourcis sont désarmés."
   },
+  "diagAllShadowed": {
+    "message": "Tous les raccourcis sont sous l’attrape-tout : aucun ne se déclenche."
+  },
+  "diagNothingToInstall": {
+    "message": "Rien n'est actif pour l'instant, donc aucun raccourci ne se déclenche. Vérifiez les lignes ci-dessous."
+  },
+  "diagCatchAllNotInstalled": {
+    "message": "L’attrape-tout n’a pas pu être installé : il ne capte rien."
+  },
   "diagDisarmed": {
     "message": "Tous les raccourcis sont désactivés. Les recherches se comportent normalement."
+  },
+  "diagInstallFailed": {
+    "message": "Les règles n’ont pas pu être installées. Ce qui tourne peut différer de ce que vous voyez."
   },
   "diagMissingOrigins": {
     "message": "Les règles sont installées mais ne peuvent pas s’appliquer : l’accès manque."
@@ -74,6 +131,9 @@
   "diagReady": {
     "message": "Prêt."
   },
+  "diagSomeShadowed": {
+    "message": "Certains raccourcis sont sous l’attrape-tout et ne se déclenchent jamais."
+  },
   "diffChanged": {
     "message": "Modifié"
   },
@@ -85,6 +145,9 @@
   },
   "domain": {
     "message": "Domaine"
+  },
+  "dragToReorder": {
+    "message": "Glissez pour réordonner"
   },
   "engines": {
     "message": "Moteurs de recherche"
@@ -101,6 +164,36 @@
   "extensionName": {
     "message": "Quick Jump for Jira"
   },
+  "factAppeared": {
+    "message": "a été ajouté, pointant vers"
+  },
+  "factRemoved": {
+    "message": "a été supprimé. Il pointait vers"
+  },
+  "factReplaced": {
+    "message": "Toute la configuration a changé ailleurs. Vérifiez chaque destination."
+  },
+  "factShadowedStopped": {
+    "message": "Ces clés ne se déclenchent plus, car l'attrape-tout est passé au-dessus d'elles :"
+  },
+  "factShadowedClaims": {
+    "message": "Ce que l'attrape-tout réclame part vers"
+  },
+  "factKeyChanged": {
+    "message": "n'intercepte plus la même chose ; la clé est maintenant"
+  },
+  "factArmed": {
+    "message": "a été armée et redirige désormais vers"
+  },
+  "factEnginesAdded": {
+    "message": "Davantage de moteurs de recherche sont interceptés. Vérifiez la section Accès."
+  },
+  "factPolicyArmed": {
+    "message": "L'extension a été réactivée ailleurs, et tous les raccourcis redirigent à nouveau."
+  },
+  "factUnreadable": {
+    "message": "Ce qui était enregistré est devenu illisible, donc rien n'est installé. Vérifiez chaque destination."
+  },
   "fix": {
     "message": "Corriger"
   },
@@ -116,7 +209,7 @@
   "importDisarmed": {
     "message": "Tout arrive désarmé, et les avertissements déjà acceptés ne sont pas repris."
   },
-  "importDropped": {
+  "importRefused": {
     "message": "Certaines entrées ont été refusées et ne seront pas importées."
   },
   "importLede": {
@@ -125,8 +218,59 @@
   "importTooBig": {
     "message": "Ce fichier est trop volumineux pour être une configuration."
   },
+  "installDiffers": {
+    "message": "La configuration installée diffère de celle que vous voyez."
+  },
+  "skipUnknownEngine": {
+    "message": "Un moteur de recherche coché n'est plus connu."
+  },
+  "skipRegexUnsupported": {
+    "message": "Le navigateur a refusé le motif de cette règle."
+  },
+  "skipUnitIncomplete": {
+    "message": "Cette règle a été écartée avec le groupe auquel elle appartient."
+  },
+  "skipConstructionRefused": {
+    "message": "Les règles n'ont pas pu être construites."
+  },
+  "skipRunOverBudget": {
+    "message": "La garde des préfixes réservés est trop longue pour le navigateur."
+  },
+  "skipEnvelopeOverBudget": {
+    "message": "L'adresse de ce moteur de recherche ne laisse pas de place pour une règle."
+  },
+  "skipKeyLengthOverBudget": {
+    "message": "L'attrape-tout revendique des clés plus longues que ce que le navigateur sait apparier."
+  },
+  "journalOverflowed": {
+    "message": "Certains changements n’ont pas pu être enregistrés."
+  },
+  "journalUnreadable": {
+    "message": "L'enregistrement des changements n'a pas pu être lu."
+  },
   "key": {
     "message": "Clé"
+  },
+  "moveDown": {
+    "message": "Descendre"
+  },
+  "moveUp": {
+    "message": "Remonter"
+  },
+  "movedDown": {
+    "message": "Déplacé vers le bas."
+  },
+  "movedUp": {
+    "message": "Déplacé vers le haut."
+  },
+  "noLongerShadowed": {
+    "message": "Plus masqué."
+  },
+  "noLongerShadowedActive": {
+    "message": "Plus masqué : ce raccourci se déclenche à nouveau."
+  },
+  "nowShadowed": {
+    "message": "Désormais masqué : ce raccourci ne se déclenche plus."
   },
   "openSettings": {
     "message": "Ouvrir les réglages"
@@ -134,8 +278,230 @@
   "optionsSub": {
     "message": "Tapez une clé de ticket dans la barre d’adresse, atterrissez sur le ticket."
   },
+  "orderDropped": {
+    "message": "La liste a changé, votre déplacement a été abandonné."
+  },
+  "orderNote": {
+    "message": "Évalué de haut en bas. Le premier qui correspond gagne."
+  },
   "popupSub": {
     "message": "De la barre d’adresse au ticket."
+  },
+  "previewMatchedCatchAll": {
+    "message": "Correspond à l’attrape-tout."
+  },
+  "previewMatchedShortcut": {
+    "message": "Correspond à un raccourci nommé."
+  },
+  "previewNoMatch": {
+    "message": "Cette recherche passerait sans être modifiée."
+  },
+  "previewEngineDisagreement": {
+    "message": "La réponse dépend du moteur de recherche utilisé par la barre d'adresse."
+  },
+  "previewNotASearchUrl": {
+    "message": "Ce n’est pas une URL de recherche."
+  },
+  "previewNotAUrl": {
+    "message": "Ce n’est pas une URL."
+  },
+  "refuseDuplicateKey": {
+    "message": "Cette clé est déjà utilisée par un autre raccourci."
+  },
+  "refuseDuplicateCatchAll": {
+    "message": "Il y a déjà un raccourci attrape-tout."
+  },
+  "refuseDuplicateId": {
+    "message": "Deux entrées revendiquent le même identifiant."
+  },
+  "refuseDuplicateEngine": {
+    "message": "Ce domaine est déjà dans la liste."
+  },
+  "refuseUnknownShortcut": {
+    "message": "Ce raccourci n'existe plus."
+  },
+  "refuseUnknownQuarantined": {
+    "message": "Cette entrée n'est plus mise de côté."
+  },
+  "refuseKeyNature": {
+    "message": "Un attrape-tout ne peut pas être renommé, et un raccourci ne peut pas en devenir un."
+  },
+  "refuseKeyShape": {
+    "message": "Une clé ressemble à ABC : 2 à 20 lettres, chiffres ou tirets bas, commençant par une lettre."
+  },
+  "refuseKeyControl": {
+    "message": "Cette clé contient un caractère invisible ou de contrôle."
+  },
+  "refuseKeyLookalike": {
+    "message": "Cette clé contient des caractères sosies."
+  },
+  "refuseBaseEmpty": {
+    "message": "Saisissez une adresse Jira."
+  },
+  "refuseBaseScheme": {
+    "message": "Seules les adresses http et https sont acceptées."
+  },
+  "refuseBaseUserinfo": {
+    "message": "Une adresse ne peut pas porter d'identifiants."
+  },
+  "refuseBaseQuery": {
+    "message": "Une adresse ne peut pas porter de chaîne de requête."
+  },
+  "refuseBaseFragment": {
+    "message": "Une adresse ne peut pas porter de fragment."
+  },
+  "refuseBaseCanonical": {
+    "message": "Écrivez l'adresse sous sa forme simple, par exemple https://example.atlassian.net/jira."
+  },
+  "refuseBaseForbiddenHost": {
+    "message": "Cette adresse est un point de métadonnées cloud ou lien-local."
+  },
+  "refuseBaseIpv6Literal": {
+    "message": "Une permission de navigateur ne peut pas désigner une adresse IPv6. Utilisez plutôt un nom d'hôte."
+  },
+  "refuseBaseHostShape": {
+    "message": "Écrivez l'hôte comme un simple nom de domaine : pas de joker, pas de tiret bas, pas d'étiquette vide."
+  },
+  "refuseBaseUnsafePort": {
+    "message": "Les navigateurs refusent de se connecter à ce port."
+  },
+  "refuseBasePathDepth": {
+    "message": "Une adresse ne peut pas avoir plus de quatre segments de chemin."
+  },
+  "refuseBaseTooLong": {
+    "message": "Cette adresse est trop longue."
+  },
+  "refuseBaseNotAUrl": {
+    "message": "Ce n'est pas une adresse valide."
+  },
+  "refuseBaseNotText": {
+    "message": "Une adresse Jira doit être du texte."
+  },
+  "refuseBaseControl": {
+    "message": "Cette adresse contient un caractère invisible ou de contrôle."
+  },
+  "refuseBasePercent": {
+    "message": "Les caractères encodés en pourcentage ne sont pas acceptés dans une adresse."
+  },
+  "refuseBaseBackslash": {
+    "message": "Une adresse ne peut pas contenir de barre oblique inverse."
+  },
+  "refuseBaseTraversal": {
+    "message": "Une adresse ne peut pas contenir de segment . ou .."
+  },
+  "refuseBasePort": {
+    "message": "Le port doit être un nombre entre 1 et 65535."
+  },
+  "refuseBaseNotAscii": {
+    "message": "Cette adresse contient des caractères non ASCII."
+  },
+  "refuseKeyNotText": {
+    "message": "Une clé de projet doit être du texte."
+  },
+  "refuseHostNotText": {
+    "message": "Un nom de domaine doit être du texte."
+  },
+  "refuseShapeShape": {
+    "message": "Ce n'est pas une forme de moteur de recherche connue de cette version."
+  },
+  "refuseEngineShape": {
+    "message": "Ce moteur de recherche n'a pas pu être lu."
+  },
+  "refuseEntryBadId": {
+    "message": "Cette entrée n'a pas d'identifiant utilisable."
+  },
+  "refuseConsentShape": {
+    "message": "Le consentement enregistré n'a pas pu être lu."
+  },
+  "refuseConsentList": {
+    "message": "Les accusés enregistrés n'ont pas pu être lus."
+  },
+  "refuseConsentArmed": {
+    "message": "L'état activé/désactivé enregistré n'a pas pu être lu."
+  },
+  "refuseDuplicateAck": {
+    "message": "Cet accusé est indiqué deux fois."
+  },
+  "refuseUnknownField": {
+    "message": "Ce fichier contient un champ inconnu de cette version."
+  },
+  "refuseNotJson": {
+    "message": "Ce fichier n'est pas du JSON valide."
+  },
+  "refuseMaliciousKey": {
+    "message": "Ce fichier contient des clés qui ne sont jamais légitimes."
+  },
+  "refuseNotADocument": {
+    "message": "Cette configuration n'a pas pu être lue."
+  },
+  "refuseSchemaMissing": {
+    "message": "Cette configuration n'indique pas dans quel format elle est écrite."
+  },
+  "refuseSchemaTooNew": {
+    "message": "Cette configuration a été écrite par une version plus récente de cette extension."
+  },
+  "refuseShortcutsNotAList": {
+    "message": "La liste des raccourcis n'a pas pu être lue."
+  },
+  "refuseTooManyShortcuts": {
+    "message": "Cette configuration contient plus de raccourcis que cette extension n'en conserve."
+  },
+  "refuseEnginesNotAList": {
+    "message": "La liste des moteurs de recherche n'a pas pu être lue."
+  },
+  "refuseCustomEnginesNotAList": {
+    "message": "La liste des domaines ajoutés n'a pas pu être lue."
+  },
+  "refuseTooManyCustomEngines": {
+    "message": "Cette configuration contient plus de domaines ajoutés que cette extension n'en conserve."
+  },
+  "refuseEntryNotAnObject": {
+    "message": "Cette entrée n'a pas pu être lue comme un raccourci."
+  },
+  "refuseMissingFreshId": {
+    "message": "Cette entrée a besoin d'un nouvel identifiant avant de pouvoir être rétablie."
+  },
+  "refuseHostShape": {
+    "message": "Saisissez un simple nom de domaine, sans schéma ni chemin."
+  },
+  "refuseHostTooLong": {
+    "message": "Ce nom de domaine est trop long."
+  },
+  "refuseShortcutLimit": {
+    "message": "Cela créerait plus de raccourcis que cette extension n'en conserve."
+  },
+  "refuseBindingLimit": {
+    "message": "Cela créerait plus de règles de redirection que le navigateur n'en autorise."
+  },
+  "refuseOrderStale": {
+    "message": "L'ordre a changé dans une autre fenêtre. Réessayez."
+  },
+  "refuseConflict": {
+    "message": "Une autre fenêtre a modifié la configuration en même temps. Réessayez."
+  },
+  "refusePolicyUnreadable": {
+    "message": "La configuration enregistrée n'a pas pu être lue : plus rien ne redirige."
+  },
+  "refuseQuota": {
+    "message": "Il n'y a plus de place pour enregistrer ceci."
+  },
+  "refuseUnacknowledged": {
+    "message": "Lisez les avertissements de destination avant d'activer ce raccourci."
+  },
+  "refuseUnknownWarning": {
+    "message": "Cet accusé n'est pas connu de cette version."
+  },
+  "previewNoEngines": {
+    "message": "Cochez d'abord un moteur de recherche : rien n'est intercepté pour l'instant."
+  },
+  "previewReservedPrefix": {
+    "message": "Retenu par un préfixe réservé : l’attrape-tout le laisse passer."
+  },
+  "previewTooLong": {
+    "message": "C’est trop long pour être une URL de recherche."
+  },
+  "previewTypedHint": {
+    "message": "Collez une URL de recherche, ou simplement le texte que vous taperiez dans la barre d’adresse."
   },
   "quarantine": {
     "message": "Impossible à relire"
@@ -152,11 +518,14 @@
   "removeDomain": {
     "message": "Supprimer ce domaine"
   },
+  "shadowed": {
+    "message": "Masqué"
+  },
+  "shadowedWhy": {
+    "message": "Une ligne placée sous l’attrape-tout ne se déclenche jamais, quelle que soit sa clé. Placez-la au-dessus de l’attrape-tout."
+  },
   "shortcuts": {
     "message": "Raccourcis"
-  },
-  "shortcutsNote": {
-    "message": "Où chaque clé de ticket vous envoie."
   },
   "statusArmed": {
     "message": "Le saut est armé"
@@ -191,8 +560,35 @@
   "tagAllOff": {
     "message": "Tout désactivé"
   },
+  "tagAllShadowed": {
+    "message": "Tous masqués"
+  },
+  "tagNothingToInstall": {
+    "message": "Rien d'actif"
+  },
+  "tagAwaitingAck": {
+    "message": "Non accepté"
+  },
+  "tagCatchAllOff": {
+    "message": "Attrape-tout inactif"
+  },
   "tagEmpty": {
     "message": "Vide"
+  },
+  "tagInstallFailed": {
+    "message": "Non installé"
+  },
+  "statusInstallUnknown": {
+    "message": "L'installation des règles n'a pas pu être vérifiée."
+  },
+  "tagInstallUnknown": {
+    "message": "Inconnu"
+  },
+  "statusCoverageUnknown": {
+    "message": "L'installation de l'attrape-tout n'a pas pu être vérifiée."
+  },
+  "tagCoverageUnknown": {
+    "message": "Attrape-tout inconnu"
   },
   "tagNoAccess": {
     "message": "Aucun accès"
@@ -209,6 +605,9 @@
   "tagReady": {
     "message": "Prêt"
   },
+  "tagSomeShadowed": {
+    "message": "Certains masqués"
+  },
   "toggleAll": {
     "message": "Armer ou désarmer tous les raccourcis"
   },
@@ -218,13 +617,130 @@
   "transferNote": {
     "message": "Les raccourcis importés arrivent toujours désarmés."
   },
+  "transferUnavailable": {
+    "message": "La configuration enregistrée n'a pas pu être lue : elle ne peut être ni exportée ni remplacée."
+  },
   "tryIt": {
     "message": "Essayer une URL"
   },
   "tryItEmpty": {
     "message": "Rien pour l’instant."
   },
-  "tryItNote": {
-    "message": "Collez une URL de recherche pour voir où elle mènerait."
+  "warnCatchAll": {
+    "message": "Toute recherche en forme de clé de 2 à 6 caractères, trait d’union et nombre partira vers cette destination, sur chaque moteur que vous avez coché. Seule une courte liste réservée est retenue."
+  },
+  "warnInsecureScheme": {
+    "message": "Le trafic et votre cookie de session Jira circulent en clair."
+  },
+  "warnInternalHost": {
+    "message": "Cette destination se trouve sur un réseau privé ou non public."
+  },
+  "warnLiteralIp": {
+    "message": "Cette destination est une adresse IP plutôt qu’un nom d’hôte."
+  },
+  "warnPunycode": {
+    "message": "Ce nom d’hôte utilise des caractères non ASCII et peut en imiter un autre."
+  },
+  "previewUnavailable": {
+    "message": "Impossible de lire les règles installées."
+  },
+  "factProjectionStale": {
+    "message": "Le détecteur de changement n'a pas pu rafraîchir sa référence : la prochaine alerte pourrait nommer une modification que vous avez faite vous-même."
+  },
+  "factReplacedKinds": {
+    "message": "Ce qui a changé :"
+  },
+  "kindDestination": {
+    "message": "destinations"
+  },
+  "kindKey": {
+    "message": "clés"
+  },
+  "kindArmed": {
+    "message": "raccourcis activés"
+  },
+  "kindCatchAll": {
+    "message": "un attrape-tout"
+  },
+  "kindShadowing": {
+    "message": "quel raccourci l'emporte"
+  },
+  "kindEngines": {
+    "message": "moteurs de recherche"
+  },
+  "kindPolicyArmed": {
+    "message": "l'extension activée"
+  },
+  "kindReadmitted": {
+    "message": "entrées remises en service"
+  },
+  "factEnginesRemoved": {
+    "message": "Moins de moteurs de recherche sont interceptés qu'avant."
+  },
+  "kindEnginesRemoved": {
+    "message": "moteurs retirés"
+  },
+  "kindDomains": {
+    "message": "domaines de recherche ajoutés"
+  },
+  "kindDomainsRemoved": {
+    "message": "domaines de recherche retirés"
+  },
+  "kindUnknown": {
+    "message": "un changement que cette version ne sait pas nommer"
+  },
+  "factDomainsAdded": {
+    "message": "Des domaines de recherche ont été ajoutés, et les recherches qui s'y font sont désormais interceptées :"
+  },
+  "factDomainsRemoved": {
+    "message": "Des domaines de recherche ont été retirés, leurs recherches passent donc sans être touchées :"
+  },
+  "factUnknown": {
+    "message": "Un changement a été enregistré que cette version ne sait pas décrire. Vérifiez chaque destination."
+  },
+  "unreadableArming": {
+    "message": "L'état armé enregistré n'a pas pu être lu, donc rien n'est armé."
+  },
+  "unreadableEngineId": {
+    "message": "Un moteur de recherche enregistré n'était pas un moteur, il n'est donc plus sélectionné."
+  },
+  "unreadableEnginesTruncated": {
+    "message": "La liste enregistrée de moteurs de recherche était plus longue que le nombre de moteurs pouvant exister, les entrées en trop ont donc été refusées."
+  },
+  "unreadableEngineIdType": {
+    "message": "Un moteur de recherche enregistré n'a pas pu être lu, il n'est donc plus sélectionné."
+  },
+  "refuseTooManyEngines": {
+    "message": "Cette configuration coche plus de moteurs de recherche que cette extension n'en lit."
+  },
+  "refuseEngineLimit": {
+    "message": "Cela cocherait plus de moteurs de recherche que cette extension ne peut en utiliser."
+  },
+  "unreadableFields": {
+    "message": "Champs qui n'ont pas pu être lus"
+  },
+  "unreadableNote": {
+    "message": "Recalculés à chaque lecture, et disparus dès que la configuration est réécrite."
+  },
+  "skipQueryParamTooLong": {
+    "message": "L'adresse de ce moteur de recherche utilise un nom de paramètre que cette version ne sait pas apparier."
+  },
+  "skipSeparatorNoUrlForm": {
+    "message": "Cette version ne sait pas apparier l'un des séparateurs que la clé accepte."
+  },
+  "skipEmptySeparators": {
+    "message": "Cette clé n'accepte aucun séparateur, donc aucune règle ne peut être construite pour elle."
+  },
+  "kindDomainsReshaped": {
+    "message": "la façon dont un domaine de recherche est intercepté"
+  },
+  "factDomainsReshaped": {
+    "message": "L'adresse sur laquelle un domaine de recherche est intercepté a changé, d'autres recherches sont donc capturées :"
+  },
+  "importSurface": {
+    "message": "Ce fichier choisit aussi où les recherches sont interceptées :"
+  },
+  "importDomains": {
+    "message": "et il ajoute ces domaines de recherche :"
   }
 }
