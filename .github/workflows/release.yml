@@ -22,7 +22,7 @@ jobs:
       attestations: write
     steps:
       - name: Watch what the job talks to
-        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         with:
           # BLOCK. Nothing outside the list below leaves this job.
           #
@@ -125,7 +125,7 @@ jobs:
       HAS_AMO_CREDENTIALS: ${{ secrets.WEB_EXT_API_KEY != '' && secrets.WEB_EXT_API_SECRET != '' }}
     steps:
       - name: Watch what the job talks to
-        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         with:
           # BLOCK. Nothing outside the list below leaves this job.
           #
